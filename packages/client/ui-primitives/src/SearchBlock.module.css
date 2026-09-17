@@ -4,6 +4,12 @@
 
   position: relative;
   margin: 16px 0;
+  /* Ink surface: rebind the label scale this element inherits, so its title,
+     line numbers, and captions read on the dark fill. Same surface-scoped
+     rebinding the elevation stroke and the scrollbar pair use. */
+  --dsw-alias-label-primary: var(--dsw-code-ink);
+  --dsw-alias-label-secondary: var(--dsw-code-ink-secondary);
+  --dsw-alias-label-tertiary: var(--dsw-code-ink-tertiary);
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-markdown-code-block);
   border-radius: var(--dsl-search-radius);

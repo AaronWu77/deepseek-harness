@@ -12,11 +12,13 @@ Web 客户端的每个表面都刷不透明填充——框架与会话列取 `--
 
 [ui-theme](../../../../packages/client/ui-theme/src/styles/design-platform.css) 持有配色。`--dsw-glass-fill`/`-raised`/`-sunken` 是表面按层级选用的半透明填充，`--dsw-glass-stroke` 与 `--dsw-glass-highlight` 是它的发丝描边与高光边，`--dsw-glass-blur`/`-strong`/`-thin` 是三档 `backdrop-filter`，`--dsw-glass-scrim` 是会话列铺的薄纱，让正文在环境色之上保住对比度。`--dsw-aurora-1` 至 `--dsw-aurora-5` 是五个径向色团，`--dsw-aurora-drift` 是它们的基础周期；`--dsw-glass-canvas` 仍是不渲染极光层时的静态退化。[base.css](../../../../packages/client/ui-theme/src/styles/base.css) 声明这些表面所用的运动 token。
 
-[AppFrame](../../../../packages/client/ui-layout/src/client/AppFrame.tsx) 分成舞台与浮动窗口两部分。舞台铺画布，并以 `--dsw-glass-frame-gap` 作内边距；`.window` 才是真正的三栏网格，按该缝隙内缩，带 `--dsw-glass-frame-radius`、半透明的 `--dsw-glass-window` 渐变与 prominent 高度。窗口刻意不做 `backdrop-filter`——它直接坐在环境画布上，模糊没有可见的活可干，却会让窗口成为 `position: fixed` 后代的包含块。舞台绘制环境画布：五个绝对定位的 span 位于`inset: -18%`、铺在列之下，列本身抬到 `z-index: 1`。每个色团绘制一个极光 token，并以各自的基础周期倍数（1、1.21、1.47、0.89、1.63）漂移，因此它们永不同步，循环看不出接缝。动画只写 `transform`，色团因此留在合成器上；`prefers-reduced-motion` 会停止它们。色团尺寸大于视口，使相邻色团互相重叠；只覆盖一角的色团会让画布在其他色团够不到的地方退回中性色。
+[AppFrame](../../../../packages/client/ui-layout/src/client/AppFrame.tsx) 分成舞台与浮动窗口两部分。舞台铺画布，并以 `--dsw-glass-frame-gap` 作内边距；`.window` 才是真正的三栏网格，按该缝隙内缩，带 `--dsw-glass-frame-radius`、半透明的 `--dsw-glass-window` 渐变与 prominent 高度。窗口刻意不做 `backdrop-filter`——它直接坐在环境画布上，模糊没有可见的活可干，却会让窗口成为 `position: fixed` 后代的包含块。舞台绘制环境画布：`inset: -18%` 处的一个元素铺在列之下，列本身抬到 `z-index: 1`；五个极光 token 是它身上的五张背景图，整体一起漂移。动画只写 `transform`，图层因此留在合成器上；`prefers-reduced-motion` 会停止它。色团尺寸大于视口，使相邻色团互相重叠；只覆盖一角的色团会让画布在其他色团够不到的地方退回中性色。
 
 每个表面只有一个归属。侧栏的玻璃面由 AppFrame 的列承载，因此 `SidebarRoot` 画 `transparent`，而不是再刷一层不透明填充把它盖住。会话列画 `--dsw-glass-scrim` 而非不透明底色，composer 座位的渐隐遮罩也淡出到同一张薄纱。composer 卡片取 `--dsw-glass-fill-raised` 加 `--dsw-glass-blur-strong`，并把它的 elevation 描边重新绑定为 `--dsw-glass-stroke`，让发丝线与玻璃边缘一致。浮层沿用同一套处理。[ui-primitives](../../../../packages/client/ui-primitives/src/Menu.module.css) 的共享菜单与对话框外壳，以及[停靠套件](../../../../packages/client/ui-dockkit/src/components/dockkit.module.css)的浮动面板与上下文菜单，取 `--dsw-glass-fill-raised` 加 `--dsw-glass-blur-strong`，并把 elevation 描边重绑为 `--dsw-glass-stroke`，因此在画布上展开的菜单与 composer 读起来是同一种材质。底色本身带紫→粉→蓝的走向，而不是中性色，因此色团之间的区域不会退回灰色；对话面薄纱停在 38% 白——足以撑住正文对比度，又不会把身下的环境色压平。`--dsw-glass-fill-accent` 用于用户自己的消息气泡，那是正文里唯一承载身份色的表面。右侧面板铺与会话列相同的 `--dsw-glass-scrim`；设置面板取 `--dsw-glass-fill-thick`——这是第四档、不透明度更高，用于大到密到必须让填充自己承担可读性的表面，而壳层档把这部分交给了画布。
 
-环境画布刻意不带 `filter: blur()`：带透明色标的径向渐变本身已经足够柔和，而为五个视口尺寸的图层加高斯只会白白生成五张巨大的离屏纹理。
+环境画布刻意不带 `filter: blur()`：带透明色标的径向渐变本身已经足够柔和，而为视口尺寸的图层加高斯只会白白生成巨大的离屏纹理。
+
+正文里还有两类表面。展开的工具调用会变成一张卡——摘要行是它的表头，正文压在下面——而收起的行保持扁平，因此这门语言的成本取决于屏上实际展开的表面数，而不是日志里有多少次调用。[ui-theme](../../../../packages/client/ui-theme/src/styles/design-platform.css) 还把代码族（代码、终端、读取、检索、差异、网页、JSON，以及工具卡的 IN/OUT 正文）渲染为**墨色表面**：两种主题下都是深色半透明卡片，[shiki.css](../../../../packages/client/ui-theme/src/styles/shiki.css) 的语法色板也据此调过——按浅底选的色板放到这块深底上会有一半读不出来。由于填充是深色而它继承的文字阶梯不是，每块墨色表面都在自己的容器上把 `--dsw-alias-label-primary`/`-secondary`/`-tertiary` 重绑到 `--dsw-code-ink*` 阶梯，用的是与 elevation 描边、滚动条变量同一套表面级重绑契约。composer 的 chip 取玻璃发丝线与下沉档填充，主发送控件取 `--dsw-brand-gradient`——界面上唯一一处饱和渐变。
 
 ## 被压缩器合并掉的前缀对
 
@@ -28,7 +30,9 @@ Web 客户端的每个表面都刷不透明填充——框架与会话列取 `--
 
 ## Alternatives considered
 
-**在单个渐变图层上动画 `background-position`。** 那会每帧在主线程重绘整块画布。五个合成器上的 transform 图层各自只要一次变换。
+**在单个渐变图层上动画 `background-position`。** 那会每帧在主线程重绘整块画布。一个合成器上的 transform 图层只要一次变换。
+
+**五个各自独立漂移的色团。** 它存活了一段时间；上面那处逐层栅格化接缝就是它被撤掉的原因。单层整体漂移，代价是失去色团之间的反相运动。
 
 **给会话列加 `backdrop-filter`。** 会话列直接坐在极光之上，模糊它等于模糊画布本身，而且要在薄纱之外再付一次全视口模糊。
 
@@ -44,9 +48,9 @@ Web 客户端的每个表面都刷不透明填充——框架与会话列取 `--
 
 帧节奏在 0、4、12 层玻璃、模糊半径 20、44、150 px 的全部组合下都保持 60 fps（p95 16.8 ms、无卡顿帧），测试环境为 1680×1050 @2× DPR 的 RTX 4080 SUPER。单层显存数字仍只是估算而非实测：Windows 的 GPU 进程计数器分辨不出它，同一配置两次采样之间就相差多达 190 MB。
 
-## Deferred
+## 为什么极光是一层
 
-留一处观感问题：某些漂移相位下，正文列里能看见一道柔和的竖向色阶接缝，位置正是粉色色团渐变边缘扫过阅读区的地方。把该色团的背景改成纯色后接缝消失，说明它是那张大径向渐变图层的边缘伪影，而不是布局或裁剪故障；我软化过色标、也去掉了 `will-change: transform`，都没能消除它。
+环境画布原本是五个绝对定位的 span，每个都是铺满视口的合成图层、各带一张大径向渐变。某些漂移相位下，正文列里会出现一道可见的竖向日阶接缝。把其中一个色团的背景改成纯色后接缝消失，把五张渐变合并到同一个元素后也消失，因此它是多图层栅格化的伪影，而不是布局或裁剪故障：穿过接缝的扫描线在五层版本上是 4/5/6/5/6/2，在单层版本上是 3/3/2/1/1/0/0/1。合并同时每帧少掉四个合成图层。软化色标和去掉 `will-change: transform` 都没能修好它，所以成因是图层数量，不是渐变斜率也不是提升提示。
 
 ## Testing
 

@@ -22,6 +22,12 @@
   padding: 8px;
   max-height: 200px;
   overflow: auto;
+  /* Ink surface: rebind the label scale this element inherits, so its title,
+     line numbers, and captions read on the dark fill. Same surface-scoped
+     rebinding the elevation stroke and the scrollbar pair use. */
+  --dsw-alias-label-primary: var(--dsw-code-ink);
+  --dsw-alias-label-secondary: var(--dsw-code-ink-secondary);
+  --dsw-alias-label-tertiary: var(--dsw-code-ink-tertiary);
   background: var(--dsw-alias-markdown-code-block);
   border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: 6px;

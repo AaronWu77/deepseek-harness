@@ -33,20 +33,14 @@ export type AppFrameProps =
 
 /**
  * Ambient aurora canvas: the drifting colour fields every glass surface blurs.
- * ui-theme owns the colours and the drift period; this module owns only the
- * element stack that paints them. Decorative, so it is hidden from assistive
+ * ui-theme owns the colours and the drift period; this module owns only the one
+ * element they are painted on. A single layer is deliberate — five full-viewport
+ * layers each re-rasterize their own large radial gradient and leave a visible
+ * tonal step where the fields meet. Decorative, so it is hidden from assistive
  * technology, and its drift stops under prefers-reduced-motion.
  */
 function AmbientCanvas() {
-  return (
-    <div className={css.ambient} aria-hidden="true">
-      <span />
-      <span />
-      <span />
-      <span />
-      <span />
-    </div>
-  )
+  return <div className={css.ambient} aria-hidden="true" />
 }
 
 /** Center column grid item (session-body building block). */

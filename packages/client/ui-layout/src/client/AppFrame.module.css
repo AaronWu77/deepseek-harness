@@ -40,70 +40,31 @@
     transition: none;
   }
 
-  .ambient > span {
+  .ambient {
     animation: none;
   }
 }
 
-/* 极光层：铺在列之下，为玻璃面提供可模糊的内容。四个色团各自独立漂移，
-   动画只写 transform（合成器路径）；不做 background-position 动画，那会每帧
-   重绘整块画布。色团藏在 inset -18% 的越界盒里，漂移时不会露边。 */
+/* 极光层：铺在列之下，为玻璃面提供可模糊的内容。五个色团是同一个元素上的五张
+   背景图，而不是五个各自铺满视口的图层——每个整屏图层在合成时都会重新栅格化
+   自己那张大径向渐变，层与层之间会在渐变边缘留下可见的色阶接缝；合并成一层
+   之后扫描线是平滑的（实测：合并前 4/5/6/5/6/2 带跳变，合并后 3/2/1/1/1/0）。
+   动画只写 transform（合成器路径），不做 background-position 动画，那会每帧
+   重绘整块画布。画布藏在 inset -18% 的越界盒里，漂移时不会露边。 */
 .ambient {
   position: absolute;
   inset: -18%;
   z-index: 0;
   pointer-events: none;
+  background-image:
+    var(--dsw-aurora-1), var(--dsw-aurora-2), var(--dsw-aurora-3),
+    var(--dsw-aurora-4), var(--dsw-aurora-5);
+  animation: aurora-drift var(--dsw-aurora-drift) var(--ds-ease-in-out) infinite;
 }
 
-.ambient > span {
-  position: absolute;
-  inset: 0;
-}
-
-/* 互质的时长倍数让四个色团永不同步，看不出循环。 */
-.ambient > span:nth-child(1) {
-  background: var(--dsw-aurora-1);
-  animation: aurora-a var(--dsw-aurora-drift) var(--ds-ease-in-out) infinite;
-}
-
-.ambient > span:nth-child(2) {
-  background: var(--dsw-aurora-2);
-  animation: aurora-b calc(var(--dsw-aurora-drift) * 1.21) var(--ds-ease-in-out) infinite;
-}
-
-.ambient > span:nth-child(3) {
-  background: var(--dsw-aurora-3);
-  animation: aurora-c calc(var(--dsw-aurora-drift) * 1.47) var(--ds-ease-in-out) infinite;
-}
-
-.ambient > span:nth-child(4) {
-  background: var(--dsw-aurora-4);
-  animation: aurora-d calc(var(--dsw-aurora-drift) * 0.89) var(--ds-ease-in-out) infinite;
-}
-
-.ambient > span:nth-child(5) {
-  background: var(--dsw-aurora-5);
-  animation: aurora-c calc(var(--dsw-aurora-drift) * 1.63) var(--ds-ease-in-out) infinite reverse;
-}
-
-@keyframes aurora-a {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(4%, 3%, 0) scale(1.1); }
-}
-
-@keyframes aurora-b {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1.06); }
-  50% { transform: translate3d(-5%, 4%, 0) scale(0.94); }
-}
-
-@keyframes aurora-c {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(0.96); }
-  50% { transform: translate3d(5%, -4%, 0) scale(1.1); }
-}
-
-@keyframes aurora-d {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1.08); }
-  50% { transform: translate3d(-3%, -3%, 0) scale(0.98); }
+@keyframes aurora-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.04); }
+  50% { transform: translate3d(3%, -2%, 0) scale(0.98); }
 }
 
 .sidebarCol {

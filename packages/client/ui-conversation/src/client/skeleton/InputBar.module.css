@@ -303,16 +303,17 @@
   flex: none;
   width: 28px;
   height: 28px;
-  border: none;
-  border-radius: 999px;
-  corner-shape: round;
-  background: var(--dsw-specific-selector);
-  color: var(--dsw-alias-label-primary);
+  border: 0.5px solid var(--dsw-glass-stroke);
+  border-radius: 9px;
+  background: var(--dsw-glass-fill-sunken);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
+  transition: background 140ms var(--dsw-motion-spring), color 140ms var(--dsw-motion-spring);
 }
 
 .add:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
+  background: var(--dsw-glass-fill-raised);
+  color: var(--dsw-alias-label-primary);
 }
 
 .add:disabled {
@@ -325,11 +326,11 @@
 .select {
   max-width: 220px;
   height: 28px;
-  padding: 0 20px 0 8px;
-  border: none;
-  border-radius: 8px;
+  padding: 0 20px 0 9px;
+  border: 0.5px solid var(--dsw-glass-stroke);
+  border-radius: 9px;
   outline: none;
-  background-color: transparent;
+  background-color: var(--dsw-glass-fill-sunken);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 4px center;
@@ -344,7 +345,7 @@
 }
 
 .select:hover:not(:disabled) {
-  background-color: var(--dsw-alias-interactive-bg-hover);
+  background-color: var(--dsw-glass-fill-raised);
 }
 
 .select:disabled {
@@ -364,12 +365,13 @@
   border: none;
   border-radius: 999px;
   corner-shape: round;
-  background: var(--dsw-alias-button-info-fill);
-  /* Static white, not the foreground token: the arrow stays white on the blue
-     fill in both themes (design 34:10465). */
+  background: var(--dsw-brand-gradient);
+  /* Static white, not the foreground token: the arrow stays white on the
+     saturated fill in both themes. */
   color: #fff;
   cursor: pointer;
-  transition: background-color 100ms ease;
+  box-shadow: 0 4px 14px -4px color-mix(in srgb, rgb(139, 107, 255) 55%, transparent);
+  transition: transform 200ms var(--dsw-motion-spring), box-shadow 200ms var(--dsw-motion-spring);
   /* Opts out of the row's 2px downward shift (.row top pad): the send circle
      keeps its original seat while the smaller chips sit lower. Transform, not
      margin, so flex centering math is untouched. */
@@ -377,7 +379,12 @@
 }
 
 .primary:hover:not(:disabled) {
-  background: var(--dsw-alias-button-info-hover);
+  transform: translateY(-2px) scale(1.06);
+  box-shadow: 0 8px 22px -6px color-mix(in srgb, rgb(139, 107, 255) 70%, transparent);
+}
+
+.primary:active:not(:disabled) {
+  transform: translateY(-2px) scale(0.97);
 }
 
 .primary:disabled {

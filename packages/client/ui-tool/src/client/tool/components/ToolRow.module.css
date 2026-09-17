@@ -11,6 +11,46 @@
   flex-direction: column;
 }
 
+/* An expanded tool call becomes a card: its summary row is the header and the
+   body sits under it. Collapsed rows stay flat, so a transcript holding dozens
+   of calls mounts no backdrop-filter beyond the ones actually open — the cost
+   of this language is the surfaces on screen, not the calls in the log. */
+.root[data-expanded] {
+  margin: 6px 0;
+  overflow: hidden;
+  border-radius: 16px;
+  /* The card holds the scrolling bodies (.bodyScroll, .ioSection), so it takes
+     the l2 thumb pair per the ui-theme rebinding contract. */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+  background: var(--dsw-glass-fill);
+  -webkit-backdrop-filter: var(--dsw-glass-blur);
+  backdrop-filter: var(--dsw-glass-blur);
+  box-shadow: var(--dsw-elevation-panel), inset 0 0.5px 0 var(--dsw-glass-highlight);
+}
+
+.root[data-expanded] .row {
+  padding-inline: 12px;
+  border-bottom: 0.5px solid var(--dsw-glass-stroke);
+}
+
+/* The bodies keep their own block chrome but lose the flow indent: the card's
+   padding now owns that space. */
+.root[data-expanded] .bodyWrap {
+  padding: 2px 10px 10px;
+}
+
+.root[data-expanded] .ioCard,
+.root[data-expanded] .codeBody,
+.root[data-expanded] .terminalBody,
+.root[data-expanded] .diffBody,
+.root[data-expanded] .readBody,
+.root[data-expanded] .imageBody,
+.root[data-expanded] .searchBody,
+.root[data-expanded] .webBody {
+  margin: 0;
+}
+
 .row {
   position: relative; /* sweep-glare overlay anchor */
   overflow: hidden;
@@ -215,6 +255,12 @@
   margin: 4px 0 4px 4px;
   border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: 12px;
+  /* Ink surface: rebind the label scale this element inherits, so its title,
+     line numbers, and captions read on the dark fill. Same surface-scoped
+     rebinding the elevation stroke and the scrollbar pair use. */
+  --dsw-alias-label-primary: var(--dsw-code-ink);
+  --dsw-alias-label-secondary: var(--dsw-code-ink-secondary);
+  --dsw-alias-label-tertiary: var(--dsw-code-ink-tertiary);
   background: var(--dsw-alias-markdown-code-block);
   font: var(--dsw-font-markdown-code-block-small);
 }
