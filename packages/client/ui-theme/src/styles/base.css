@@ -12,4 +12,10 @@
   --ds-transition-duration: 0.2s;
   --ds-transition-duration-fast: 0.1s;
   --ds-transition-duration-slow: 0.3s;
+  /* Apple 风格运动曲线：起步快、收尾缓，接近弹簧而不需要 JS 补间。控件反馈
+     用 fast，浮层进出用 duration，列宽与面板这种大位移用 slow。 */
+  --dsw-motion-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --dsw-motion-duration-fast: 0.16s;
+  --dsw-motion-duration: 0.24s;
+  --dsw-motion-duration-slow: 0.34s;
 }

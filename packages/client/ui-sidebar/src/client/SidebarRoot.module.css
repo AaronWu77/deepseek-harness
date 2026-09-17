@@ -13,7 +13,9 @@
   height: 100%;
   padding: 6px var(--dsh-sidebar-inline-padding);
   box-sizing: border-box;
-  background: var(--dsw-specific-sidebar-fill);
+  /* 侧栏的玻璃面由 AppFrame 的列拥有（那里也画发丝分隔线）；这里再刷一层不透明
+     填充会把它整个盖住，backdrop-filter 就取不到身后的极光。 */
+  background: transparent;
   color: var(--dsw-alias-label-primary);
   font-size: 14px;
   /* The sidebar is elevated above the conversation surface, so a revealed

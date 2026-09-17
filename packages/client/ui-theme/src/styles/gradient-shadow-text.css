@@ -26,12 +26,20 @@ body {
 body,
 body * {
   --dsw-elevation-stroke: 0 0 0 0.5px var(--dsw-elevation-stroke-color);
+  /* Apple 风格三层投影：近距离接触阴影定形、中距柔光给出高度、远距环境光
+     拉开浮层。比原来的单层近距阴影更"浮"，透明度仍压低以免发脏。 */
   --dsw-elevation-panel:
-    var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
+    var(--dsw-elevation-stroke), 0 1px 2px 0 rgba(0, 0, 0, 0.05),
+    0 6px 20px -6px rgba(0, 0, 0, 0.1),
+    0 22px 48px -18px rgba(0, 0, 0, 0.1);
   --dsw-elevation-prominent:
-    var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.04), 0 0 20px 0 rgba(0, 0, 0, 0.05);
+    var(--dsw-elevation-stroke), 0 2px 4px 0 rgba(0, 0, 0, 0.06),
+    0 10px 28px -8px rgba(0, 0, 0, 0.14),
+    0 30px 64px -24px rgba(0, 0, 0, 0.16);
   --dsw-elevation-soft:
-    var(--dsw-elevation-stroke), 0 4px 16px 0 rgba(0, 0, 0, 0.03), 0 0 24px 0 rgba(0, 0, 0, 0.03);
+    var(--dsw-elevation-stroke), 0 1px 2px 0 rgba(0, 0, 0, 0.04),
+    0 8px 24px -8px rgba(0, 0, 0, 0.09),
+    0 24px 56px -20px rgba(0, 0, 0, 0.09);
 }
 
 body[data-ds-dark-theme] {

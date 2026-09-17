@@ -1,10 +1,29 @@
 .frame {
-  position: relative; /* anchors the drag handles, which straddle column borders */
+  /* The stage: full-bleed ambient canvas with the floating window inset by
+     --dsw-glass-frame-gap, so the flowing colour frames the glass. */
+  position: relative;
+  height: 100%;
+  box-sizing: border-box;
+  padding: var(--dsw-glass-frame-gap);
+  overflow: hidden;
+  background: var(--dsw-glass-canvas);
+}
+
+/* The floating window: the real three-column grid. Its translucent gradient
+   needs no backdrop-filter — it sits directly on the soft ambient canvas, where
+   a blur has nothing to sharpen and would only make the window a containing
+   block for position: fixed descendants. The blur belongs to the surfaces that
+   have content behind them (the sidebar layer, the floating layers). */
+.window {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-rows: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--dsw-alias-bg-base);
+  border-radius: var(--dsw-glass-frame-radius);
+  background: var(--dsw-glass-window);
+  box-shadow: var(--dsw-elevation-prominent);
   /* Collapse/expand animates the tracks on the deepsuite sider curve
      (--ds-ease-in-out / --ds-transition-duration-slow, ui-theme base.css). */
   transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out);
@@ -12,24 +31,109 @@
 
 /* Dragging writes widths at pointer cadence; easing them would detach the
    column from the handle. */
-.frame[data-dragging] {
+.frame[data-dragging] .window {
   transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .frame {
+  .window {
     transition: none;
   }
+
+  .ambient > span {
+    animation: none;
+  }
+}
+
+/* 极光层：铺在列之下，为玻璃面提供可模糊的内容。四个色团各自独立漂移，
+   动画只写 transform（合成器路径）；不做 background-position 动画，那会每帧
+   重绘整块画布。色团藏在 inset -18% 的越界盒里，漂移时不会露边。 */
+.ambient {
+  position: absolute;
+  inset: -18%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.ambient > span {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+/* 互质的时长倍数让四个色团永不同步，看不出循环。 */
+.ambient > span:nth-child(1) {
+  background: var(--dsw-aurora-1);
+  animation: aurora-a var(--dsw-aurora-drift) var(--ds-ease-in-out) infinite;
+}
+
+.ambient > span:nth-child(2) {
+  background: var(--dsw-aurora-2);
+  animation: aurora-b calc(var(--dsw-aurora-drift) * 1.21) var(--ds-ease-in-out) infinite;
+}
+
+.ambient > span:nth-child(3) {
+  background: var(--dsw-aurora-3);
+  animation: aurora-c calc(var(--dsw-aurora-drift) * 1.47) var(--ds-ease-in-out) infinite;
+}
+
+.ambient > span:nth-child(4) {
+  background: var(--dsw-aurora-4);
+  animation: aurora-d calc(var(--dsw-aurora-drift) * 0.89) var(--ds-ease-in-out) infinite;
+}
+
+.ambient > span:nth-child(5) {
+  background: var(--dsw-aurora-5);
+  animation: aurora-c calc(var(--dsw-aurora-drift) * 1.63) var(--ds-ease-in-out) infinite reverse;
+}
+
+@keyframes aurora-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(4%, 3%, 0) scale(1.1); }
+}
+
+@keyframes aurora-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.06); }
+  50% { transform: translate3d(-5%, 4%, 0) scale(0.94); }
+}
+
+@keyframes aurora-c {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(0.96); }
+  50% { transform: translate3d(5%, -4%, 0) scale(1.1); }
+}
+
+@keyframes aurora-d {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.08); }
+  50% { transform: translate3d(-3%, -3%, 0) scale(0.98); }
 }
 
 .sidebarCol {
   min-width: 0;
   overflow: hidden;
-  background: var(--dsw-specific-sidebar-fill);
-  border-right: 0.5px solid var(--dsw-alias-border-l3);
+  position: relative;
+  z-index: 1;
+}
+
+/* 玻璃画在独立的背景层上，而不是列本身：backdrop-filter 会让元素成为
+   position: fixed 后代的包含块，而侧栏里就挂着设置浮层这类全屏 fixed 界面
+   —— 挂在列上，inset: 0 会解析成 288px 宽的侧栏，浮层被挤成一条。
+   z-index: -1 让它在列的层叠上下文内落到内容之下、环境画布之上。
+   前缀在前、标准属性在后：bundle 的 CSS 压缩会把这一对合并成一条，保留最后
+   一条，顺序颠倒会让产物里只剩引擎不支持的 -webkit- 版本。 */
+.sidebarGlass {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--dsw-glass-fill);
+  -webkit-backdrop-filter: var(--dsw-glass-blur);
+  backdrop-filter: var(--dsw-glass-blur);
+  border-right: 0.5px solid var(--dsw-glass-stroke);
 }
 
 .centerCol {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -83,6 +187,7 @@
  */
 .rightbarCol {
   position: relative;
+  z-index: 1;
   min-width: 0;
   overflow: visible;
 }

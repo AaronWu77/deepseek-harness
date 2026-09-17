@@ -142,6 +142,15 @@ const SURFACE_PROPERTIES = ['background', 'background-color']
  * carries a radius, a shadow, and a fixed size, so shape cannot separate them.
  */
 const SURFACE_TOKEN_PATTERN = /^--dsw-(?:alias-bg-|specific-)/
+/**
+ * Glass surface tiers that are elevated by construction. They float over the
+ * ambient canvas instead of sitting on a palette rung, so the ladder cannot
+ * derive them: their values are translucent fills, not rung colors. The raised
+ * tiers are named here; the sunken tier is deliberately absent, because a
+ * recessed well is not an elevated surface and a scroll container drawn in one
+ * keeps the l1 thumb.
+ */
+const ELEVATED_GLASS_TOKENS = ['--dsw-glass-fill', '--dsw-glass-fill-raised', '--dsw-glass-fill-thick'] as const
 
 /**
  * The palette's own dark elevation ladder, resolved from `design-platform.css`:
@@ -175,6 +184,7 @@ function elevatedRungs(): Set<string> {
   for (const name of definitions.keys()) {
     if (SURFACE_TOKEN_PATTERN.test(name) && rungs.has(resolve(name))) tokens.add(name)
   }
+  for (const name of ELEVATED_GLASS_TOKENS) tokens.add(name)
   return tokens
 }
 
@@ -471,13 +481,14 @@ describe('elevated surface rebinds', () => {
     }
   })
 
-  it('resolves the elevated surface set from the palette ladder', () => {
-    // The set has to come from the palette, not from the sheets that happen to
+  it('resolves the elevated surface set from the palette ladder plus the raised glass tiers', () => {
+    // The set has to come from an authority outside the sheets that happen to
     // rebind: derived from rebinds it can only confirm what someone already
     // remembered, and a surface nobody has rebound yet — the case the check
-    // exists for — would define itself as unelevated. Anchoring it here means a
-    // new palette token on an elevated rung is in scope the moment it is
-    // defined. `--dsw-specific-tip` is the regression that proved the point: it
+    // exists for — would define itself as unelevated. Rung-backed surfaces come
+    // from the palette, so a new palette token on an elevated rung is in scope
+    // the moment it is defined; the raised glass tiers are anchored in this
+    // spec instead, because a translucent fill carries no rung to read. `--dsw-specific-tip` is the regression that proved the point: it
     // resolves to the same dark rung as the menu surface, and the Todo panel
     // scrolled on it unrebound while a rebind-derived set stayed green.
     expect(elevatedSurfaces).toContain('--dsw-alias-bg-layer-2')
@@ -485,6 +496,12 @@ describe('elevated surface rebinds', () => {
     expect(elevatedSurfaces).toContain('--dsw-specific-menu')
     expect(elevatedSurfaces).toContain('--dsw-specific-input-major')
     expect(elevatedSurfaces).toContain('--dsw-specific-tip')
+    // A scroll container on glass takes the same l2 thumb as one on a rung.
+    expect(elevatedSurfaces).toContain('--dsw-glass-fill')
+    expect(elevatedSurfaces).toContain('--dsw-glass-fill-raised')
+    expect(elevatedSurfaces).toContain('--dsw-glass-fill-thick')
+    // The recessed tier stays out: a well is not an elevated surface.
+    expect(elevatedSurfaces).not.toContain('--dsw-glass-fill-sunken')
     // Base surfaces stay out, or every scroll container would be in scope and
     // the check would say nothing.
     expect(elevatedSurfaces).not.toContain('--dsw-alias-bg-base')

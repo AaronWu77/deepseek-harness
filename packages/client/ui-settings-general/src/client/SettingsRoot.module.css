@@ -89,7 +89,12 @@
   max-width: calc(100vw - 48px);
   border-radius: 32px;
   overflow: hidden;
-  background: var(--dsw-alias-bg-layer-2);
+  /* Thick glass: the panel is large and content-dense, so it keeps more fill
+     than the menu tier while still reading as the same material. */
+  background: var(--dsw-glass-fill-thick);
+  -webkit-backdrop-filter: var(--dsw-glass-blur-strong);
+  backdrop-filter: var(--dsw-glass-blur-strong);
+  --dsw-elevation-stroke-color: var(--dsw-glass-stroke);
   box-shadow: var(--dsw-elevation-prominent);
   /* Elevated surface: the scrollbar thumb takes the l2 elevation tokens.
      Declared on the panel rather than the scrolling `.options` child so the

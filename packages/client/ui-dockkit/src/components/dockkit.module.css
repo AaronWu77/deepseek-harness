@@ -448,8 +448,10 @@
   flex-direction: column;
   min-width: 96px;
   padding: 4px;
-  background: var(--dsw-alias-bg-layer-3);
-  border: 0.5px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-glass-fill-raised);
+  -webkit-backdrop-filter: var(--dsw-glass-blur-strong);
+  backdrop-filter: var(--dsw-glass-blur-strong);
+  border: 0.5px solid var(--dsw-glass-stroke);
   border-radius: 6px;
 }
 
@@ -645,12 +647,14 @@
   /* The body inside is unpadded and reaches the edges, so the frame clips it
      to its own corners. */
   overflow: hidden;
-  background: var(--dsw-alias-bg-layer-2);
+  background: var(--dsw-glass-fill-raised);
+  -webkit-backdrop-filter: var(--dsw-glass-blur-strong);
+  backdrop-filter: var(--dsw-glass-blur-strong);
   border-radius: 20px;
-  /* The menu's shadow with the stroke rebound one step lighter than the
-     default (l2): the panel reads as the same kind of raised surface, and the
-     shadow's hairline outlines it, so the frame draws no border of its own. */
-  --dsw-elevation-stroke-color: var(--dsw-alias-border-l2);
+  /* The menu's shadow with the glass hairline: the panel reads as the same kind
+     of raised surface as the other floating layers, and the shadow's hairline
+     outlines it, so the frame draws no border of its own. */
+  --dsw-elevation-stroke-color: var(--dsw-glass-stroke);
   box-shadow: var(--dsw-elevation-prominent);
   pointer-events: auto;
 }

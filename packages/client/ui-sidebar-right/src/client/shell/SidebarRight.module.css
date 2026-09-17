@@ -29,9 +29,10 @@
   flex-direction: column;
   min-width: 0;
   /* The same ground as the conversation: this is a column of the page, not a
-     raised surface. The edge is the weight of the kit's split dividers inside
+     raised surface, so it takes the same translucent scrim and lets the ambient
+     canvas through. The edge is the weight of the kit's split dividers inside
      (ui-dockkit `.divider`), so the panel's outline and its inner rules match. */
-  background: var(--dsw-alias-bg-base);
+  background: var(--dsw-glass-scrim);
   border-left: 0.5px solid var(--dsw-alias-border-l4);
   transform: translateX(100%);
   visibility: hidden;

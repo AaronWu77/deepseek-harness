@@ -114,9 +114,15 @@ function mountFrame(windowWidth = frameWidth) {
   }
 }
 
+/**
+ * Column tracks of the floating window. The stage holds the ambient canvas and
+ * the frame gap; the grid itself lives on the window inset inside it.
+ */
 function tracks(frame: HTMLElement): number[] {
-  const match = /^([\d.]+)px minmax\(0, 1fr\) ([\d.]+)px$/.exec(frame.style.gridTemplateColumns)
-  if (match === null) throw new Error(`unexpected template: ${frame.style.gridTemplateColumns}`)
+  const window = frame.querySelector<HTMLElement>('[data-shell-window]')
+  if (window === null) throw new Error('missing shell window')
+  const match = /^([\d.]+)px minmax\(0, 1fr\) ([\d.]+)px$/.exec(window.style.gridTemplateColumns)
+  if (match === null) throw new Error(`unexpected template: ${window.style.gridTemplateColumns}`)
   return [Number(match[1]), Number(match[2])]
 }
 

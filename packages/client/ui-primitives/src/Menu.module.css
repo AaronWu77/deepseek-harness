@@ -3,8 +3,10 @@
   display: inline-flex;
 }
 
-/* Dropdown card (figma MenuDropdown 122:9481 / 419:16920): menu surface,
- * r12, elevation-prominent (hairline stroke in shadow), 4px inset padding. */
+/* Dropdown card (figma MenuDropdown 122:9481 / 419:16920): glass menu surface,
+ * r20, elevation-prominent (glass hairline stroke in shadow), 4px inset padding.
+ * The card floats over the ambient canvas, so it takes the raised glass fill and
+ * the strong blur rather than an opaque palette rung. */
 .list,
 .submenu {
   /* min-widths below are the design's outer card widths — include the pad. */
@@ -15,8 +17,10 @@
   gap: 0;
   border: 0;
   border-radius: 20px;
-  background: var(--dsw-specific-menu);
-  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  background: var(--dsw-glass-fill-raised);
+  -webkit-backdrop-filter: var(--dsw-glass-blur-strong);
+  backdrop-filter: var(--dsw-glass-blur-strong);
+  --dsw-elevation-stroke-color: var(--dsw-glass-stroke);
   box-shadow: var(--dsw-elevation-prominent);
   /* Elevated surface: the scrollbar thumb takes the l2 elevation tokens. The
      declaration sits on the card rather than on `.scrollable .viewport`

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-17-aurora-glass-visual-language.md
+2026-09-17-aurora-glass-visual-language.md: 9200ee369debff2d2d0817843ab10db6c129886f
+2026-09-17-aurora-glass-visual-language.zh.md: e46771d7a9f098ff9b5bf495cd0a6a07c7c24ec0

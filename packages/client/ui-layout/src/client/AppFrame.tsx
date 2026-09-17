@@ -31,6 +31,24 @@ export type AppFrameProps =
   & PropsStore<ReturnType<typeof createLayoutStore>>
   & PropsLocale<'common'>
 
+/**
+ * Ambient aurora canvas: the drifting colour fields every glass surface blurs.
+ * ui-theme owns the colours and the drift period; this module owns only the
+ * element stack that paints them. Decorative, so it is hidden from assistive
+ * technology, and its drift stops under prefers-reduced-motion.
+ */
+function AmbientCanvas() {
+  return (
+    <div className={css.ambient} aria-hidden="true">
+      <span />
+      <span />
+      <span />
+      <span />
+      <span />
+    </div>
+  )
+}
+
 /** Center column grid item (session-body building block). */
 function CenterColumn(props: { children?: ReactNode }) {
   return <div className={css.centerCol}>{props.children}</div>
@@ -201,40 +219,47 @@ export function AppFrame({
 
   return (
     <div
-      ref={frameRef}
       className={css.frame}
-      style={{
-        gridTemplateColumns:
-          `${cols.sidebar}px minmax(0, 1fr) ${cols.rightbar}px`,
-      }}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-rightbar-collapsed={cols.rightbar === 0 || undefined}
       data-rightbar-fullscreen={layoutInfo.rightbarFullscreen || undefined}
       data-rightbar-instant={layoutInfo.rightbarInstant || undefined}
       data-dragging={dragging || undefined}
     >
-      <DocumentTitle
-        productTitle={productTitle}
-        useSessions={useSessions}
-        usePanelInfo={usePanelInfo}
-      />
-      <div className={css.sidebarCol}>
-        {sidebar}
+      <AmbientCanvas />
+      <div
+        ref={frameRef}
+        className={css.window}
+        data-shell-window
+        style={{
+          gridTemplateColumns:
+            `${cols.sidebar}px minmax(0, 1fr) ${cols.rightbar}px`,
+        }}
+      >
+        <DocumentTitle
+          productTitle={productTitle}
+          useSessions={useSessions}
+          usePanelInfo={usePanelInfo}
+        />
+        <div className={css.sidebarCol}>
+          <div className={css.sidebarGlass} aria-hidden="true" />
+          {sidebar}
+        </div>
+        <>
+          <CenterColumn>{main}</CenterColumn>
+          <RightbarColumn>
+            {renderSlot('rightbar', { width: normal.rightbar, viewportWidth: viewport, canShow: normal.rightbar > 0 })}
+          </RightbarColumn>
+        </>
+        <div className={css.overlayLayer} data-shell-overlay>
+          {overlays}
+        </div>
+        {/* The collapsed rail is fixed-width: no resize handle while closed. */}
+        {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
+        {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
+          <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
+        )}
       </div>
-      <>
-        <CenterColumn>{main}</CenterColumn>
-        <RightbarColumn>
-          {renderSlot('rightbar', { width: normal.rightbar, viewportWidth: viewport, canShow: normal.rightbar > 0 })}
-        </RightbarColumn>
-      </>
-      <div className={css.overlayLayer} data-shell-overlay>
-        {overlays}
-      </div>
-      {/* The collapsed rail is fixed-width: no resize handle while closed. */}
-      {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
-        <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
-      )}
     </div>
   )
 }

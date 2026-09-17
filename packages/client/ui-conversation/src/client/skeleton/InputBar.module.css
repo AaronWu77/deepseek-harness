@@ -47,13 +47,16 @@
   width: 100%;
   max-width: var(--dsh-composer-card-max-width);
   padding-top: 8px;
-  /* Input stroke: the light neutral (l2, one step above the menus' l1),
-     drawn as the elevation hairline so it costs no layout; the shadow is the
-     soft elevation tier. Fill: the input surface token (elevated in dark). */
+  /* Input stroke: the glass hairline, drawn as the elevation hairline so it
+     costs no layout; the shadow is the soft elevation tier. Fill: the raised
+     glass tier plus a backdrop blur, so the transcript scrolls visibly under
+     the floating card. */
   border: 0;
-  --dsw-elevation-stroke-color: var(--dsw-alias-border-l2);
+  --dsw-elevation-stroke-color: var(--dsw-glass-stroke);
   border-radius: 22px;
-  background: var(--dsw-specific-input-major);
+  background: var(--dsw-glass-fill-raised);
+  -webkit-backdrop-filter: var(--dsw-glass-blur-strong);
+  backdrop-filter: var(--dsw-glass-blur-strong);
   box-shadow: var(--dsw-elevation-soft);
   /* The draft text follows the Settings font-size preference (the textarea,
      mirror, and backdrop all inherit from here, so the three layers stay in
