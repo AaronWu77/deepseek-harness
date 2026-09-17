@@ -42,7 +42,7 @@ target package 通过 declaration merge 扩展 snapshot 与 Location data map，
 
 已认领的命令在仅删除参数和末尾分隔空格时保留身份与高亮，改动命令名才会释放认领。所有命令和语言使用相同规则，包括 `/goal`、`/目标`、`/plan` 和 `/计划`。输入法组合输入期间，命令提示和普通占位文字持续隐藏，直到编辑器提交最终文字且对应输入为空时才重新显示。
 
-工作区选择使用 `uiWorkspace.openWorkspace` 准备目标并提交导航。草稿文字和附件仅在该请求仍为当前请求时，通过它的同步准备回调搬移；后续导航或所有者释放会保留原草稿。
+工作区选择使用 `uiWorkspace.openWorkspace` 准备目标并提交导航。选中的工作区标签会在会话与工作区列表投影同步期间保持显示；请求失败时 composer 保持不可用并显示本地化重试操作，导航提交后即使工作区成员列表稍后刷新也会先启用输入。草稿文字和附件仅在该请求仍为当前请求时，通过它的同步准备回调搬移；后续导航或所有者释放会保留原草稿。
 
 本包占据 root 作用域 `main` 中的 `conversation` key，其包装层声明 optional-Session `main.conversation` shell。本包注册 strict Session header/body、View list、composer chain 与 bar、输入区域、Hero 区域、queue dock、草稿持久化和 phase 计算。`ctx.uiSession.provide()` 从同一个 Session binding 物化 Conversation 与 input source，并将 `inputActions` 作为稳定标准 prop 提供。
 

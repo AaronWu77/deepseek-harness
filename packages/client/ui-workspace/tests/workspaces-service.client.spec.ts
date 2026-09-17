@@ -280,12 +280,36 @@ describe('UiWorkspaceService', () => {
     const first = b.uiWorkspace.openWorkspace(wid('alpha'), oldDraft)
     const second = b.uiWorkspace.openWorkspace(wid('beta'), newDraft)
     newer.resolve(sid('newer'))
-    await second
+    await expect(second).resolves.toBe(true)
     older.resolve(sid('older'))
-    await first
+    await expect(first).resolves.toBe(false)
     expect(oldDraft).not.toHaveBeenCalled()
     expect(newDraft).toHaveBeenCalledExactlyOnceWith(sid('newer'))
     expect(b.sessions.open).toHaveBeenCalledExactlyOnceWith(sid('newer'))
+  })
+
+  it('cancels startup auto-selection when manual Workspace navigation begins', async () => {
+    const automatic = Promise.withResolvers<SessionId>()
+    const b = bench({
+      workspaces: workspaceState([workspace('alpha'), workspace('beta')]),
+      sessions: sessionState([], undefined, 'ready'),
+    })
+    b.sessions.create.mockImplementation(options => options?.workspaceId === wid('alpha')
+      ? automatic.promise
+      : Promise.resolve(sid('manual')))
+
+    // The initial snapshot was already ready when the service was constructed,
+    // so publish it once more after scripting create to start auto-selection.
+    b.sessions.list.set(sessionState([], undefined, 'ready'))
+    expect(b.sessions.create).toHaveBeenCalledWith({ workspaceId: wid('alpha') })
+
+    const manual = b.uiWorkspace.openWorkspace(wid('beta'))
+    automatic.resolve(sid('automatic'))
+    await expect(manual).resolves.toBe(true)
+    await flush()
+
+    expect(b.sessions.open).toHaveBeenCalledExactlyOnceWith(sid('manual'))
+    expect(b.sessions.list.getSnapshot().current).toBe(sid('manual'))
   })
 
   it('does not move drafts or reopen a Workspace after reselecting the current Session', async () => {

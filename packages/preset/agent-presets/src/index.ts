@@ -76,6 +76,17 @@ export const AgentPresetSettingsSchema: z<AgentPresetSettings> = z.object({
   modeSelectionEnabled: z.boolean(),
 })
 
+const RETIRED_CODE_PRESET_ID = 'code'
+const RENAMED_PTC_PRESET_ID = 'ptc'
+
+/**
+ * Recover a saved default written before the shipped `code` preset was renamed
+ * to `ptc`; explicit preset ids still resolve against the current roster.
+ */
+function migrateSavedDefaultId(id: string): string {
+  return id === RETIRED_CODE_PRESET_ID ? RENAMED_PTC_PRESET_ID : id
+}
+
 export { COMPOSITION_FILE, discoverPresets, scanRoot, SHIPPED_PRESET_ROOT } from './discovery.ts'
 export {
   METADATA_FILE, readPresetMetadata, renderPresetMetadata, type PresetMetadata,
@@ -254,7 +265,7 @@ export class AgentPresets extends TypertRemoteService {
     const enabled = settings.modeSelectionEnabled
     return {
       enabled,
-      defaultId: enabled ? settings.default : this.config.default,
+      defaultId: enabled ? migrateSavedDefaultId(settings.default) : this.config.default,
     }
   }
 

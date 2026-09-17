@@ -131,6 +131,19 @@ describe('virtualManifest', () => {
     }
   })
 
+  it('ignores an empty prefix directory for a skipped optional package', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-notices-empty-prefix-'))
+    try {
+      const name = '@scope/pkg'
+      const store = join(root, 'store')
+      mkdirSync(join(store, `${name.replace('/', '+')}@1.0.0`, 'node_modules', name), { recursive: true })
+
+      expect(virtualManifest(store, name)).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('falls back to a content scan when pnpm 11 truncates the store directory name', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-notices-truncated-'))
     try {

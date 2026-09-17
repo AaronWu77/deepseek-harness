@@ -23,9 +23,9 @@ export interface UiWorkspace {
    * Connect a Workspace and open its Session unless a later navigation supersedes it.
    * @param workspaceId - target Workspace.
    * @param beforeOpen - optional synchronous preparation for the selected Session, skipped after supersession.
-   * @returns completion; a superseded request may create a Session but does not open it.
+   * @returns true when the request opens the Session, or false when it is superseded before the UI commit.
    */
-  openWorkspace(workspaceId: WorkspaceId, beforeOpen?: (sessionId: SessionId) => void): Promise<void>
+  openWorkspace(workspaceId: WorkspaceId, beforeOpen?: (sessionId: SessionId) => void): Promise<boolean>
   /**
    * Fork a Session and open the child unless a later navigation supersedes it.
    * @param sessionId - source Session.
@@ -141,13 +141,15 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     this.ctx.layout.selectPanel(null)
   }
 
-  async openWorkspace(workspaceId: WorkspaceId, beforeOpen?: (sessionId: SessionId) => void): Promise<void> {
+  async openWorkspace(workspaceId: WorkspaceId, beforeOpen?: (sessionId: SessionId) => void): Promise<boolean> {
     const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
     const isCurrent = (): boolean => !navigation.aborted
     const sessionId = await this.connectWorkspace(workspaceId)
-    if (!isCurrent()) return
+    if (!isCurrent()) return false
     beforeOpen?.(sessionId)
-    if (isCurrent()) this.openSession(sessionId)
+    if (!isCurrent()) return false
+    this.openSession(sessionId)
+    return true
   }
 
   async forkSession(sessionId: SessionId): Promise<void> {
@@ -222,16 +224,23 @@ class UiWorkspaceService extends Service implements UiWorkspace {
         return
       }
       initial = 'connecting'
+      const navigation = this.ctx.layout.beginNavigation()
       void this.connectWorkspace(target).then(
         (sessionId) => {
-          if (this.lifetime.signal.aborted) return
+          if (navigation.aborted || this.lifetime.signal.aborted) {
+            initial = 'done'
+            return
+          }
           if (this.sessions.list.getSnapshot().current === undefined) {
             this.sessions.open(sessionId)
           }
           initial = 'done'
         },
         (reason: unknown) => {
-          if (this.lifetime.signal.aborted) return
+          if (navigation.aborted || this.lifetime.signal.aborted) {
+            initial = 'done'
+            return
+          }
           initial = 'waiting'
           console.warn('initial workspace selection failed:', reason)
         },

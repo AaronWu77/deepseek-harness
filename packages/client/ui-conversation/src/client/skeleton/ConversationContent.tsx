@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
+import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { ConversationSlotProps, InputZone } from '../contract/slots.ts'
 import { HeroShell, WorkspaceChip, workspaceLabel } from './EmptyHero.tsx'
@@ -14,6 +15,11 @@ type ConversationContentProps = Omit<ConversationSlotProps, 'useSession' | 'useC
   onHandleDrag: (width: number) => void
   onHandleCommit: (width: number) => void
   onHandleEnd: () => void
+}
+
+type WorkspaceSelectionState = {
+  workspaceId: WorkspaceId
+  phase: 'pending' | 'opened' | 'failed'
 }
 
 /** One transcript width handle: pointer capture + rAF-throttled symmetric
@@ -121,7 +127,8 @@ export function ConversationContent({
   const composerBlock = useComposerBlock(block => block)
 
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [pendingWorkspaceId, setPendingWorkspaceId] = useState<WorkspaceId | undefined>()
+  const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelectionState>()
+  const workspaceSelectionRequest = useRef(0)
   const pickerAnchor = useRef<HTMLButtonElement>(null)
 
   // Publishes the two live measurements floating View chrome reads off the
@@ -151,6 +158,7 @@ export function ConversationContent({
   const sessionWorkspace = sessionId === undefined
     ? undefined
     : workspaces.items.find(workspace => workspace.sessionIds.includes(sessionId))
+  const pendingWorkspaceId = workspaceSelection?.workspaceId
   const pendingWorkspace = workspaces.items.find(
     workspace => workspace.workspaceId === pendingWorkspaceId,
   )
@@ -161,9 +169,34 @@ export function ConversationContent({
     if (pendingWorkspaceId === undefined) return
     if (sessionWorkspace?.workspaceId === pendingWorkspaceId
       || (workspaces.phase === 'ready' && pendingWorkspace === undefined)) {
-      setPendingWorkspaceId(undefined)
+      setWorkspaceSelection(undefined)
     }
   }, [pendingWorkspaceId, sessionWorkspace?.workspaceId, workspaces.phase, pendingWorkspace])
+
+  const beginWorkspaceSelection = useCallback((workspaceId: WorkspaceId): void => {
+    const request = workspaceSelectionRequest.current + 1
+    workspaceSelectionRequest.current = request
+    setPickerOpen(false)
+    setWorkspaceSelection({ workspaceId, phase: 'pending' })
+    void selectWorkspace(workspaceId).then(
+      (opened) => {
+        if (workspaceSelectionRequest.current !== request) return
+        setWorkspaceSelection((current) => {
+          if (current?.workspaceId !== workspaceId) return current
+          return opened ? { ...current, phase: 'opened' } : undefined
+        })
+      },
+      (reason: unknown) => {
+        if (workspaceSelectionRequest.current !== request) return
+        console.warn('workspace selection failed:', reason)
+        setWorkspaceSelection(current => current?.workspaceId === workspaceId
+          ? { workspaceId, phase: 'failed' }
+          : current)
+      },
+    )
+  }, [selectWorkspace])
+
+  useEffect(() => () => { workspaceSelectionRequest.current += 1 }, [])
 
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
@@ -197,13 +230,7 @@ export function ConversationContent({
         open: pickerOpen,
         anchorRef: pickerAnchor,
         selectedId: pendingWorkspaceId ?? sessionWorkspace?.workspaceId,
-        onPick: (workspaceId) => {
-          setPickerOpen(false)
-          setPendingWorkspaceId(workspaceId)
-          void selectWorkspace(workspaceId).catch(() => {
-            setPendingWorkspaceId(current => current === workspaceId ? undefined : current)
-          })
-        },
+        onPick: beginWorkspaceSelection,
         onClose: () => { setPickerOpen(false) },
       })}
       {renderSlot('conversation.hero.agentPreset', {})}
@@ -215,13 +242,36 @@ export function ConversationContent({
   // blank session whose workspace vanished (deleted from the sidebar). The
   // bar is ONE session-maybe slot rendered unconditionally — inert is a prop,
   // not a different tree, so the textarea DOM survives the transition.
-  const inert = sessionId === undefined || (hero && chipTitle === undefined)
+  const workspaceSelectionActive = workspaceSelection?.phase === 'pending'
+    || workspaceSelection?.phase === 'failed'
+  const inert = sessionId === undefined || workspaceSelectionActive || (hero && chipTitle === undefined)
   // A raised block is the same inert posture with the blocker's own reason:
   // one disabled textarea, never a second tree. The no-workspace state wins
   // when both hold — picking a workspace is the earlier prerequisite.
   const blocked = !inert && composerBlock !== undefined
+  const failedWorkspaceId = workspaceSelection?.phase === 'failed'
+    ? workspaceSelection.workspaceId
+    : undefined
+  const workspaceErrorAccessory = failedWorkspaceId === undefined ? undefined : (
+    <div className={css.workspaceSelectionError} role="alert">
+      <span className={css.workspaceSelectionErrorText}>{t('workspace.selectionFailed')}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={css.workspaceSelectionRetry}
+        onClick={(event) => {
+          event.stopPropagation()
+          beginWorkspaceSelection(failedWorkspaceId)
+        }}
+      >
+        {t('workspace.retrySelection')}
+      </Button>
+    </div>
+  )
   const inputBar = renderSlot('conversation.composer.bar', {
     variant: hero ? 'hero' : 'composer',
+    ...(workspaceErrorAccessory === undefined ? {} : { accessory: workspaceErrorAccessory }),
     ...(inert
       ? {
         disabled: true,

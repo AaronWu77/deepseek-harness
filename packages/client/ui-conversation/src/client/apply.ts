@@ -90,7 +90,7 @@ interface WorkspaceNavigation {
   openWorkspace(
     workspaceId: Parameters<ConversationInjected['selectWorkspace']>[0],
     beforeOpen: (sessionId: SessionId) => void,
-  ): Promise<void>
+  ): Promise<boolean>
 }
 
 /** Action registration used by the composer without importing its command-UI consumer. */

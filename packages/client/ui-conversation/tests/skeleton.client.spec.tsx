@@ -110,7 +110,7 @@ function sessionSnapshotOf(overrides: Partial<SessionSnapshot> = {}): SessionSna
 function mount(
   snapshot: SessionSnapshot,
   workspaceRows: WorkspaceView[] = [{ ...workspace('one'), sessionIds: [SID] }],
-  retargetWorkspace = vi.fn(async (_workspaceId: WorkspaceId) => {}),
+  retargetWorkspace = vi.fn(async (_workspaceId: WorkspaceId) => true),
   options: {
     /** When true, mimic overlay:true chain siblings (hidden fallback + takeover). */
     overlayTakeover?: boolean
@@ -582,8 +582,9 @@ describe('ConversationRoot resident composer', () => {
     expect(b.view.getByRole('tab', { name: 'New view' }).getAttribute('aria-selected')).toBe('false')
   })
 
-  it('rolls the pending workspace label back when switching fails', async () => {
-    const selectWorkspace = vi.fn(async () => { throw new Error('connect failed') })
+  it('keeps a failed workspace selection visible and offers a retry', async () => {
+    const selectWorkspace = vi.fn(async (_workspaceId: WorkspaceId): Promise<boolean> => true)
+    selectWorkspace.mockRejectedValueOnce(new Error('connect failed'))
     const b = mount(
       sessionSnapshotOf({ blank: true }),
       [
@@ -596,8 +597,42 @@ describe('ConversationRoot resident composer', () => {
     const owner = b.pickerOwner() as { onPick(id: WorkspaceId): void }
     await act(async () => { owner.onPick(wid('second')); await Promise.resolve() })
     expect(selectWorkspace).toHaveBeenCalledWith(wid('second'))
-    expect(b.view.queryByText('Selected Folder')).toBeNull()
-    expect(b.view.getByText('one')).toBeTruthy()
+    expect(b.view.getByText('Selected Folder')).toBeTruthy()
+    expect(b.view.getByRole('alert').textContent).toContain('工作区选择失败')
+    expect(b.view.getByRole('textbox').getAttribute('contenteditable')).not.toBe('true')
+
+    await act(async () => {
+      fireEvent.click(b.view.getByRole('button', { name: '重试选择工作区' }))
+      await Promise.resolve()
+    })
+    expect(selectWorkspace).toHaveBeenCalledTimes(2)
+    expect(b.view.getByRole('textbox').getAttribute('contenteditable')).toBe('true')
+    expect(b.view.queryByRole('alert')).toBeNull()
+  })
+
+  it('unlocks the composer after open commits before the workspace feed catches up', async () => {
+    const opening = Promise.withResolvers<boolean>()
+    const selectWorkspace = vi.fn((_workspaceId: WorkspaceId) => opening.promise)
+    const b = mount(
+      sessionSnapshotOf({ blank: true }),
+      [
+        { ...workspace('one'), sessionIds: [SID] },
+        { ...workspace('second'), title: 'Selected Folder' },
+      ],
+      selectWorkspace,
+    )
+    fireEvent.click(b.view.getByRole('button', { name: '选择工作区' }))
+    const owner = b.pickerOwner() as { onPick(id: WorkspaceId): void }
+    act(() => { owner.onPick(wid('second')) })
+    expect(b.view.getByText('Selected Folder')).toBeTruthy()
+    expect(b.view.getByRole('textbox').getAttribute('contenteditable')).not.toBe('true')
+
+    await act(async () => {
+      opening.resolve(true)
+      await opening.promise
+    })
+    expect(b.view.getByRole('textbox').getAttribute('contenteditable')).toBe('true')
+    expect(b.view.getByText('Selected Folder')).toBeTruthy()
   })
 
   it('blank session keeps the interactive picker chip (workspace switchable until the first message)', () => {

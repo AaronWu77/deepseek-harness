@@ -104,6 +104,36 @@ describe('the default preset as a user setting', () => {
     }
   })
 
+  it('migrates a saved default from the renamed code preset', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-preset-ptc-'))
+    roots.push(root)
+    await mkdir(join(root, 'ptc'))
+    await writeFile(
+      join(root, 'ptc', COMPOSITION_FILE),
+      `- id: only\n  name: ${join(FIXTURES, 'plugins', 'contribute.js')}\n  config:\n    tool: ptc\n`,
+    )
+    const { ctx } = await harness([{ path: root, trust: 'user' as const }])
+
+    await ctx.settings.update(NS, { default: 'code' })
+
+    expect(ctx.agentPresets.defaultId).toBe('ptc')
+    expect((await ctx.agentPresets.remoteExportList()).presets)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ id: 'ptc', isDefault: true })]))
+
+    const handle = await ctx.agents.create({
+      sessionId: SessionId('settings-renamed-default'),
+      setup: async (agentCtx: Context) => void await ctx.agentPresets.mount(agentCtx),
+    })
+    try {
+      expect(toolNames(ctx, handle.agent)).toEqual(['ptc'])
+    } finally {
+      await handle.dispose()
+    }
+
+    await expect(ctx.agentPresets.resolve('code'))
+      .rejects.toThrow(/preset "code" not found/)
+  })
+
   it('leaves a running session on the preset it was composed from', async () => {
     const { ctx } = await harness()
     const running = await ctx.agents.create({
