@@ -267,7 +267,10 @@ body {
      正文对比不再被身后的会话内容干扰。 */
   --dsw-glass-fill-thick: rgba(255, 255, 255, 0.97);
   /* 品牌色玻璃：锚在画布上的用户气泡这类需要一点身份色的表面。 */
-  --dsw-glass-fill-accent: linear-gradient(135deg, rgba(180, 160, 255, 0.30), rgba(255, 160, 210, 0.24));
+  --dsw-glass-fill-accent: linear-gradient(135deg, rgba(170, 148, 255, 0.22), rgba(255, 150, 205, 0.17));
+  /* 底部回光：半透明面在浅背景上只靠顶部镜面会显得"只有上边是玻璃"，
+     补一条极淡的下缘反光，形状才立体。 */
+  --dsw-glass-rim-bottom: rgba(255, 255, 255, 0.26);
   /* 品牌渐变：主操作按钮的填充，也是界面上唯一使用饱和渐变的控件。 */
   --dsw-brand-gradient: linear-gradient(135deg, rgb(139, 107, 255) 0%, rgb(255, 111, 176) 52%, rgb(74, 155, 255) 100%);
   --dsw-glass-stroke: rgba(15, 17, 21, 0.07);
@@ -398,7 +401,8 @@ body[data-ds-dark-theme] {
   --dsw-glass-fill-raised: rgba(38, 39, 45, 0.68);
   --dsw-glass-fill-sunken: rgba(24, 25, 29, 0.36);
   --dsw-glass-fill-thick: rgba(38, 39, 45, 0.95);
-  --dsw-glass-fill-accent: linear-gradient(135deg, rgba(124, 92, 255, 0.28), rgba(255, 95, 168, 0.22));
+  --dsw-glass-fill-accent: linear-gradient(135deg, rgba(124, 92, 255, 0.30), rgba(255, 95, 168, 0.24));
+  --dsw-glass-rim-bottom: rgba(255, 255, 255, 0.14);
   --dsw-brand-gradient: linear-gradient(135deg, rgb(150, 122, 255) 0%, rgb(255, 122, 183) 52%, rgb(92, 168, 255) 100%);
   --dsw-glass-stroke: rgba(255, 255, 255, 0.09);
   --dsw-glass-highlight: rgba(255, 255, 255, 0.14);

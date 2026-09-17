@@ -26,11 +26,18 @@
      keeps narrow windows sane. */
   max-width: 100%;
   /* Brand-tinted glass rather than a flat fill, so the user's own turn reads as
-     the one surface on the canvas carrying identity colour. */
+     the one surface on the canvas carrying identity colour. The fill stays thin
+     enough that the ambient colour behind it shows through; what defines the
+     shape is the rim — a specular top edge and a faint bounce along the bottom —
+     because there is no high-frequency content behind a bubble for the blur to
+     smear. */
   background: var(--dsw-glass-fill-accent);
-  -webkit-backdrop-filter: var(--dsw-glass-blur-thin);
-  backdrop-filter: var(--dsw-glass-blur-thin);
-  box-shadow: var(--dsw-elevation-panel), inset 0 0.5px 0 var(--dsw-glass-highlight);
+  -webkit-backdrop-filter: var(--dsw-glass-blur);
+  backdrop-filter: var(--dsw-glass-blur);
+  box-shadow:
+    var(--dsw-elevation-panel),
+    inset 0 1px 0 var(--dsw-glass-highlight),
+    inset 0 -1px 0 var(--dsw-glass-rim-bottom);
   border-radius: 22px;
   /* 42px single-line bubble at the default size: 22 line + 10 vertical
      padding each side; the Settings font-size preference moves size and line
