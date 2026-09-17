@@ -257,25 +257,29 @@ body {
   /* 厚材质：大而密的内容面板（设置面板）用更高的不透明度——玻璃感仍在，但
      正文对比不再被身后的会话内容干扰。 */
   --dsw-glass-fill-thick: rgba(255, 255, 255, 0.97);
+  /* 品牌色玻璃：锚在画布上的用户气泡这类需要一点身份色的表面。 */
+  --dsw-glass-fill-accent: linear-gradient(135deg, rgba(180, 160, 255, 0.30), rgba(255, 160, 210, 0.24));
   --dsw-glass-stroke: rgba(15, 17, 21, 0.07);
   --dsw-glass-highlight: rgba(255, 255, 255, 0.85);
   /* 对话面薄纱：压在极光之上保证正文对比度，仍透出约四分之一的色。 */
-  --dsw-glass-scrim: rgba(255, 255, 255, 0.62);
+  --dsw-glass-scrim: rgba(255, 255, 255, 0.38);
   /* 极光：五个径向色团，由 shell 铺在列之下供玻璃面取色。尺寸都大于视口，
      相邻色团互相重叠，画布才不会落在几块色团之间的中性缝里；静态退化见
      --dsw-glass-canvas（打印与无脚本外壳）。 */
-  --dsw-aurora-1: radial-gradient(70vw 70vw at 12% 4%, rgba(179, 160, 255, 0.82), rgba(179, 160, 255, 0) 70%);
-  --dsw-aurora-2: radial-gradient(64vw 64vw at 92% 2%, rgba(255, 158, 208, 0.70), rgba(255, 158, 208, 0) 70%);
-  --dsw-aurora-3: radial-gradient(78vw 78vw at 42% 112%, rgba(147, 201, 255, 0.72), rgba(147, 201, 255, 0) 70%);
-  --dsw-aurora-4: radial-gradient(56vw 56vw at 88% 92%, rgba(201, 180, 255, 0.60), rgba(201, 180, 255, 0) 72%);
-  --dsw-aurora-5: radial-gradient(62vw 62vw at 46% 46%, rgba(186, 205, 255, 0.46), rgba(186, 205, 255, 0) 72%);
+  --dsw-aurora-1: radial-gradient(70vw 70vw at 12% 4%, rgba(179, 160, 255, 0.82) 0%, rgba(179, 160, 255, 0.34) 38%, rgba(179, 160, 255, 0.10) 56%, rgba(179, 160, 255, 0) 72%);
+  --dsw-aurora-2: radial-gradient(64vw 64vw at 92% 2%, rgba(255, 158, 208, 0.70) 0%, rgba(255, 158, 208, 0.29) 38%, rgba(255, 158, 208, 0.09) 56%, rgba(255, 158, 208, 0) 72%);
+  --dsw-aurora-3: radial-gradient(78vw 78vw at 42% 112%, rgba(147, 201, 255, 0.72) 0%, rgba(147, 201, 255, 0.30) 38%, rgba(147, 201, 255, 0.09) 56%, rgba(147, 201, 255, 0) 72%);
+  --dsw-aurora-4: radial-gradient(56vw 56vw at 88% 92%, rgba(201, 180, 255, 0.60) 0%, rgba(201, 180, 255, 0.25) 38%, rgba(201, 180, 255, 0.07) 56%, rgba(201, 180, 255, 0) 74%);
+  --dsw-aurora-5: radial-gradient(62vw 62vw at 46% 46%, rgba(186, 205, 255, 0.46) 0%, rgba(186, 205, 255, 0.19) 38%, rgba(186, 205, 255, 0.06) 56%, rgba(186, 205, 255, 0) 74%);
   --dsw-aurora-drift: 32s;
   /* 浮动玻璃窗：外框缝隙与圆角。缝隙让四周透出流动的极光，窗口本身只铺一层
      半透明渐变——它身后就是柔和色团，做 backdrop-filter 没有可见收益。 */
   --dsw-glass-frame-gap: clamp(10px, 1.4vw, 18px);
   --dsw-glass-frame-radius: clamp(16px, 1.8vw, 26px);
   --dsw-glass-window: linear-gradient(135deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.14) 46%, rgba(196, 208, 255, 0.20) 100%);
-  --dsw-glass-canvas: linear-gradient(180deg, rgb(247, 248, 251) 0%, rgb(242, 244, 248) 100%);
+  /* 底色自带一层紫→粉→蓝的走向：极光是流动的局部色，底色负责让整块画布即使
+     在色团之间也不会退回中性灰。 */
+  --dsw-glass-canvas: linear-gradient(158deg, rgb(247, 244, 255) 0%, rgb(253, 246, 251) 42%, rgb(241, 247, 255) 100%);
 
   background-color: var(--dsw-alias-bg-base);
 }
@@ -379,17 +383,18 @@ body[data-ds-dark-theme] {
   --dsw-glass-fill-raised: rgba(38, 39, 45, 0.68);
   --dsw-glass-fill-sunken: rgba(24, 25, 29, 0.36);
   --dsw-glass-fill-thick: rgba(38, 39, 45, 0.95);
+  --dsw-glass-fill-accent: linear-gradient(135deg, rgba(124, 92, 255, 0.28), rgba(255, 95, 168, 0.22));
   --dsw-glass-stroke: rgba(255, 255, 255, 0.09);
   --dsw-glass-highlight: rgba(255, 255, 255, 0.14);
-  --dsw-glass-scrim: rgba(16, 16, 21, 0.70);
-  --dsw-aurora-1: radial-gradient(70vw 70vw at 12% 4%, rgba(107, 69, 255, 0.46), rgba(107, 69, 255, 0) 70%);
-  --dsw-aurora-2: radial-gradient(64vw 64vw at 92% 2%, rgba(255, 61, 146, 0.36), rgba(255, 61, 146, 0) 70%);
-  --dsw-aurora-3: radial-gradient(78vw 78vw at 42% 112%, rgba(47, 107, 255, 0.42), rgba(47, 107, 255, 0) 70%);
-  --dsw-aurora-4: radial-gradient(56vw 56vw at 88% 92%, rgba(124, 77, 255, 0.34), rgba(124, 77, 255, 0) 72%);
-  --dsw-aurora-5: radial-gradient(62vw 62vw at 46% 46%, rgba(80, 120, 255, 0.24), rgba(80, 120, 255, 0) 72%);
+  --dsw-glass-scrim: rgba(16, 16, 21, 0.56);
+  --dsw-aurora-1: radial-gradient(70vw 70vw at 12% 4%, rgba(107, 69, 255, 0.46) 0%, rgba(107, 69, 255, 0.19) 38%, rgba(107, 69, 255, 0.06) 56%, rgba(107, 69, 255, 0) 72%);
+  --dsw-aurora-2: radial-gradient(64vw 64vw at 92% 2%, rgba(255, 61, 146, 0.36) 0%, rgba(255, 61, 146, 0.15) 38%, rgba(255, 61, 146, 0.05) 56%, rgba(255, 61, 146, 0) 72%);
+  --dsw-aurora-3: radial-gradient(78vw 78vw at 42% 112%, rgba(47, 107, 255, 0.42) 0%, rgba(47, 107, 255, 0.17) 38%, rgba(47, 107, 255, 0.05) 56%, rgba(47, 107, 255, 0) 72%);
+  --dsw-aurora-4: radial-gradient(56vw 56vw at 88% 92%, rgba(124, 77, 255, 0.34) 0%, rgba(124, 77, 255, 0.14) 38%, rgba(124, 77, 255, 0.04) 56%, rgba(124, 77, 255, 0) 74%);
+  --dsw-aurora-5: radial-gradient(62vw 62vw at 46% 46%, rgba(80, 120, 255, 0.24) 0%, rgba(80, 120, 255, 0.10) 38%, rgba(80, 120, 255, 0.03) 56%, rgba(80, 120, 255, 0) 74%);
   --dsw-aurora-drift: 32s;
   --dsw-glass-frame-gap: clamp(10px, 1.4vw, 18px);
   --dsw-glass-frame-radius: clamp(16px, 1.8vw, 26px);
   --dsw-glass-window: linear-gradient(135deg, rgba(38, 34, 58, 0.42) 0%, rgba(24, 22, 36, 0.30) 46%, rgba(28, 34, 62, 0.36) 100%);
-  --dsw-glass-canvas: linear-gradient(180deg, rgb(18, 18, 21) 0%, rgb(14, 14, 17) 100%);
+  --dsw-glass-canvas: linear-gradient(158deg, rgb(20, 18, 30) 0%, rgb(26, 20, 28) 42%, rgb(17, 22, 33) 100%);
 }

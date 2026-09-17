@@ -58,7 +58,6 @@
 .ambient > span {
   position: absolute;
   inset: 0;
-  will-change: transform;
 }
 
 /* 互质的时长倍数让四个色团永不同步，看不出循环。 */

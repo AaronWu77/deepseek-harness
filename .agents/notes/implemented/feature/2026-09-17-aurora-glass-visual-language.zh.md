@@ -14,7 +14,7 @@ Web 客户端的每个表面都刷不透明填充——框架与会话列取 `--
 
 [AppFrame](../../../../packages/client/ui-layout/src/client/AppFrame.tsx) 分成舞台与浮动窗口两部分。舞台铺画布，并以 `--dsw-glass-frame-gap` 作内边距；`.window` 才是真正的三栏网格，按该缝隙内缩，带 `--dsw-glass-frame-radius`、半透明的 `--dsw-glass-window` 渐变与 prominent 高度。窗口刻意不做 `backdrop-filter`——它直接坐在环境画布上，模糊没有可见的活可干，却会让窗口成为 `position: fixed` 后代的包含块。舞台绘制环境画布：五个绝对定位的 span 位于`inset: -18%`、铺在列之下，列本身抬到 `z-index: 1`。每个色团绘制一个极光 token，并以各自的基础周期倍数（1、1.21、1.47、0.89、1.63）漂移，因此它们永不同步，循环看不出接缝。动画只写 `transform`，色团因此留在合成器上；`prefers-reduced-motion` 会停止它们。色团尺寸大于视口，使相邻色团互相重叠；只覆盖一角的色团会让画布在其他色团够不到的地方退回中性色。
 
-每个表面只有一个归属。侧栏的玻璃面由 AppFrame 的列承载，因此 `SidebarRoot` 画 `transparent`，而不是再刷一层不透明填充把它盖住。会话列画 `--dsw-glass-scrim` 而非不透明底色，composer 座位的渐隐遮罩也淡出到同一张薄纱。composer 卡片取 `--dsw-glass-fill-raised` 加 `--dsw-glass-blur-strong`，并把它的 elevation 描边重新绑定为 `--dsw-glass-stroke`，让发丝线与玻璃边缘一致。浮层沿用同一套处理。[ui-primitives](../../../../packages/client/ui-primitives/src/Menu.module.css) 的共享菜单与对话框外壳，以及[停靠套件](../../../../packages/client/ui-dockkit/src/components/dockkit.module.css)的浮动面板与上下文菜单，取 `--dsw-glass-fill-raised` 加 `--dsw-glass-blur-strong`，并把 elevation 描边重绑为 `--dsw-glass-stroke`，因此在画布上展开的菜单与 composer 读起来是同一种材质。右侧面板铺与会话列相同的 `--dsw-glass-scrim`；设置面板取 `--dsw-glass-fill-thick`——这是第四档、不透明度更高，用于大到密到必须让填充自己承担可读性的表面，而壳层档把这部分交给了画布。
+每个表面只有一个归属。侧栏的玻璃面由 AppFrame 的列承载，因此 `SidebarRoot` 画 `transparent`，而不是再刷一层不透明填充把它盖住。会话列画 `--dsw-glass-scrim` 而非不透明底色，composer 座位的渐隐遮罩也淡出到同一张薄纱。composer 卡片取 `--dsw-glass-fill-raised` 加 `--dsw-glass-blur-strong`，并把它的 elevation 描边重新绑定为 `--dsw-glass-stroke`，让发丝线与玻璃边缘一致。浮层沿用同一套处理。[ui-primitives](../../../../packages/client/ui-primitives/src/Menu.module.css) 的共享菜单与对话框外壳，以及[停靠套件](../../../../packages/client/ui-dockkit/src/components/dockkit.module.css)的浮动面板与上下文菜单，取 `--dsw-glass-fill-raised` 加 `--dsw-glass-blur-strong`，并把 elevation 描边重绑为 `--dsw-glass-stroke`，因此在画布上展开的菜单与 composer 读起来是同一种材质。底色本身带紫→粉→蓝的走向，而不是中性色，因此色团之间的区域不会退回灰色；对话面薄纱停在 38% 白——足以撑住正文对比度，又不会把身下的环境色压平。`--dsw-glass-fill-accent` 用于用户自己的消息气泡，那是正文里唯一承载身份色的表面。右侧面板铺与会话列相同的 `--dsw-glass-scrim`；设置面板取 `--dsw-glass-fill-thick`——这是第四档、不透明度更高，用于大到密到必须让填充自己承担可读性的表面，而壳层档把这部分交给了画布。
 
 环境画布刻意不带 `filter: blur()`：带透明色标的径向渐变本身已经足够柔和，而为五个视口尺寸的图层加高斯只会白白生成五张巨大的离屏纹理。
 
@@ -43,6 +43,10 @@ Web 客户端的每个表面都刷不透明填充——框架与会话列取 `--
 浅色主题现在读起来是一块柔和彩色画布配半透明外壳；这门语言按表面经 token 逐处启用，保持不透明的表面不受影响。代价是五个常驻合成图层，加上每屏四到六个活跃的 `backdrop-filter` 表面；而极光之上的正文对比度依赖 `--dsw-glass-scrim`。深色模式在既有深色配色上沿用同一结构；本次改动只调整它的 token 取值。
 
 帧节奏在 0、4、12 层玻璃、模糊半径 20、44、150 px 的全部组合下都保持 60 fps（p95 16.8 ms、无卡顿帧），测试环境为 1680×1050 @2× DPR 的 RTX 4080 SUPER。单层显存数字仍只是估算而非实测：Windows 的 GPU 进程计数器分辨不出它，同一配置两次采样之间就相差多达 190 MB。
+
+## Deferred
+
+留一处观感问题：某些漂移相位下，正文列里能看见一道柔和的竖向色阶接缝，位置正是粉色色团渐变边缘扫过阅读区的地方。把该色团的背景改成纯色后接缝消失，说明它是那张大径向渐变图层的边缘伪影，而不是布局或裁剪故障；我软化过色标、也去掉了 `will-change: transform`，都没能消除它。
 
 ## Testing
 

@@ -25,7 +25,12 @@
      the bubble widens with a user-dragged or adaptive column; percentage
      keeps narrow windows sane. */
   max-width: 100%;
-  background: var(--dsw-specific-bubble);
+  /* Brand-tinted glass rather than a flat fill, so the user's own turn reads as
+     the one surface on the canvas carrying identity colour. */
+  background: var(--dsw-glass-fill-accent);
+  -webkit-backdrop-filter: var(--dsw-glass-blur-thin);
+  backdrop-filter: var(--dsw-glass-blur-thin);
+  box-shadow: var(--dsw-elevation-panel), inset 0 0.5px 0 var(--dsw-glass-highlight);
   border-radius: 22px;
   /* 42px single-line bubble at the default size: 22 line + 10 vertical
      padding each side; the Settings font-size preference moves size and line
