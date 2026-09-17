@@ -57,6 +57,28 @@ async function fixture() {
   return { root, cwd, ctx, fiber, file, session, readEvent, open, opener, handler, resolveAgent }
 }
 
+/**
+ * Point `source` at a target outside the workspace. A POSIX host and a Windows
+ * host with Developer Mode take a file symlink. An unprivileged Windows host
+ * cannot create one (EPERM), so it falls back to a directory junction, which
+ * needs no privilege and lands in the same classification: `lstat` reports
+ * `isSymbolicLink()` for a junction too, so the route still takes the branch
+ * under test instead of the file never being linked.
+ * @param target - File the link resolves to when symlinking is available.
+ * @param source - Path to replace with the link.
+ * @param fallbackDirectory - Directory the junction resolves to when it is not.
+ * @throws The original failure when it is anything but the missing privilege.
+ */
+async function linkOutside(target: string, source: string, fallbackDirectory: string): Promise<void> {
+  try {
+    await symlink(target, source)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error
+    await mkdir(fallbackDirectory, { recursive: true })
+    await symlink(fallbackDirectory, source, 'junction')
+  }
+}
+
 describe('Presented workspace file native open route', () => {
   it('opens the source itself with current bytes and leaves it intact at disposal', async () => {
     const { cwd, open, file, fiber, opener, handler, ctx } = await fixture()
@@ -134,7 +156,7 @@ describe('Presented workspace file native open route', () => {
     await writeFile(outside, 'outside')
     const source = join(cwd, file.path)
     await unlink(source)
-    await symlink(outside, source)
+    await linkOutside(outside, source, join(root, 'outside-directory'))
     expect((await open()).status).toBe(404)
     expect(opener).not.toHaveBeenCalled()
     for (const path of ['../outside.txt', outside]) {
