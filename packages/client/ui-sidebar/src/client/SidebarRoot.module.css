@@ -8,6 +8,11 @@
 
 .root {
   --dsh-sidebar-inline-padding: 12px;
+  /* Positioned so the column's glass layer paints under this content, and with
+     z-index left at auto so no stacking context forms: the settings dialog
+     mounted in the footer is position: fixed and must reach the shell's
+     stacking context, or the conversation column paints over it. */
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;

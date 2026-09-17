@@ -71,19 +71,24 @@
   min-width: 0;
   overflow: hidden;
   position: relative;
-  z-index: 1;
+  /* Deliberately no z-index: it would create a stacking context, and the
+     settings dialog is a position: fixed overlay mounted inside this column.
+     Confined there, its z-index: 1000 loses to the conversation column's, so
+     the dialog paints under the transcript and takes no pointer events. The
+     column is ordered against the ambient canvas by .window instead. */
 }
 
 /* 玻璃画在独立的背景层上，而不是列本身：backdrop-filter 会让元素成为
    position: fixed 后代的包含块，而侧栏里就挂着设置浮层这类全屏 fixed 界面
    —— 挂在列上，inset: 0 会解析成 288px 宽的侧栏，浮层被挤成一条。
-   z-index: -1 让它在列的层叠上下文内落到内容之下、环境画布之上。
+   列本身不建层叠上下文（见 .sidebarCol），所以这一层靠"先绘制"与 SidebarRoot
+   .root 的 position: relative 分前后，而不是靠负 z-index。
    前缀在前、标准属性在后：bundle 的 CSS 压缩会把这一对合并成一条，保留最后
    一条，顺序颠倒会让产物里只剩引擎不支持的 -webkit- 版本。 */
 .sidebarGlass {
   position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   pointer-events: none;
   background: var(--dsw-glass-fill);
   -webkit-backdrop-filter: var(--dsw-glass-blur);
@@ -92,8 +97,9 @@
 }
 
 .centerCol {
+  /* No z-index, for the reason .sidebarCol states: a column that opens a
+     stacking context confines every position: fixed overlay mounted inside it. */
   position: relative;
-  z-index: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -147,7 +153,6 @@
  */
 .rightbarCol {
   position: relative;
-  z-index: 1;
   min-width: 0;
   overflow: visible;
 }

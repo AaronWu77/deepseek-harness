@@ -28,6 +28,8 @@ Web 客户端的每个表面都刷不透明填充——框架与会话列取 `--
 
 生效的 `backdrop-filter` 会让所在元素成为 `position: fixed` 后代的包含块。侧栏列里挂着设置浮层，而它是 `position: fixed; inset: 0`，因此把玻璃直接画在列上会把该浮层解析到一条 288px 宽的列里，面板被压成列的宽度。于是该列改为把玻璃画在内容之下、专用的 `.sidebarGlass` 层上（`position: absolute; inset: 0; z-index: -1`），既保住模糊又不再吸附后代。出于同一原因，中列同样不承载 backdrop-filter。
 
+把玻璃移出列同时也撤掉了列的层叠上下文。壳层各列现在都不声明 `z-index`：带 `z-index` 的列会把它内部挂载的每一个 `position: fixed` 浮层关在里面——设置对话框挂在侧栏页脚、自己声明 `z-index: 1000`，却输给会话列自己的 `z-index`，被画到正文下面且收不到任何指针事件，于是设置根本点不动，那层半透明的正文覆盖还让它看起来像"面板本身是透明的"；`.window` 是壳层为环境画布定序所需的唯一层叠上下文，侧栏玻璃层改为靠绘制顺序落在内容之下而不是负 `z-index`，并由一条 [AppFrame 样式表 spec](../../../../packages/client/ui-layout/tests/app-frame-styles.client.spec.ts) 守住这条规则——jsdom 渲染没有布局也没有绘制，看不见这类问题。
+
 ## Alternatives considered
 
 **在单个渐变图层上动画 `background-position`。** 那会每帧在主线程重绘整块画布。一个合成器上的 transform 图层只要一次变换。
