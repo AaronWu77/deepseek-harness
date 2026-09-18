@@ -22,4 +22,4 @@ Source `dsh` launches run through `tsx/esm`, whose `paths` projection can load a
 
 ## Consequences
 
-Source and profile package entry points can share this scheduler capability without requiring one module instance. Other runtime exports that rely on object or class identity remain subject to the existing source/artifact launch rules; this decision covers only the symbol-keyed scheduler. The tools test asserts the key is the global registry value, and the Web smoke verifies a real PTC tool call completes instead of failing at `prepare`.
+Source and profile package entry points can share this scheduler capability without requiring one module instance. Other runtime exports that rely on object or class identity remain subject to the existing source/artifact launch rules; this decision covers only the symbol-keyed scheduler. The tools unit test pins the global registry key, and the dual-resolution Web smoke executes a nested PTC binding so the scheduler lookup completes instead of failing at `prepare`.

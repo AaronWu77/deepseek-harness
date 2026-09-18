@@ -15,7 +15,7 @@ import { canonicalPath, writableRoots } from '@deepseek-ai/dsh-sandbox'
 import { SESSION_FORMAT_VERSION, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { auditStartupEntries, composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 // These imports carry the tools/sandboxPolicy/approval Context merges.
-import { RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
+import { defineTool, RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-permission-presets'
@@ -649,13 +649,45 @@ it('ships PTC with run_code but without the general workflow SDK binding under d
     sessionId: SessionId('shipped-ptc-composition'),
     setup: agentCtx => ctx.agentPresets.mount(agentCtx, 'ptc').then(() => undefined),
   })
+  const probeCalls: string[] = []
+  const disposeProbe = ctx.tools.register(defineTool({
+    name: 'dual_resolution_probe',
+    description: 'Returns a deterministic probe value.',
+    parameters: { value: { type: 'string', required: true } },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    async execute(args) {
+      probeCalls.push(args.value)
+      return args.value
+    },
+  }))
   try {
     const assembly = await ctx.systemPrompt.assemble({ scope: handle.agent })
     expect(assembly.tools.map(tool => tool.name)).toEqual([RUN_CODE_NAME])
     const sdk = assembly.sections.find(section => section.name === 'tools:sdk')?.text ?? ''
     expect(sdk).not.toContain('  ralph: {')
     expect(sdk).not.toContain('  workflow: {')
+    // Execute a nested binding so the PTC bridge reads the scheduler key; schema
+    // assembly alone does not touch that path.
+    const result = await ctx.tools.execute({
+      signal: new AbortController().signal,
+      callId: ToolCallId('shipped-ptc-dual-resolution'),
+      name: RUN_CODE_NAME,
+      arguments: {
+        code: "return await tools.dual_resolution_probe({ value: 'SHIPPED_PTC_DUAL_RESOLUTION_OK' })",
+        description: 'Run the dual-resolution scheduler probe',
+      },
+      agent: handle.agent,
+    })
+    expect(result).toMatchObject({
+      isError: false,
+      value: { result: 'SHIPPED_PTC_DUAL_RESOLUTION_OK' },
+    })
+    expect(probeCalls).toEqual(['SHIPPED_PTC_DUAL_RESOLUTION_OK'])
   } finally {
+    disposeProbe()
     await handle.dispose()
   }
 }, 120_000)

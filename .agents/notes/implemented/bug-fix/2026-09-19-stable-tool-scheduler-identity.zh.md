@@ -22,4 +22,4 @@ Status: implemented
 
 ## 后果
 
-源码入口与 profile package 入口可以共享该调度能力，而不要求进程中只有一个模块实例。其他依赖对象或 class 身份的运行时导出仍受现有源码／产物启动规则约束；本决策只覆盖这个 symbol-keyed scheduler。tools 测试断言该键等于 global registry 的值，Web smoke 则验证真实 PTC 工具调用能够完成，而不是在 `prepare` 处失败。
+源码入口与 profile package 入口可以共享该调度能力，而不要求进程中只有一个模块实例。其他依赖对象或 class 身份的运行时导出仍受现有源码／产物启动规则约束；本决策只覆盖这个 symbol-keyed scheduler。tools 单元测试固定 global registry key，dual-resolution Web smoke 则执行一次嵌套 PTC binding，使 scheduler lookup 能完成而不会在 `prepare` 处失败。

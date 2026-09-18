@@ -38,7 +38,7 @@ const echoTool = defineTool({
 })
 
 describe('ToolRuntime', () => {
-  it('uses a stable scheduler key across package entry points', () => {
+  it('uses the global registry key for the scheduler', () => {
     expect(TOOL_RUNTIME_SCHEDULER).toBe(Symbol.for('@deepseek-ai/dsh-tools.scheduler'))
   })
 
