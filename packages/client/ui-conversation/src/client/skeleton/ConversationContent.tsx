@@ -1,124 +1,35 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
-import type { SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
-import type { ConversationSlotProps, InputZone } from '../contract/slots.ts'
+import type { ConversationContentProps, ConversationViewsProps, InputZone } from '../contract/slots.ts'
 import { HeroShell, WorkspaceChip, workspaceLabel } from './EmptyHero.tsx'
 import css from './ConversationRoot.module.css'
 
-type ConversationContentProps = Omit<ConversationSlotProps, 'useSession' | 'useConversation'> & {
-  session: SessionSnapshot | undefined
-  phase: 'settling' | 'hero' | 'active'
-  hero: boolean
-  onHandleStart: () => number
-  onHandleDrag: (width: number) => void
-  onHandleCommit: (width: number) => void
-  onHandleEnd: () => void
+function ConversationSessionView({ renderSlot }: ConversationViewsProps) {
+  return renderSlot('conversation.session', {})
 }
 
-type WorkspaceSelectionState = {
-  workspaceId: WorkspaceId
-  phase: 'pending' | 'opened' | 'failed'
-}
-
-/** One transcript width handle: pointer capture + rAF-throttled symmetric
- * resize (both sides write the one centered width, so outward travel widens
- * by 2× the pointer distance). pointermove publishes the pointer's Y as a CSS
- * variable so the glow indicator rides it. Mirrors ui-layout AppFrame's
- * DragHandle capture model. */
-function WidthHandle(props: {
-  side: 'left' | 'right'
-  onStart: () => number
-  onDrag: (width: number) => void
-  onCommit: (width: number) => void
-  onEnd: () => void
-}) {
-  const [dragging, setDragging] = useState(false)
-  const base = useRef(0)
-  const origin = useRef(0)
-  const latest = useRef(0)
-  const frame = useRef<number | null>(null)
-  const callbacks = useRef(props)
-  callbacks.current = props
-
-  const outwardWidth = () => {
-    const dx = latest.current - origin.current
-    const outward = callbacks.current.side === 'right' ? dx : -dx
-    return base.current + outward * 2
-  }
-  const cancelFrame = () => {
-    if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null }
-  }
-  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.currentTarget.setPointerCapture(e.pointerId)
-    origin.current = e.clientX
-    latest.current = e.clientX
-    base.current = callbacks.current.onStart()
-    setDragging(true)
-  }, [])
-  const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const box = e.currentTarget.getBoundingClientRect()
-    e.currentTarget.style.setProperty('--dsh-width-handle-pointer-y', `${e.clientY - box.top}px`)
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
-    latest.current = e.clientX
-    frame.current ??= requestAnimationFrame(() => {
-      frame.current = null
-      callbacks.current.onDrag(outwardWidth())
-    })
-  }, [])
-  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
-    e.currentTarget.releasePointerCapture(e.pointerId)
-    cancelFrame()
-    latest.current = e.clientX
-    // Only a gesture with actual travel commits: a press-and-release on a
-    // window-clamped width must not overwrite the wider stored preference
-    // with the clamped display value.
-    if (latest.current !== origin.current) callbacks.current.onCommit(outwardWidth())
-    setDragging(false)
-    callbacks.current.onEnd()
-  }, [])
-  // Releasing the button outside the window delivers pointercancel (or drops
-  // the capture silently) instead of pointerup; without this the glow's
-  // data-dragging state sticks on. The gesture is abandoned uncommitted —
-  // onEnd republishes the stored preference. releasePointerCapture inside
-  // onPointerUp also fires lostpointercapture, so this runs (idempotently)
-  // after every normal drag end too; keep both paths.
-  const onPointerCancel = useCallback(() => {
-    cancelFrame()
-    setDragging(false)
-    callbacks.current.onEnd()
-  }, [])
-
-  return (
-    <div
-      className={css.widthHandle}
-      data-side={props.side}
-      data-width-handle={props.side}
-      data-dragging={dragging || undefined}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
-      onLostPointerCapture={onPointerCancel}
-    />
-  )
+function NoConversationWidthControls() {
+  return null
 }
 
 /**
- * Render the existing Conversation body, Composer, and width handles.
- * @param props - original Conversation seats plus MainPanel-derived phase and width callbacks.
- * @returns the unchanged Conversation body subtree.
+ * Render the shared Conversation body and its occurrence-selected local Components.
+ * @param props - Factory input, standard Session sources, and Conversation seats.
+ * @returns the Conversation view, Composer, and optional width controls.
  */
-export function ConversationContent({
-  sessionId, session, phase, hero, useSessions, useSessionPendingInteraction,
-  useWorkspaces, useInput, useComposerBlock, renderSlot, renderSlotChain,
-  selectWorkspace, t, onHandleStart, onHandleDrag, onHandleCommit, onHandleEnd,
-}: ConversationContentProps) {
-  const pendingInteraction = useSessionPendingInteraction(snapshot =>
-    sessionId === undefined ? undefined : snapshot.get(sessionId))
+export function ConversationContent(props: ConversationContentProps) {
+  const {
+    sessionId, phase, hero, useSession, useSessions, useSessionStatus,
+    useWorkspaces, useInput, useComposerBlock, renderSlot, renderSlotChain,
+    selectWorkspace, t, useFactorySlot,
+  } = props
+  const session = useSession(snapshot => snapshot)
+  const Views = useFactorySlot('views', ConversationSessionView)
+  const WidthControls = useFactorySlot('widthControls', NoConversationWidthControls)
+  const [body, setBody] = useState<HTMLDivElement | null>(null)
+  const pendingInteraction = useSessionStatus(snapshot =>
+    sessionId === undefined ? undefined : snapshot.get(sessionId)?.pendingInteraction)
   const inputState = useInput(s => s)
   const cwd = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId]?.cwd)
   const workspaces = useWorkspaces(s => s)
@@ -127,8 +38,7 @@ export function ConversationContent({
   const composerBlock = useComposerBlock(block => block)
 
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelectionState>()
-  const workspaceSelectionRequest = useRef(0)
+  const [pendingWorkspaceId, setPendingWorkspaceId] = useState<WorkspaceId | undefined>()
   const pickerAnchor = useRef<HTMLButtonElement>(null)
 
   // Publishes the two live measurements floating View chrome reads off the
@@ -158,7 +68,6 @@ export function ConversationContent({
   const sessionWorkspace = sessionId === undefined
     ? undefined
     : workspaces.items.find(workspace => workspace.sessionIds.includes(sessionId))
-  const pendingWorkspaceId = workspaceSelection?.workspaceId
   const pendingWorkspace = workspaces.items.find(
     workspace => workspace.workspaceId === pendingWorkspaceId,
   )
@@ -169,34 +78,9 @@ export function ConversationContent({
     if (pendingWorkspaceId === undefined) return
     if (sessionWorkspace?.workspaceId === pendingWorkspaceId
       || (workspaces.phase === 'ready' && pendingWorkspace === undefined)) {
-      setWorkspaceSelection(undefined)
+      setPendingWorkspaceId(undefined)
     }
   }, [pendingWorkspaceId, sessionWorkspace?.workspaceId, workspaces.phase, pendingWorkspace])
-
-  const beginWorkspaceSelection = useCallback((workspaceId: WorkspaceId): void => {
-    const request = workspaceSelectionRequest.current + 1
-    workspaceSelectionRequest.current = request
-    setPickerOpen(false)
-    setWorkspaceSelection({ workspaceId, phase: 'pending' })
-    void selectWorkspace(workspaceId).then(
-      (opened) => {
-        if (workspaceSelectionRequest.current !== request) return
-        setWorkspaceSelection((current) => {
-          if (current?.workspaceId !== workspaceId) return current
-          return opened ? { ...current, phase: 'opened' } : undefined
-        })
-      },
-      (reason: unknown) => {
-        if (workspaceSelectionRequest.current !== request) return
-        console.warn('workspace selection failed:', reason)
-        setWorkspaceSelection(current => current?.workspaceId === workspaceId
-          ? { workspaceId, phase: 'failed' }
-          : current)
-      },
-    )
-  }, [selectWorkspace])
-
-  useEffect(() => () => { workspaceSelectionRequest.current += 1 }, [])
 
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
@@ -230,7 +114,13 @@ export function ConversationContent({
         open: pickerOpen,
         anchorRef: pickerAnchor,
         selectedId: pendingWorkspaceId ?? sessionWorkspace?.workspaceId,
-        onPick: beginWorkspaceSelection,
+        onPick: (workspaceId) => {
+          setPickerOpen(false)
+          setPendingWorkspaceId(workspaceId)
+          void selectWorkspace(workspaceId).catch(() => {
+            setPendingWorkspaceId(current => current === workspaceId ? undefined : current)
+          })
+        },
         onClose: () => { setPickerOpen(false) },
       })}
       {renderSlot('conversation.hero.agentPreset', {})}
@@ -242,36 +132,13 @@ export function ConversationContent({
   // blank session whose workspace vanished (deleted from the sidebar). The
   // bar is ONE session-maybe slot rendered unconditionally — inert is a prop,
   // not a different tree, so the textarea DOM survives the transition.
-  const workspaceSelectionActive = workspaceSelection?.phase === 'pending'
-    || workspaceSelection?.phase === 'failed'
-  const inert = sessionId === undefined || workspaceSelectionActive || (hero && chipTitle === undefined)
+  const inert = sessionId === undefined || (hero && chipTitle === undefined)
   // A raised block is the same inert posture with the blocker's own reason:
   // one disabled textarea, never a second tree. The no-workspace state wins
   // when both hold — picking a workspace is the earlier prerequisite.
   const blocked = !inert && composerBlock !== undefined
-  const failedWorkspaceId = workspaceSelection?.phase === 'failed'
-    ? workspaceSelection.workspaceId
-    : undefined
-  const workspaceErrorAccessory = failedWorkspaceId === undefined ? undefined : (
-    <div className={css.workspaceSelectionError} role="alert">
-      <span className={css.workspaceSelectionErrorText}>{t('workspace.selectionFailed')}</span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className={css.workspaceSelectionRetry}
-        onClick={(event) => {
-          event.stopPropagation()
-          beginWorkspaceSelection(failedWorkspaceId)
-        }}
-      >
-        {t('workspace.retrySelection')}
-      </Button>
-    </div>
-  )
   const inputBar = renderSlot('conversation.composer.bar', {
     variant: hero ? 'hero' : 'composer',
-    ...(workspaceErrorAccessory === undefined ? {} : { accessory: workspaceErrorAccessory }),
     ...(inert
       ? {
         disabled: true,
@@ -313,23 +180,17 @@ export function ConversationContent({
   )
 
   return (
-    <div className={css.body}>
+    <div
+      ref={setBody}
+      className={clsx(css.body, props.variant === 'embedded' && css.embeddedBody)}
+      data-conversation-content=""
+      data-content-phase={phase}
+    >
       <div className={css.scrollBody} data-conversation-scroll="">
-        {sessionId === undefined ? null : renderSlot('conversation.session', {})}
+        {sessionId === undefined ? null : <Views />}
         {composerSeat}
       </div>
-      {/* Width handles only while a transcript is on screen; the hero has no
-          content column to size. */}
-      {phase === 'active' && (['left', 'right'] as const).map(side => (
-        <WidthHandle
-          key={side}
-          side={side}
-          onStart={onHandleStart}
-          onDrag={onHandleDrag}
-          onCommit={onHandleCommit}
-          onEnd={onHandleEnd}
-        />
-      ))}
+      <WidthControls container={body} phase={phase} />
     </div>
   )
 }
