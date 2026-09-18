@@ -1,4 +1,4 @@
-# Agent Note: 导航竞争期间工作区选择保持可恢复
+# Agent Note: Workspace 选择在导航竞态下仍可恢复
 
 Status: implemented
 
@@ -6,20 +6,20 @@ Status: implemented
 
 ## Problem
 
-Conversation 把失败或被替代的工作区选择当成普通完成处理。失败时它清除唯一可见的目标标签，让冷启动 composer 在没有恢复操作的情况下保持锁定；同时启动阶段的自动选区可能在手动选择开始后才提交结果。
+会话界面把被拒绝或被后续导航取代的 Workspace 选择当作普通完成处理：失败时它会清掉界面上唯一可见的目标标签，而启动时的自动选区也可能在用户已开始手动选择之后才提交。
 
 ## Decision
 
-`uiWorkspace.openWorkspace` 仅在提交会话打开后解析为 `true`，在导航替代请求时解析为 `false`。启动阶段的自动选区使用布局导航信号，因此手动导航会使其晚到结果失效。ConversationContent 在会话与工作区投影同步期间保持所选工作区标签；选择进行中或失败时保持输入不可用，失败后显示本地化重试操作，打开提交后立即启用输入。请求身份会忽略过期的异步完成结果。
+`uiWorkspace.openWorkspace` 只在自己的导航信号仍然有效时提交。`replaceMain` 会在可选的同步准备回调之后重新检查该信号，并在请求被取代时释放已保留的引用，因此被取代的调用仍可能创建 Session，但绝不会选中它，也不会搬移草稿。启动时的自动选区走同一个方法，因而共享同一套布局导航信号，晚到的结果无法覆盖手动选择。[ConversationContent](../../../../packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx) 把选中的 Workspace 作为 pending 状态持有，并在选择回调 reject 时回滚，先前选中的标签因此保持可见。界面不提供单独的重试控件：选择器仍在，用户重新选一次即可。
 
 ## Alternatives considered
 
-**每次失败都清除待选标签**会隐藏目标，让冷启动用户没有恢复路径，因此失败选择保持可见并提供明确的重试。**等待工作区成员列表后才启用输入**会在列表投影滞后时让成功打开的 composer 继续锁定，因此以打开提交作为启用事件。**让启动自动选区保持不可取消**会使晚到的自动结果覆盖手动选择，因此两个流程共享布局取消信号。
+**任何失败都清掉 pending 标签**会在选择仍在落定期间隐藏目标。**不取消启动时的自动选区**会让晚到的自动结果覆盖手动选择，因此两条路径共享布局的取消信号。
 
 ## Consequences
 
-工作区选择失败会可见且可重试，不需要重新构建页面。`openWorkspace` 和注入的 `selectWorkspace` 回调消费者可以区分会话已打开与请求已被替代。被替代的请求仍可能留下已创建的会话，但不能搬移草稿或选中晚到的结果。
+被拒绝的选择会保留先前选中的标签；被取代的请求会留下它创建的 Session 但不选中它。选择回调与 `openWorkspace` 都是 `Promise<void>`：调用方通过 rejection 而非返回值观察失败。
 
 ## Verification
 
-Conversation 测试覆盖进行中状态、工作区成员列表刷新前的成功、失败可见性和重试。工作区服务测试覆盖布尔结果，以及手动导航取消启动自动选区。
+会话测试覆盖 pending 状态、Workspace 成员刷新之前就成功、以及 reject 时的回滚。Workspace 服务测试覆盖提交规则，以及手动导航对启动自动选区的取消。

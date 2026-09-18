@@ -35,36 +35,27 @@
   transition: none;
 }
 
-/* The Windows caption row remains outside every conversation and file panel. */
+/* The Windows caption row sits above every column. The stage reserves its
+   height on top of the frame gap and the drag strip spans that band. The band
+   paints no fill — the ambient canvas shows through it — and the window
+   already owns the content radius, so the inset and the drag region are the
+   only things this sheet owes the platform. */
 :global([data-windows-titlebar]) .frame {
   --dsh-windows-content-radius: 16px;
   box-sizing: border-box;
-  padding-top: var(--dsh-windows-titlebar-height);
-  grid-template-rows: minmax(0, 1fr);
-  background: var(--dsw-specific-sidebar-fill);
-}
-
-:global([data-windows-titlebar]) .centerCol {
-  background: var(--dsw-alias-bg-base);
-  border-radius: var(--dsh-windows-content-radius) 0 0 0;
-  corner-shape: round;
+  padding-top: calc(var(--dsw-glass-frame-gap) + var(--dsh-windows-titlebar-height));
 }
 
 :global([data-windows-titlebar]) .frame::before {
   content: '';
   position: absolute;
   inset: 0 0 auto;
-  height: var(--dsh-windows-titlebar-height);
-  background: var(--dsw-specific-sidebar-fill);
+  height: calc(var(--dsw-glass-frame-gap) + var(--dsh-windows-titlebar-height));
   -webkit-app-region: drag;
 }
 
-:global([data-windows-titlebar]) .sidebarCol {
+:global([data-windows-titlebar]) .sidebarGlass {
   border-right: none;
-}
-
-:global([data-windows-titlebar]) .handle {
-  top: var(--dsh-windows-titlebar-height);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -138,30 +129,12 @@
   overflow: hidden;
 }
 
-/* macOS desktop: the frame goes transparent so window vibrancy reaches the
-   sidebar column, which keeps only a translucent tint; the centre paints the
-   base background itself to stay opaque. The sidebar/centre separator moves
-   to the opaque centre: on the translucent sidebar the alpha border mixes
-   with the wallpaper and reads as a dark seam. */
-:global([data-platform='darwin']) .frame {
-  background: transparent;
-}
-
-:global([data-platform='darwin']) .sidebarCol {
-  background: color-mix(in srgb, var(--dsw-specific-sidebar-fill) 60%, transparent);
-  border-right: none;
-}
-
-:global([data-platform='darwin']) .centerCol {
-  background: var(--dsw-alias-bg-base);
-  border-left: 0.5px solid var(--dsw-alias-border-l3);
-}
-
-/* The darwin closed sidebar has no rail: the centre reaches the window edge,
-   where a separator would draw a seam against nothing. */
-:global([data-platform='darwin']) [data-sidebar-collapsed] .centerCol {
-  border-left: none;
-}
+/* macOS desktop previously made the frame transparent so the native window
+   vibrancy reached the sidebar, and repainted the centre opaque to keep it
+   readable. The ambient canvas is this shell's own material on every platform,
+   so those surface rules are retired: the sidebar's glass layer and the centre
+   column's scrim already separate the columns. Reinstating native vibrancy
+   means deciding what the canvas yields to it. */
 
 /* Drag handles are frame children (columns clip overflow): an 8px hit strip
    centered on the column border via inline left, above column content. No
