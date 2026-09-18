@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-17-aurora-glass-visual-language.md
-2026-09-17-aurora-glass-visual-language.md: b2d40f154c9e8f9ba0cfb2840a01d0e8cb9598c6
-2026-09-17-aurora-glass-visual-language.zh.md: e283ccb55254a894fb0fe7e8127e41d0926652bd
+2026-09-17-aurora-glass-visual-language.md: f4b5d8a1aa1d7ad05bc74f3cfb6bfb68fb0509dc
+2026-09-17-aurora-glass-visual-language.zh.md: 30dc097dcf6536e6e945017e82c248e8dbfa429f

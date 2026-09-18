@@ -28,12 +28,14 @@
   /* Brand-tinted glass rather than a flat fill, so the user's own turn reads as
      the one surface on the canvas carrying identity colour. The fill stays thin
      enough that the ambient colour behind it shows through; what defines the
-     shape is the rim — a specular top edge and a faint bounce along the bottom —
-     because there is no high-frequency content behind a bubble for the blur to
-     smear. */
+     shape is the rim — a specular top edge and a faint bounce along the bottom.
+     Deliberately no backdrop-filter: a bubble sits in normal flow, so the only
+     thing behind it is the conversation scrim over a smooth aurora — a blur of
+     that has nothing to smear, while each message would still cost its own
+     composited layer and backdrop texture. A session runs to dozens of bubbles,
+     and re-rasterizing them all on every scroll and hover is the performance
+     and flicker this trades away. */
   background: var(--dsw-glass-fill-accent);
-  -webkit-backdrop-filter: var(--dsw-glass-blur);
-  backdrop-filter: var(--dsw-glass-blur);
   box-shadow:
     var(--dsw-elevation-panel),
     inset 0 1px 0 var(--dsw-glass-highlight),
