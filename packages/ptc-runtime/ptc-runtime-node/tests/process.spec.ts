@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { copyFile, mkdtemp, rm } from 'node:fs/promises'
+import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -11,6 +11,8 @@ import { decodePtcJsonWire, encodePtcJsonWire } from '../src/json-wire.ts'
 it('boots an unbuilt source closure outside the workspace and exchanges tool replies', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-node-source-'))
   onTestFinished(async () => { await rm(directory, { recursive: true, force: true }) })
+  // Keep a host user's parent package.json from changing the copied .ts module type.
+  await writeFile(join(directory, 'package.json'), '{"type":"module"}\n')
   for (const file of ['process.ts', 'bootstrap.ts', 'channel.ts', 'json-wire.ts', 'output-json.ts', 'protocol.ts', 'environment.ts']) {
     await copyFile(new URL(`../src/${file}`, import.meta.url), join(directory, file))
   }
