@@ -254,6 +254,7 @@ const SDK_INSTRUCTIONS = `## Writing code for run_code
 const SDK_PROGRAM_INSTRUCTIONS = `Inside the program:
 
 - Call tools as \`await tools.name(args)\` — quoted access for exotic names: \`tools["my-tool"](args)\`. Every call resolves to the tool's typed canonical JSON value. Tool arguments must be lossless JSON.
+- Keep the program valid TypeScript. Markdown, JSON, YAML, HTML, and other file contents are data, not source: quote or JSON-serialize them before placing them in an object or tool argument; never paste raw file text after \`:\` (\`#\` is not a TypeScript comment). Prefer a declared file-reading binding when one is available.
 - A FAILED tool call rejects with \`ToolCallError\`, whose \`toolName\` identifies the failed tool and whose \`message\` is human-readable — \`try/catch\` it to handle and continue.
 - Independent read-only calls MAY overlap under \`Promise.all\` (safe calls run concurrently; mutating calls run alone, in submission order). Sequence dependent work with \`await\`.
 - Emit results with \`return\` and/or \`console.log(...)\`. Only what you print or return is program output. A successful tool result containing an image is attached after the run so you can inspect it on the next step; every other intermediate result stays out of the conversation, so extract just what you need.

@@ -1460,6 +1460,20 @@ describe('the run_code dispatch bridge', () => {
     expect(text).toContain('got this far')
   })
 
+  it('adds source-serialization guidance to parser failures', async () => {
+    const { ctx, runtime } = await setup({ mode: 'ptc' })
+    runtime.behavior = () => Promise.resolve({
+      logs: [],
+      error: { kind: 'exception', message: "Expected ',', got 'ident'" },
+    })
+
+    const result = await runCode(ctx, 'program')
+
+    expect(result.isError).toBe(true)
+    expect((result.content[0] as { text: string }).text).toContain('failed to parse before execution')
+    expect((result.content[0] as { text: string }).text).toContain('quote or JSON-serialize Markdown')
+  })
+
   it('CodeRunFailedError is a HarnessError with the CODE_RUN_FAILED code', () => {
     const error = new CodeRunFailedError('boom')
     expect(error.code).toBe('CODE_RUN_FAILED')

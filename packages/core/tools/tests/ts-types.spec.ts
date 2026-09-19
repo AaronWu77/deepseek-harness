@@ -150,6 +150,8 @@ describe('renderToolsSdk', () => {
     expect(text).toContain('rejects with `ToolCallError`')
     expect(text).toContain('MAY overlap under `Promise.all`')
     expect(text).toContain('lossless JSON')
+    expect(text).toContain('Markdown, JSON, YAML, HTML, and other file contents are data, not source')
+    expect(text).toContain('`#` is not a TypeScript comment')
   })
 
   it('names both required call arguments, not just the program', () => {
