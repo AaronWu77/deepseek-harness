@@ -2223,6 +2223,8 @@ describe('per-program execution controls', () => {
       expect(JSON.stringify(schema.parameters)).toContain('Default 120000; capped at 600000')
       expect(JSON.stringify(schema.parameters)).toContain('sandbox_permissions')
       expect(schema.description).toContain('Nested tools retain their own policies')
+      expect(schema.description).toContain('Ordinary programs and read-only operations must omit both `sandbox_permissions` and `justification`')
+      expect(JSON.stringify(schema.parameters)).toContain('only after an explicit sandbox denial')
       expect(schema.description).toContain('Programs start with an empty environment.')
       expect(schema.description).toContain("The working directory is the Session's current directory.")
     } finally { await ctx.fiber.dispose() }

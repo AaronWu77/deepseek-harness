@@ -532,7 +532,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
     },
     "sandbox_permissions": {
       "type": "string",
-      "description": "Wider sandbox mode for this complete program execution; requires justification and approval.",
+      "description": "Wider sandbox mode for this complete program execution; provide it only after an explicit sandbox denial, request the narrowest mode strictly wider than the current mode, and omit both fields when the current mode is danger-full-access.",
       "enum": [
         "workspace-write",
         "danger-full-access"

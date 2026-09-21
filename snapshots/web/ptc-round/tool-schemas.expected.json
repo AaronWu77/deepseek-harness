@@ -2,7 +2,7 @@
   "initial": [
     {
       "name": "run_code",
-      "description": "Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Only what you print or return is program output — curate it. Image-bearing subtool results are attached after the run. Each call runs in a fresh Node process. Node APIs are available through await import(...). Relative paths use the supplied working directory; process.env starts empty. Direct filesystem access follows this execution's sandbox policy. The working directory is the Session's current directory. A sandbox escalation approves this complete program for one execution only. Nested tools retain their own policies and approvals. Request wider access only after evidence of a denial. Earlier effects may already have completed: inspect them before explicitly retrying. Programs are never replayed automatically.",
+      "description": "Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Only what you print or return is program output — curate it. Image-bearing subtool results are attached after the run. Each call runs in a fresh Node process. Node APIs are available through await import(...). Relative paths use the supplied working directory; process.env starts empty. Direct filesystem access follows this execution's sandbox policy. The working directory is the Session's current directory. A sandbox escalation approves this complete program for one execution only. Ordinary programs and read-only operations must omit both `sandbox_permissions` and `justification`. Set both only after an explicit sandbox denial, using the narrowest mode strictly wider than the current policy. If the current policy is `danger-full-access`, omit both fields: `workspace-write` is narrower, not an escalation. Nested tools retain their own policies and approvals. Earlier effects may already have completed: inspect them before explicitly retrying. Programs are never replayed automatically.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -20,7 +20,7 @@
           },
           "sandbox_permissions": {
             "type": "string",
-            "description": "Wider sandbox mode for this complete program execution; requires justification and approval.",
+            "description": "Wider sandbox mode for this complete program execution; provide it only after an explicit sandbox denial, request the narrowest mode strictly wider than the current mode, and omit both fields when the current mode is danger-full-access.",
             "enum": [
               "workspace-write",
               "danger-full-access"

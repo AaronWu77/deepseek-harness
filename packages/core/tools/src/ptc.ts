@@ -100,7 +100,7 @@ const RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION
 
 const RUN_CODE_CONTROLS = {
   timeoutMs: { type: 'number', description: 'Positive elapsed-time budget in milliseconds, capped by the deployment maximum.' },
-  sandbox_permissions: { type: 'string', enum: [...ESCALATION_TARGETS], description: 'Wider sandbox mode for this complete program execution; requires justification and approval.' },
+  sandbox_permissions: { type: 'string', enum: [...ESCALATION_TARGETS], description: 'Wider sandbox mode for this complete program execution; provide it only after an explicit sandbox denial, request the narrowest mode strictly wider than the current mode, and omit both fields when the current mode is danger-full-access.' },
   justification: { type: 'string', description: 'Reason this complete program needs wider access, shown to the user for approval.' },
 } as const
 
@@ -138,7 +138,7 @@ function controlParameters(runtime: PtcRuntime | undefined) {
 
 function escalationGuidance(runtime: PtcRuntime | undefined): string {
   return runtime?.sandboxMode === undefined ? ''
-    : ' A sandbox escalation approves this complete program for one execution only. Nested tools retain their own policies and approvals. Request wider access only after evidence of a denial. Earlier effects may already have completed: inspect them before explicitly retrying. Programs are never replayed automatically.'
+    : ' A sandbox escalation approves this complete program for one execution only. Ordinary programs and read-only operations must omit both `sandbox_permissions` and `justification`. Set both only after an explicit sandbox denial, using the narrowest mode strictly wider than the current policy. If the current policy is `danger-full-access`, omit both fields: `workspace-write` is narrower, not an escalation. Nested tools retain their own policies and approvals. Earlier effects may already have completed: inspect them before explicitly retrying. Programs are never replayed automatically.'
 }
 
 /**
