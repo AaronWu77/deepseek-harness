@@ -49,6 +49,7 @@ describe('the enforced raw JSON Schema subset', () => {
   it('accepts every JSON root and every supported node', () => {
     for (const schema of [
       { type: 'string' },
+      { type: 'string', minLength: 1 },
       { type: 'number' },
       { type: 'integer' },
       { type: 'boolean' },
@@ -94,6 +95,8 @@ describe('the enforced raw JSON Schema subset', () => {
       .toEqual(['schema cannot declare both type and oneOf'])
     expect(violationsOf({ oneOf: [{ type: 'string' }, { type: 'number' }], items: {} }))
       .toEqual(['schema.items is not supported beside oneOf'])
+    expect(violationsOf({ oneOf: [{ type: 'string' }, { type: 'number' }], minLength: 1 }))
+      .toEqual(['schema.minLength is not supported beside oneOf'])
     expect(violationsOf({ oneOf: [{ type: 'string' }, { type: 'weird' }] })[0])
       .toContain('schema.oneOf[1].type')
     const sparse = new Array<unknown>(2)
@@ -299,6 +302,13 @@ describe('validateJsonSchemaValue', () => {
     expect(validateJsonSchemaValue(asserted({ type: 'null' }), null)).toEqual([])
     expect(validateJsonSchemaValue(asserted({ type: 'array', items: { type: 'string' } }), ['x'])).toEqual([])
     expect(validateJsonSchemaValue(asserted({ type: 'object' }), { x: 1 })).toEqual([])
+  })
+
+  it('enforces Unicode string minimum length', () => {
+    const schema = asserted({ type: 'string', minLength: 2 })
+    expect(validateJsonSchemaValue(schema, 'a')).toEqual(['"value" must contain at least 2 characters'])
+    expect(validateJsonSchemaValue(schema, '😀')).toEqual(['"value" must contain at least 2 characters'])
+    expect(validateJsonSchemaValue(schema, '😀a')).toEqual([])
   })
 
   it('rejects wrong scalar types and lossy numbers', () => {

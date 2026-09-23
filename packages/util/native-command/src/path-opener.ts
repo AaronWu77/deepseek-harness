@@ -247,7 +247,9 @@ export async function revealNativePath(
     // Explorer parses commas itself; a file URI preserves commas and whitespace in the path.
     const target = pathToFileURL(windowsPath, { windows: true }).href.replaceAll(',', '%2C')
     try {
-      await run('explorer.exe', ['/select,', target], signal)
+      // Explorer requires `/select,` and its target in ONE argument: given as
+      // two, it ignores the request and opens no window.
+      await run('explorer.exe', [`/select,${target}`], signal)
     } catch (error) {
       signal.throwIfAborted()
       // Explorer can exit 1 after delegating to the existing desktop process.

@@ -100,9 +100,24 @@ const RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION
 
 const RUN_CODE_CONTROLS = {
   timeoutMs: { type: 'number', description: 'Positive elapsed-time budget in milliseconds, capped by the deployment maximum.' },
-  sandbox_permissions: { type: 'string', enum: [...ESCALATION_TARGETS], description: 'Wider sandbox mode for this complete program execution; provide it only after an explicit sandbox denial, request the narrowest mode strictly wider than the current mode, and omit both fields when the current mode is danger-full-access.' },
-  justification: { type: 'string', description: 'Reason this complete program needs wider access, shown to the user for approval.' },
+  sandbox_permissions: { type: 'string', enum: [...ESCALATION_TARGETS], description: 'Wider sandbox mode for this complete program execution; provide it only after an explicit sandbox denial, together with a non-empty justification, request the narrowest mode strictly wider than the current mode, and omit both fields when the current mode is danger-full-access.' },
+  justification: { type: 'string', minLength: 1, description: 'One non-empty sentence explaining why this complete program needs wider access, shown to the user for approval.' },
 } as const
+
+/** Build actionable guidance when the model sends malformed run_code sandbox fields. */
+function runCodeSandboxArgumentMessage(message: string): string {
+  return [
+    'Invalid run_code sandbox arguments:',
+    '- Omit both sandbox_permissions and justification for ordinary or read-only work.',
+    '- After an actual sandbox denial, retry with a wider sandbox_permissions value and a non-empty justification sentence.',
+    'Original validation: ' + message,
+  ].join('\n')
+}
+
+/** Render the actionable run_code sandbox guidance as tool content. */
+function runCodeSandboxArgumentGuidance(message: string): ContentBlock[] {
+  return [{ type: 'text', text: runCodeSandboxArgumentMessage(message) }]
+}
 
 /**
  * Detect parser diagnostics that need source-serialization guidance rather than
@@ -386,19 +401,36 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
         return [{ type: 'text', text: parts.length > 0 ? parts.join('\n') : '(run_code completed with no output)' }]
       },
     },
+    finalizeContent: (_exec, result) => {
+      if (!result.isError) return undefined
+      const text = result.content
+        .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+        .map(block => block.text)
+        .join('\n')
+      return /invalid arguments:.*(?:sandbox_permissions|justification)/iu.test(text)
+        ? runCodeSandboxArgumentGuidance(text)
+        : undefined
+    },
     async execute(args, exec): Promise<RunCodeOutput> {
       if (args.description.trim().length === 0) {
         throw new Error('invalid description: expected a non-empty string')
       }
       const runtime = requireRuntime()
-      validateEscalationArgs(args.sandbox_permissions, args.justification)
+      const standingPolicy = runtime.sandboxMode === undefined ? undefined : options.resolveSandboxPolicy(exec)
+      if (standingPolicy?.mode === 'danger-full-access' && args.sandbox_permissions !== undefined) {
+        throw new Error('The current sandbox is already danger-full-access. Omit sandbox_permissions and justification; workspace-write is not an escalation.')
+      }
+      try {
+        validateEscalationArgs(args.sandbox_permissions, args.justification)
+      } catch (error: unknown) {
+        throw new Error(runCodeSandboxArgumentMessage(error instanceof Error ? error.message : String(error)))
+      }
       if (args.timeoutMs !== undefined && runtime.timeout === undefined) {
         throw new Error('timeoutMs is not available for this PTC runtime')
       }
       if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) {
         throw new Error('invalid timeoutMs: expected a positive finite number')
       }
-      const standingPolicy = runtime.sandboxMode === undefined ? undefined : options.resolveSandboxPolicy(exec)
       let policy = standingPolicy
       if (args.sandbox_permissions !== undefined && args.justification !== undefined) {
         if (standingPolicy === undefined) throw new Error('sandbox_permissions is not available for this PTC runtime')

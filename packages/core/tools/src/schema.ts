@@ -25,6 +25,8 @@ export interface StringValueSchemaSpec extends ValueSchemaAnnotations {
   type: 'string'
   enum?: readonly string[]
   const?: string
+  /** Minimum Unicode code-point length enforced by the validator. */
+  minLength?: number
 }
 
 /** Finite JSON-number schema with type-correct literal constraints. */
@@ -394,6 +396,22 @@ function runSchemaCompiler(initial: CompileTask): void {
         }
         break
       case 'string':
+        assertAuthorKeys(input, path, [...authorKeys, 'type', 'enum', 'const', 'minLength'])
+        node.type = inputType
+        copyAnnotations(input, node)
+        if (Object.hasOwn(input, 'minLength')) {
+          const minLength = input.minLength
+          if (typeof minLength !== 'number' || !Number.isSafeInteger(minLength) || minLength < 0) {
+            authorError(`${path}.minLength must be a non-negative safe integer`)
+          }
+          node.minLength = minLength
+        }
+        if (Object.hasOwn(input, 'enum')) {
+          if (!isPlainJsonArray(input.enum)) authorError(`${path}.enum must be a non-empty array of scalar values`)
+          node.enum = Array.from(input.enum, entry => entry as JsonSchemaScalar)
+        }
+        if (Object.hasOwn(input, 'const')) node.const = input.const as JsonSchemaScalar
+        break
       case 'number':
       case 'integer':
       case 'boolean':

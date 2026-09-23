@@ -12,8 +12,8 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 describe('the unified author schema DSL', () => {
   it('compiles every value root and the author-only json node', () => {
-    expect(valueSchemaSpecToJsonSchema({ type: 'string', enum: ['a', 'b'], const: 'a' }))
-      .toEqual({ type: 'string', enum: ['a', 'b'], const: 'a' })
+    expect(valueSchemaSpecToJsonSchema({ type: 'string', enum: ['a', 'b'], const: 'a', minLength: 1 }))
+      .toEqual({ type: 'string', enum: ['a', 'b'], const: 'a', minLength: 1 })
     expect(valueSchemaSpecToJsonSchema({ type: 'number' })).toEqual({ type: 'number' })
     expect(valueSchemaSpecToJsonSchema({ type: 'integer' })).toEqual({ type: 'integer' })
     expect(valueSchemaSpecToJsonSchema({ type: 'boolean' })).toEqual({ type: 'boolean' })
@@ -63,6 +63,7 @@ describe('the unified author schema DSL', () => {
       { oneOf: [{ type: 'string' }] },
       { type: 'number', enum: ['1'] },
       { type: 'string', enum: ['a'], const: 'b' },
+      { type: 'string', minLength: -1 },
       { type: 'integer', const: 1.5 },
       { type: 'json', default: undefined },
       { type: 'array', items: { type: 'string', required: true } },

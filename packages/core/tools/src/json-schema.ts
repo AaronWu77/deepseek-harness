@@ -43,6 +43,8 @@ export interface JsonSchemaNode {
   items?: JsonSchemaNode
   /** Allowed values for a scalar node. */
   enum?: JsonSchemaScalar[]
+  /** Minimum Unicode code-point length for a string node. */
+  minLength?: number
   /** The single allowed value for a scalar node. */
   const?: JsonSchemaScalar
   /** Annotation, ignored for validation. */
@@ -81,6 +83,7 @@ const CONSTRAINT_KEYWORDS = new Set([
   'additionalProperties',
   'items',
   'enum',
+  'minLength',
   'const',
 ])
 const ANNOTATION_KEYWORDS = new Set(['description', 'title', 'default', 'examples'])
@@ -197,7 +200,7 @@ type SchemaWalkTask =
   | { kind: 'object-tail'; node: Record<string, unknown>; path: string; properties: unknown }
 
 /** Keywords that are invalid beside `oneOf`. */
-const ONE_OF_SIBLING_KEYWORDS = ['properties', 'required', 'additionalProperties', 'items', 'enum', 'const'] as const
+const ONE_OF_SIBLING_KEYWORDS = ['properties', 'required', 'additionalProperties', 'items', 'enum', 'minLength', 'const'] as const
 
 /** Validate object-only fields after its property schemas have been visited. */
 function checkObjectSchemaTail(
@@ -313,6 +316,7 @@ function checkSchemaNode(root: unknown, rootPath: string, violations: string[], 
       additionalProperties: ['object'],
       items: ['array'],
       enum: ['string', 'number', 'integer', 'boolean', 'null'],
+      minLength: ['string'],
       const: ['string', 'number', 'integer', 'boolean', 'null'],
     }
     for (const [key, types] of Object.entries(allowedFor)) {
@@ -349,6 +353,10 @@ function checkSchemaNode(root: unknown, rootPath: string, violations: string[], 
       case 'integer':
       case 'boolean':
       case 'null': {
+        const minLength = schemaType === 'string' ? node.minLength : undefined
+        if (minLength !== undefined && (typeof minLength !== 'number' || !Number.isSafeInteger(minLength) || minLength < 0)) {
+          violations.push(path + '.minLength must be a non-negative safe integer')
+        }
         const hasEnum = Object.hasOwn(node, 'enum')
         const allowed = hasEnum ? node.enum : undefined
         const enumValid = isPlainJsonArray(allowed)
@@ -602,9 +610,12 @@ function checkValue(schema: JsonSchemaNode, value: unknown, path: string): strin
           break
         }
         case 'string':
-          finish(typeof frame.value === 'string'
-            ? checkScalarValue(frame.node, frame.value, frame.path)
-            : [`"${diagnosticPath(frame.path)}" must be a string`])
+          finish(typeof frame.value !== 'string'
+            ? ['"' + diagnosticPath(frame.path) + '" must be a string']
+            : Object.hasOwn(frame.node, 'minLength')
+              && Array.from(frame.value).length < (frame.node.minLength ?? 0)
+              ? ['"' + diagnosticPath(frame.path) + '" must contain at least ' + String(frame.node.minLength) + ' characters']
+              : checkScalarValue(frame.node, frame.value, frame.path))
           break
         case 'number':
           finish(typeof frame.value !== 'number'

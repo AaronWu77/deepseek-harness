@@ -1,0 +1,23 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`stacks footer contributions above settings in expanded and collapsed sidebars 1`] = `
+{
+  "mode": "expanded",
+  "plannerAboveQuota": true,
+  "plannerWidth": 276,
+  "quotaAboveSettings": true,
+  "quotaWidth": 276,
+  "sameLeft": true,
+}
+`;
+
+exports[`stacks footer contributions above settings in expanded and collapsed sidebars 2`] = `
+{
+  "mode": "collapsed",
+  "plannerAboveQuota": true,
+  "plannerWidth": 36,
+  "quotaAboveSettings": true,
+  "quotaWidth": 36,
+  "sameLeft": true,
+}
+`;

@@ -2196,13 +2196,16 @@ describe('PTC standing file policy and sandbox outcomes', () => {
 })
 
 describe('per-program execution controls', () => {
-  async function controlledSetup(approval = true) {
+  async function controlledSetup(
+    approval = true,
+    sandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access' = 'read-only',
+  ) {
     const state = await setup()
     await state.ctx.plugin(SessionProjections)
-    await state.ctx.plugin(SandboxPolicy, { mode: 'read-only', workspaceRoot: process.cwd() })
+    await state.ctx.plugin(SandboxPolicy, { mode: sandboxMode, workspaceRoot: process.cwd() })
     if (approval) await state.ctx.plugin(ApprovalService, { policy: 'ask' })
     Object.defineProperties(state.runtime, {
-      sandboxMode: { get: () => 'read-only' },
+      sandboxMode: { get: () => sandboxMode },
       executionInstructions: { get: () => 'Programs start with an empty environment.' },
       timeout: { get: () => ({ defaultMs: 120_000, maxMs: 600_000 }) },
     })
@@ -2222,6 +2225,7 @@ describe('per-program execution controls', () => {
       const schema = tools.schemas().find(tool => tool.name === RUN_CODE_NAME)!
       expect(JSON.stringify(schema.parameters)).toContain('Default 120000; capped at 600000')
       expect(JSON.stringify(schema.parameters)).toContain('sandbox_permissions')
+      expect(JSON.stringify(schema.parameters)).toContain('minLength')
       expect(schema.description).toContain('Nested tools retain their own policies')
       expect(schema.description).toContain('Ordinary programs and read-only operations must omit both `sandbox_permissions` and `justification`')
       expect(JSON.stringify(schema.parameters)).toContain('only after an explicit sandbox denial')
@@ -2286,6 +2290,30 @@ describe('per-program execution controls', () => {
     try {
       expect((await execute(args)).isError).toBe(true)
       expect(ask).not.toHaveBeenCalled()
+      expect(runtime.lastRequest).toBeUndefined()
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('renders actionable guidance when justification is empty', async () => {
+    const { ctx, runtime, execute } = await controlledSetup()
+    try {
+      const result = await execute({ sandbox_permissions: 'workspace-write', justification: '' })
+      expect(result.isError).toBe(true)
+      const text = (result.content[0] as { text: string }).text
+      expect(text).toContain('Invalid run_code sandbox arguments')
+      expect(text).toContain('Omit both sandbox_permissions and justification')
+      expect(text).toContain('non-empty justification sentence')
+      expect(runtime.lastRequest).toBeUndefined()
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('explains that workspace-write is not an escalation from danger-full-access', async () => {
+    const { ctx, runtime, execute } = await controlledSetup(true, 'danger-full-access')
+    try {
+      const result = await execute({ sandbox_permissions: 'workspace-write', justification: 'Need workspace writes' })
+      expect(result.isError).toBe(true)
+      expect((result.content[0] as { text: string }).text).toContain('current sandbox is already danger-full-access')
+      expect((result.content[0] as { text: string }).text).toContain('workspace-write is not an escalation')
       expect(runtime.lastRequest).toBeUndefined()
     } finally { await ctx.fiber.dispose() }
   })
