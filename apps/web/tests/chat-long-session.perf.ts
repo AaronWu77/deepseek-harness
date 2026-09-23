@@ -28,7 +28,7 @@ async function nextPaint(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await document.fonts.ready
     await new Promise<void>(resolve => requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve())
+      requestAnimationFrame(() => { resolve() })
     }))
   })
 }

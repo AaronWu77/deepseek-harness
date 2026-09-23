@@ -107,6 +107,7 @@
 
 .title {
   font-weight: 400;
+  transition: color 100ms ease;
 }
 
 .sep {
@@ -127,6 +128,7 @@
   font-size: var(--dsh-content-font-size-secondary, 13px);
   line-height: calc(24px + var(--dsh-content-font-delta, 0px));
   color: var(--dsw-alias-label-tertiary);
+  transition: color 100ms ease;
 }
 
 /* Trailing summary fragment kept out of .summary's ellipsis, for a count whose
@@ -141,6 +143,13 @@
   font-size: var(--dsh-content-font-size-secondary, 13px);
   line-height: calc(24px + var(--dsh-content-font-delta, 0px));
   color: var(--dsw-alias-label-tertiary);
+  transition: color 100ms ease;
+}
+
+.row:hover .title,
+.row:hover .summary:not(.errorSummary):not(.stoppedSummary),
+.row:hover .summarySuffix {
+  color: var(--dsw-alias-label-primary);
 }
 
 /* Diff-row +/- totals: the code font, matching the diff body the numbers
@@ -183,8 +192,10 @@
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
   cursor: pointer;
+  transition: color 100ms ease;
 }
 
+.row:hover .fileLink,
 .fileLink:hover {
   color: var(--dsw-alias-label-primary);
   text-decoration-color: currentColor;
@@ -193,6 +204,11 @@
 /* Error row's collapsed summary: the failure's first line in the error color. */
 .errorSummary {
   color: var(--dsw-alias-state-error-primary);
+}
+
+/* Interrupted rows retain their business glyph and replace the summary with a visible warning. */
+.stoppedSummary {
+  color: var(--dsw-alias-state-warn-label);
 }
 
 /* Expanded body + Inspect pill wrapper (sibling of .row: clicks never toggle). */
@@ -229,6 +245,17 @@
 .root:hover .inspectButton,
 .inspectButton:focus-visible {
   opacity: 1;
+}
+
+.detailsBodyWrap {
+  position: relative;
+}
+
+.detailsBodyWrap .inspectButton {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  margin: 0;
 }
 
 /* Solid hover fill (a translucent token would let content bleed through). */
@@ -374,12 +401,6 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* In-row code renders at the smaller code size (12/18) via each primitive's
-   rebindable content-font seam; standalone markdown code blocks keep 13/22. */
-.codeBody {
-  --dsl-code-block-content-font: var(--dsw-font-markdown-code-block-small);
-}
-
 /* The terminal card scrolls its OUTPUT inside its own surface (same l1
    hairline as the IN/OUT card): the banner stays pinned and the scrollbar
    never rides over it. 224px = the 260px card cap minus the ~36px banner. */
@@ -390,8 +411,8 @@
   border: 0.5px solid var(--dsw-alias-border-l1);
 }
 
-/* Visually hidden run-state label for assistive technology: the StateDot and
-   the running sweep are aria-hidden / colour-only, so the text carries the
+/* Visually hidden run-state label for assistive technology: the business icon
+   and animated text treatment do not name the state, so this text carries the
    running/failed/interrupted state to a screen reader. */
 .visuallyHidden {
   position: absolute;

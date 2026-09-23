@@ -15,6 +15,10 @@ import { atRuleBlock, type CssRule, packageStylesheets, parseRules, varReference
 
 const STYLES = new URL('../src/styles/', import.meta.url)
 const read = (name: string): string => readFileSync(fileURLToPath(new URL(name, STYLES)), 'utf8')
+/* packageStylesheets() paths are /-separated on every platform; match them
+   with the same separator or the exclusion silently stops applying on
+   Windows. */
+const SCROLLBAR_SHEET = fileURLToPath(new URL('scrollbar.css', STYLES)).replaceAll('\\', '/')
 
 const platformCss = read('design-platform.css')
 const scrollbarCss = read('scrollbar.css')
@@ -142,14 +146,8 @@ const SURFACE_PROPERTIES = ['background', 'background-color']
  * carries a radius, a shadow, and a fixed size, so shape cannot separate them.
  */
 const SURFACE_TOKEN_PATTERN = /^--dsw-(?:alias-bg-|specific-)/
-/**
- * Glass surface tiers that are elevated by construction. They float over the
- * ambient canvas instead of sitting on a palette rung, so the ladder cannot
- * derive them: their values are translucent fills, not rung colors. The raised
- * tiers are named here; the sunken tier is deliberately absent, because a
- * recessed well is not an elevated surface and a scroll container drawn in one
- * keeps the l1 thumb.
- */
+/** Translucent elevated surfaces whose colors do not resolve to a palette rung. */
+const TRANSLUCENT_ELEVATED_SURFACES = new Set(['--dsw-specific-menu'])
 const ELEVATED_GLASS_TOKENS = ['--dsw-glass-fill', '--dsw-glass-fill-raised', '--dsw-glass-fill-thick'] as const
 
 /**
@@ -188,7 +186,7 @@ function elevatedRungs(): Set<string> {
   return tokens
 }
 
-const elevatedSurfaces = elevatedRungs()
+const elevatedSurfaces = new Set([...elevatedRungs(), ...TRANSLUCENT_ELEVATED_SURFACES])
 
 for (const file of packageStylesheets()) {
   const rules = parseRules(readFileSync(file, 'utf8'))
@@ -198,7 +196,7 @@ for (const file of packageStylesheets()) {
     let rebindsElevation = false
     const ruleSurfaces: string[] = []
     for (const [property, value] of rule.declarations) {
-      if (COLOUR_INDIRECTIONS.has(property) && file !== fileURLToPath(new URL('scrollbar.css', STYLES))) {
+      if (COLOUR_INDIRECTIONS.has(property) && file !== SCROLLBAR_SHEET) {
         rebinds = true
         if (value !== HIDDEN_THUMB) rebindsElevation = true
       }
@@ -322,7 +320,7 @@ describe('scrollbar.css geometry variables', () => {
     expect(defined).toContain(WIDTH_VARIABLE)
     const readers: string[] = []
     for (const file of packageStylesheets()) {
-      if (file === fileURLToPath(new URL('scrollbar.css', STYLES))) continue
+      if (file === SCROLLBAR_SHEET) continue
       for (const rule of parseRules(readFileSync(file, 'utf8'))) {
         for (const [property, value] of rule.declarations) {
           for (const name of varReferences(value)) {
@@ -481,16 +479,16 @@ describe('elevated surface rebinds', () => {
     }
   })
 
-  it('resolves the elevated surface set from the palette ladder plus the raised glass tiers', () => {
-    // The set has to come from an authority outside the sheets that happen to
+  it('resolves opaque elevated surfaces from the palette ladder and includes translucent elevated surfaces', () => {
+    // The set has to come from the palette, not from the sheets that happen to
     // rebind: derived from rebinds it can only confirm what someone already
     // remembered, and a surface nobody has rebound yet — the case the check
-    // exists for — would define itself as unelevated. Rung-backed surfaces come
-    // from the palette, so a new palette token on an elevated rung is in scope
-    // the moment it is defined; the raised glass tiers are anchored in this
-    // spec instead, because a translucent fill carries no rung to read. `--dsw-specific-tip` is the regression that proved the point: it
-    // resolves to the same dark rung as the menu surface, and the Todo panel
-    // scrolled on it unrebound while a rebind-derived set stayed green.
+    // exists for — would define itself as unelevated. Anchoring it here means a
+    // new palette token on an elevated rung is in scope the moment it is
+    // defined. `--dsw-specific-tip` is the regression that proved the point: it
+    // resolves to the same dark rung as the input surface, and the Todo panel
+    // scrolled on it unrebound while a rebind-derived set stayed green. The
+    // translucent menu remains explicit because its alpha color has no rung.
     expect(elevatedSurfaces).toContain('--dsw-alias-bg-layer-2')
     expect(elevatedSurfaces).toContain('--dsw-alias-bg-layer-3')
     expect(elevatedSurfaces).toContain('--dsw-specific-menu')
