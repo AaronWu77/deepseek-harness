@@ -42,6 +42,21 @@
   background: var(--dsw-glass-scrim);
   border-left: 0.5px solid var(--dsw-alias-border-l4);
   pointer-events: none;
+  /* Collapsed, the box must paint nothing: it keeps its remembered width, and with the
+     dock items translated out this scrim would otherwise lie over the conversation right
+     of the frame edge. The flip waits out the slide, like the items' own visibility. */
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0s linear var(--ds-transition-duration-slow),
+    visibility 0s linear var(--ds-transition-duration-slow);
+}
+
+/* Open eases the box in before its items slide: no faded scrim over a moving pane. */
+.panel[data-sidebar-right-open] {
+  opacity: 1;
+  visibility: visible;
+  transition: none;
 }
 
 /* Only docked Grid items slide. Their common ancestor remains untransformed,
