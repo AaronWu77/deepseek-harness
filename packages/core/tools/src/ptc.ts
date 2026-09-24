@@ -17,7 +17,7 @@ declare module '@deepseek-ai/dsh-llm' {
 
 import type { ContentBlock, ToolCallId, ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { PtcBindingFunction, PtcRunResult, PtcRunSandbox, PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
-import { approveEscalation, ESCALATION_TARGETS, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { approveEscalation, ESCALATION_TARGETS, validateEscalationArgs, WIDER_MODES } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { ApprovalService } from '@deepseek-ai/dsh-user-approval'
 import { deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -424,11 +424,16 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
       }
       const runtime = requireRuntime()
       const standingPolicy = runtime.sandboxMode === undefined ? undefined : options.resolveSandboxPolicy(exec)
-      if (standingPolicy?.mode === 'danger-full-access' && args.sandbox_permissions !== undefined) {
-        throw new Error('The current sandbox is already danger-full-access. Omit sandbox_permissions and justification; workspace-write is not an escalation.')
-      }
+      // A request that cannot widen the standing policy is not an escalation: the
+      // effective mode already grants equal or wider access, so the pair is dropped
+      // and the program runs under that standing policy. Models emit the pair out of
+      // habit, and failing the whole call taught nothing.
+      const nonEscalating = standingPolicy !== undefined && args.sandbox_permissions !== undefined
+        && !(WIDER_MODES[standingPolicy.mode] ?? []).some(mode => mode === args.sandbox_permissions)
+      const sandboxPermissions = nonEscalating ? undefined : args.sandbox_permissions
+      const justification = nonEscalating ? undefined : args.justification
       try {
-        validateEscalationArgs(args.sandbox_permissions, args.justification)
+        validateEscalationArgs(sandboxPermissions, justification)
       } catch (error: unknown) {
         throw new Error(runCodeSandboxArgumentMessage(error instanceof Error ? error.message : String(error)))
       }
@@ -439,11 +444,11 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
         throw new Error('invalid timeoutMs: expected a positive finite number')
       }
       let policy = standingPolicy
-      if (args.sandbox_permissions !== undefined && args.justification !== undefined) {
+      if (sandboxPermissions !== undefined && justification !== undefined) {
         if (standingPolicy === undefined) throw new Error('sandbox_permissions is not available for this PTC runtime')
         const approvedMode = await approveEscalation({
-          requestedMode: args.sandbox_permissions,
-          justification: args.justification,
+          requestedMode: sandboxPermissions,
+          justification,
           effectiveMode: standingPolicy.mode,
           subject: 'program',
         }, {

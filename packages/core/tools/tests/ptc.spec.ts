@@ -2315,14 +2315,15 @@ describe('per-program execution controls', () => {
     } finally { await ctx.fiber.dispose() }
   })
 
-  it('explains that workspace-write is not an escalation from danger-full-access', async () => {
+  it('drops a non-widening sandbox request under danger-full-access and still runs', async () => {
     const { ctx, runtime, execute } = await controlledSetup(true, 'danger-full-access')
+    const ask = vi.fn(() => Promise.resolve<ApprovalOutcome>('allowed-once'))
+    ctx.on('approval/request', ask)
     try {
       const result = await execute({ sandbox_permissions: 'workspace-write', justification: 'Need workspace writes' })
-      expect(result.isError).toBe(true)
-      expect((result.content[0] as { text: string }).text).toContain('current sandbox is already danger-full-access')
-      expect((result.content[0] as { text: string }).text).toContain('workspace-write is not an escalation')
-      expect(runtime.lastRequest).toBeUndefined()
+      expect(result.isError).toBe(false)
+      expect(ask).not.toHaveBeenCalled()
+      expect(runtime.lastRequest).toBeDefined()
     } finally { await ctx.fiber.dispose() }
   })
 
