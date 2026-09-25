@@ -267,6 +267,15 @@ describe('ui-model-selection dual entry', () => {
     expect(options.find((o: SelectOption) => o.label === 'DeepSeek-V4-Pro')).toMatchObject({ active: true })
   })
 
+  it('rejects a stale popup option without issuing a selection', async () => {
+    const b = await bench()
+    b.mint('s1')
+    const options = await b.popup().options(projection('s1'), new AbortController().signal)
+    const stale = { ...options[0]!, id: 'stale/provider-model' }
+    await expect(b.popup().onSelect(stale, projection('s1'))).rejects.toThrow(zh['error.staleOption'])
+    expect(b.calls.select).toBe(0)
+  })
+
   it('a popup selection lands on the seat store — the reverse direction of the same state', async () => {
     const b = await bench()
     b.mint('s1')
@@ -488,7 +497,7 @@ describe('ui-model-selection dual entry', () => {
     await expect(b.popup().options(
       projection('child'),
       new AbortController().signal,
-    )).rejects.toThrow(/unavailable for addressed subagent/)
+    )).rejects.toThrow(zh['error.unavailableSubagent'])
 
     const face = b.seat().inject!(sid('child'))
     expect(face.available).toBe(false)

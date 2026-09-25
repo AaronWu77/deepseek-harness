@@ -2,6 +2,10 @@
 
 DeepSeek Harness is an all-plugin Cordis agent harness. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
 
+## Fork maintenance
+
+Keep personal choices in profiles or plugins where possible. Record each lasting source deviation in the [fork deviation registry](docs/fork-deviations.md) with a behavioral regression test and a retirement condition. Integrate upstream in a separate worktree; review every active deviation and relevant tests before updating the daily branch. Follow the [fork synchronization guide](docs/cookbook/syncing-the-fork.md); do not disturb uncommitted work.
+
 ## Pre-stable APIs and released Session data
 
 Public APIs are pre-stable; update every consumer. Follow [version/status](docs/session-format-status.md) and [type acknowledgements](docs/cookbook/reviewing-persistence-type-changes.md). [Adjacent migration](.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md) may add a version-named successor but never move, overwrite, or delete committed generations; predecessors imply neither fallback nor downgrade support. SQLite uses monotonic `SCHEMA_VERSION`.

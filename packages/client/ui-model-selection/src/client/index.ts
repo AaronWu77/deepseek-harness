@@ -151,18 +151,18 @@ export function apply(ctx: ClientContext): void {
         kind: 'popupSelect',
         options: async (session) => {
           if (sessions.subagentAddress(session.sessionId) !== undefined) {
-            throw new Error('model selection is unavailable for addressed subagent sessions')
+            throw new Error(t('error.unavailableSubagent'))
           }
           return optionsOf(await models.directoryFor(session.sessionId).load(), t)
         },
         onSelect: async (option, session) => {
           if (sessions.subagentAddress(session.sessionId) !== undefined) {
-            throw new Error('model selection is unavailable for addressed subagent sessions')
+            throw new Error(t('error.unavailableSubagent'))
           }
           const directory = models.directoryFor(session.sessionId)
           const selection = selectionOf(directory.store.getSnapshot(), option.id)
           if (selection === undefined) {
-            throw new Error('this provider\'s catalog failed to load — pick a model from a loaded group')
+            throw new Error(t('error.staleOption'))
           }
           const result = await directory.select(selection)
           if (!result.ok) {

@@ -8,6 +8,10 @@ It is built on an **everything-is-a-plugin** architecture and powered by [Cordis
 
 Documentation: [https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
 
+## Personal fork
+
+This repository is a personal fork of the upstream DeepSeek Harness project, not an official DeepSeek AI release. The maintained development branch is [mine/main](https://github.com/AaronWu77/deepseek-harness/tree/mine/main). Keep local defect fixes in the [deviation registry](docs/fork-deviations.md), integrate upstream with the [fork synchronization guide](docs/cookbook/syncing-the-fork.md), and qualify shared changes for [Desktop](apps/desktop/README.md) separately. These fork policies do not change the upstream project or its npm releases.
+
 ## Developer preview
 
 DeepSeek Harness is in _developer preview_ and iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
@@ -24,14 +28,14 @@ Install `Node.js`, then run:
 npx @deepseek-ai/dsh web
 ```
 
-The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
+This npm command installs the upstream release, not this fork. The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
 
 ### Run from source
 
 To run from a repository checkout:
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
+git clone --branch mine/main https://github.com/AaronWu77/deepseek-harness.git
 cd deepseek-harness
 pnpm install
 pnpm run build

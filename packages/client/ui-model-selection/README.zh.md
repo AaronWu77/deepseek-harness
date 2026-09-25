@@ -27,7 +27,7 @@ Web GUI 允许用户通过 `/model` 弹窗或 composer 模型控件切换既有�
 
 与 `ui-conversation` 及命令包一起挂载本插件；composer 随即在待处理指示器旁显示模型位，`/model` 则以弹窗打开同一份目录。模型位菜单打开期间，`↑`／`↓` 在所显示面板的行间移动焦点，`Tab` 选定聚焦行，Escape 与 `Shift+Tab` 先退出已下钻的面板，否则关闭并回到触发器。下钻落在正在使用的那一行，返回则落在打开该面板的格子上。当确切提供方／模型对仍在已公布分组中时，两个界面都显示 Host 报告的当前选择；目录行缺席时，可路由的选择保持不变，触发器提示 `Select model`。
 
-鼠标选择沿用浏览器原生点击及其取消行为；仅按下按钮不会选定。打开菜单时聚焦触发按钮，再次点击触发按钮会关闭菜单并把焦点还给它。等待选择结果时，焦点停在触发按钮；选择被拒绝后菜单保持打开，Tab 可回到当前选中的行。
+鼠标选择沿用浏览器原生点击及其取消行为；仅按下按钮不会选定。打开菜单时聚焦触发按钮，再次点击触发按钮会关闭菜单并把焦点还给它。等待选择结果时，焦点停在触发按钮。Host 确认选择后，控件会保持显示该选择，直至持久投影确认或替换它。选择被拒绝后菜单保持打开，Tab 可回到当前选中的行。
 
 ### 模型与推理强度
 
@@ -43,7 +43,7 @@ Web GUI 允许用户通过 `/model` 弹窗或 composer 模型控件切换既有�
 
 ### 选择失败
 
-当会话被其他写句柄占用时，模型选择失败提示用户退出其他正在运行的 DSH 后重试。
+当会话被其他写句柄占用时，模型选择失败提示用户退出其他正在运行的 DSH 后重试。如果 `/model` 弹窗打开后目录发生变化，选择已失效的行会保持弹窗打开并提示用户重新打开 `/model`，且不会发送选择请求。
 
 -----
 
@@ -53,7 +53,7 @@ Web GUI 允许用户通过 `/model` 弹窗或 composer 模型控件切换既有�
 <details>
 <summary>实现细节——点击展开</summary>
 
-两个入口共用一份由 `ModelDirectoryResolver`（`ctx.modelDirectories`）持有的会话级目录：`/model` popupSelect 贡献项（经 `ctx.commandUi` 注册）与 composer 的具名 `conversation.input.model` 位都经 `session.models` 加载会话的建议目录、经 `session.selectModel` 通过同一个 `ModelDirectory` 实例提交，因此任一入口所做的切换正是另一个入口接下来显示的。目录加载与选择共享一个代次计数器，旧响应不会覆盖新结果；连接重置丢弃所有常驻投影，并在显示前重新拉取 Host 恢复的选择。目录按会话惰性解析，随会话作用域一并 dispose（资源释放）；已寻址 subagent 会话不公开任一入口。每份常驻目录都会直接在转发的 `llm/adapters-updated` 与 `settings/document-updated` owner 事件上重拉。
+两个入口共用一份由 `ModelDirectoryResolver`（`ctx.modelDirectories`）持有的会话级目录：`/model` popupSelect 贡献项（经 `ctx.commandUi` 注册）与 composer 的具名 `conversation.input.model` 位都经 `session.models` 加载会话的建议目录、经 `session.selectModel` 通过同一个 `ModelDirectory` 实例提交，因此任一入口所做的切换正是另一个入口接下来显示的。选择 RPC 成功后，只要持久投影仍等于该选择之前的有效值，目录就保留新选择；投影确认会清除待确认值，而冲突投影会替换它。选择代次可阻止已被取代的结果、连接重置后的结果及已释放作用域的结果发布延迟状态或错误。目录按会话惰性解析，随会话作用域一并 dispose（资源释放）；已寻址 subagent 会话不公开任一入口。每份常驻目录都会直接在转发的 `llm/adapters-updated` 与 `settings/document-updated` owner 事件上重拉。
 
 </details>
 

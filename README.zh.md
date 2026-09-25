@@ -8,6 +8,10 @@ DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的�
 
 文档：[https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
 
+## 个人 fork
+
+本仓库是上游 DeepSeek Harness 项目的个人 fork，不是 DeepSeek AI 的官方发布版。日常维护分支为 [mine/main](https://github.com/AaronWu77/deepseek-harness/tree/mine/main)。本地缺陷修复登记在[偏差清单](docs/fork-deviations.zh.md)，按 [fork 同步指南](docs/cookbook/syncing-the-fork.zh.md)集成上游，并对共享代码分别执行 [Desktop](apps/desktop/README.zh.md) 验证。这些 fork 规则不会修改上游项目或其 npm 发布版。
+
 ## 开发者预览
 
 DeepSeek Harness 处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
@@ -26,7 +30,7 @@ DeepSeek Harness 处于 _开发者预览_ 阶段，正在快速迭代。**未来
 npx @deepseek-ai/dsh web
 ```
 
-该命令默认会在 `http://127.0.0.1:3080` 启动 Web UI，本机启动时还会用默认浏览器打开页面。通过 SSH 启动时只打印宿主机 URL，因为本地转发地址由 SSH 客户端或编辑器持有。传入 `--no-open` 可仅运行服务器而不打开浏览器。详见 [Web UI 指南](docs/user/guide/index.zh.md)。
+此 npm 命令安装的是上游发布版，而非本 fork。该命令默认会在 `http://127.0.0.1:3080` 启动 Web UI，本机启动时还会用默认浏览器打开页面。通过 SSH 启动时只打印宿主机 URL，因为本地转发地址由 SSH 客户端或编辑器持有。传入 `--no-open` 可仅运行服务器而不打开浏览器。详见 [Web UI 指南](docs/user/guide/index.zh.md)。
 
 <a id="run-from-source"></a>
 
@@ -35,7 +39,7 @@ npx @deepseek-ai/dsh web
 如需从仓库源码运行：
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
+git clone --branch mine/main https://github.com/AaronWu77/deepseek-harness.git
 cd deepseek-harness
 pnpm install
 pnpm run build

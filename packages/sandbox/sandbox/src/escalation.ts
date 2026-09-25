@@ -170,7 +170,7 @@ export async function approveEscalation<A, C>(request: EscalationRequest, approv
     // whole runs whose model repeated the arguments out of habit. An unknown
     // mode is still malformed input and fails closed.
     if (KNOWN_SANDBOX_MODES.includes(mode as SandboxMode)
-      && KNOWN_SANDBOX_MODES.includes(effectiveMode as SandboxMode)) return effectiveMode
+      && KNOWN_SANDBOX_MODES.includes(effectiveMode)) return effectiveMode
     throw new Error(`sandbox escalation to "${mode}" is not strictly wider than this call's current "${effectiveMode}" mode; the current mode already grants equal or wider access, so omit sandbox_permissions and justification`)
   }
   if (approval.approver === undefined) {

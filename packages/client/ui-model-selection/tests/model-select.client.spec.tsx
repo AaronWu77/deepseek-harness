@@ -210,6 +210,27 @@ describe('ModelSelect reasoning effort', () => {
     expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
   })
 
+  it('announces a directly rejected selection promise', async () => {
+    const groups = [{
+      id: 'deepseek-official',
+      name: 'DeepSeek',
+      models: [
+        { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash', reasoning },
+        { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
+      ],
+    }]
+    const directory = createSnapshotStore<ModelDirectoryState>(state({ groups }))
+    const select = vi.fn().mockRejectedValue(new Error('connection reset'))
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} select={select} t={t} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /选择模型|当前/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /DeepSeek-V4-Pro/ }))
+
+    const toast = await screen.findByRole('alert')
+    expect(toast.textContent).toBe('模型操作失败：gateway/internal: connection reset')
+  })
+
   it('portals the placed menu card to body and closes only on truly-outside mousedown', () => {
     const offsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')!
     const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!
