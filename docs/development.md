@@ -97,6 +97,8 @@ pnpm run build
 
 `pnpm run hygiene` includes `publint`, which validates package entrypoints against the built `lib/*.js` files, and `verify-node-next-types`, which validates built declarations against a temporary NodeNext consumer. A fresh worktree has no bundled JS or declarations until `pnpm run build` runs; ordinary commits and pushes do not require that build unless their selected checks consume it.
 
+On native Windows, the NodeNext consumer uses directory junctions without requiring symbolic-link privileges. `verify-cordis-config` follows a Loader link checked out as plain text only when its contents match a Git-indexed symbolic link and its YAML target stays in the repository; ordinary path-like files and altered links do not bypass config validation.
+
 ### Environment variables
 
 The real DeepSeek adapter and key-backed agent demos read credentials from the environment or from a gitignored `.env` at the repo root:

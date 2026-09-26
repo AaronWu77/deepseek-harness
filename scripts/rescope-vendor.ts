@@ -85,6 +85,8 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   { file: 'packages/boot/app-boot/tests/config-schema.spec.ts', upstream: ['schemastery'] },
   // Asserts the vendored-manifest table, which gains an upstream-name column.
   { file: 'scripts/gen-third-party-notices.spec.ts', upstream: RENAMES.map(rename => rename.upstream) },
+  // Regression inputs contain the unrescoped package name on purpose.
+  { file: 'scripts/rescope-vendor.spec.ts', upstream: ['cordis'] },
   // `cordis` is also an agent-preset id, so in these files the bare name is
   // product data, not a package reference. Renaming it changed which preset
   // the creator flow stages and which id the roster reports.
@@ -482,7 +484,14 @@ function rewriteLine(line: string, file: string, all: readonly Pattern[]): strin
   let out = line
   for (const pattern of all) {
     if (skipped(file, pattern)) continue
-    out = out.replace(pattern.token, (_match, quote: string, subpath: string) => `${quote}${pattern.to}${subpath}${quote}`)
+    out = out.replace(pattern.token, (match: string, quote: string, subpath: string, offset: number, source: string) => {
+      // PropsLocale<'cordis'> names the UI dictionary, not the npm package.
+      if (file === 'packages/extensions/ui-cordis/src/client/CordisPreparingRow.tsx'
+        && pattern.upstream === 'cordis' && match === "'cordis'"
+        && source.slice(0, offset).endsWith('PropsLocale<')
+        && source[offset + match.length] === '>') return match
+      return `${quote}${pattern.to}${subpath}${quote}`
+    })
     out = out.replace(pattern.yamlName, (_match, prefix: string, suffix: string) => `${prefix}${pattern.to}${suffix}`)
   }
   return out
@@ -517,6 +526,15 @@ function rewrite(text: string, file: string, all: readonly Pattern[]): { text: s
     return next
   })
   return { text: out.join('\n'), lines }
+}
+
+/** Rewrite one authored file for a focused rescope regression.
+ * @param text - file contents to inspect.
+ * @param file - repository-relative source path.
+ * @returns content with upstream package references rescoped.
+ */
+export function rescopeText(text: string, file: string): string {
+  return rewrite(text, file, patterns(false)).text
 }
 
 function classify(file: string): string {

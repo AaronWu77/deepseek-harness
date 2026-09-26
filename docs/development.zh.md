@@ -101,6 +101,8 @@ pnpm run build
 
 `pnpm run hygiene` 包含 `publint`（用构建出的 `lib/*.js` 文件校验包入口点）和 `verify-node-next-types`（用一个临时的 NodeNext 消费方校验构建出的声明文件）。新 worktree 在 `pnpm run build` 运行之前没有打包的 JS 和声明文件；普通提交和推送无需构建，除非所选检查会使用这些产物。
 
+在原生 Windows 上，NodeNext 消费方使用目录 junction，无需创建符号链接的权限。仅当某个 Loader 链接被检出为普通文本、其内容与 Git 索引记录的符号链接一致且 YAML 目标仍在仓库内时，`verify-cordis-config` 才会读取目标；普通的路径文本文件和被改动的链接不能绕过配置校验。
+
 ### 环境变量
 
 真实的 DeepSeek 适配器和需要密钥的 agent 演示从环境变量或仓库根目录一个被 gitignore 的 `.env` 文件读取凭证：

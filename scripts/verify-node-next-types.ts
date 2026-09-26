@@ -7,8 +7,9 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import { linkNodeNextDirectory } from './node-next-directory-link.ts'
 
 const root = resolve(import.meta.dirname, '..')
 
@@ -84,7 +85,7 @@ function linkPackage(pkg: WorkspacePackage, nodeModules: string): void {
   const parts = pkg.name.split('/')
   const link = resolve(nodeModules, ...parts)
   mkdirSync(dirname(link), { recursive: true })
-  symlinkSync(pkg.dir, link, 'dir')
+  linkNodeNextDirectory(pkg.dir, link)
 }
 
 const packages = workspacePackages()
@@ -107,6 +108,7 @@ if (missingOutputs.length > 0) {
 
 const tmp = mkdtempSync(resolve(root, '.node-next-types-'))
 let failed = false
+let phase = 'temporary consumer setup'
 
 try {
   const nodeModules = resolve(tmp, 'node_modules')
@@ -117,7 +119,7 @@ try {
   if (existsSync(rootTypes)) {
     const typesDir = resolve(nodeModules, '@types')
     mkdirSync(typesDir, { recursive: true })
-    symlinkSync(rootTypes, resolve(typesDir, 'node'), 'dir')
+    linkNodeNextDirectory(rootTypes, resolve(typesDir, 'node'))
   }
 
   writeFileSync(resolve(tmp, 'package.json'), `${JSON.stringify({ type: 'module', private: true }, null, 2)}\n`)
@@ -147,6 +149,7 @@ try {
   // shim isn't spawnable on Windows (CVE-2024-27980) and the .cmd variant needs
   // shell:true, which space-joins args UNESCAPED (DEP0190) — a hazard for the
   // temp tsconfig path. The JS entry behaves identically on every platform.
+  phase = 'NodeNext consumer typecheck'
   execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', resolve(tmp, 'tsconfig.json'), '--pretty', 'false'], {
     cwd: root,
     stdio: 'pipe',
@@ -155,8 +158,9 @@ try {
 } catch (error: unknown) {
   failed = true
   const output = error as { stdout?: Buffer; stderr?: Buffer }
-  console.error('verify-node-next-types: NodeNext consumer typecheck failed.\n')
-  console.error(`${output.stdout?.toString() ?? ''}${output.stderr?.toString() ?? ''}`)
+  const detail = `${output.stdout?.toString() ?? ''}${output.stderr?.toString() ?? ''}`.trim()
+  console.error(`verify-node-next-types: ${phase} failed.`)
+  console.error(detail || (error instanceof Error ? error.message : String(error)))
 } finally {
   rmSync(tmp, { recursive: true, force: true })
 }
