@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,11 @@ def test_account_provider_signout_snapshot(tmp_path: Path) -> None:
         patches=(str(ROOT / 'snapshots' / 'sdk' / 'account-provider-signout' / 'cordis.yml'),),
         provider='deepseek-account',
         model='deepseek-v4-flash',
-        env={'DSH_TELEMETRY_DISABLED': '1', 'DSH_SNAPSHOT': 'replay'},
+        env={'DSH_TELEMETRY_DISABLED': '1', 'DSH_SNAPSHOT': 'replay', 'DSH_HOME': str(tmp_path / 'home')},
+        _launch_args=(
+            shutil.which('node') or 'node', str(ROOT / 'apps/cli/lib/bin.js'), '--profile', 'sdk',
+            '--patch', str(ROOT / 'snapshots/sdk/account-provider-signout/cordis.yml'),
+        ),
     ) as harness:
         result = harness.run('Reply with exactly: SDK snapshot')
     ending = next(event for event in reversed(result.events) if event['type'] == 'turn/end')

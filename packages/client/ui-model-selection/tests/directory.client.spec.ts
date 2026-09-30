@@ -44,7 +44,7 @@ function fixture(
     reasoningFor: () => undefined,
   }
   const projection = createSnapshotStore<ModelSelectionProjection | undefined>({ lastUsed: null, next })
-  const directory = new ModelDirectory(sessions, sid, () => true, catalog, projection)
+  const directory = new ModelDirectory(sessions, sid, () => true, catalog, projection, () => false)
   return { directory, projection }
 }
 

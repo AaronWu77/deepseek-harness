@@ -4,6 +4,7 @@
  * Session's durable selection projection, then submit through the same
  * selectModel call. A switch made in either entry updates this shared state.
  */
+import type { TrackProductEvent } from '@deepseek-ai/dsh-client-product-analytics/client'
 import type {
   ModelCatalogFailure, ModelProviderGroup, ModelSelection, ModelSelectionProjection,
 } from '@deepseek-ai/dsh-api-session-controller/types'
@@ -67,6 +68,8 @@ export class ModelDirectory {
    * @param available - whether this session may use Agent-bound model RPCs.
    * @param catalog - Host-generation catalog shared by every Session.
    * @param projected - durable model selection projected from Session history.
+   * @param isBlank - whether this Session has no first message yet.
+   * @param track - desktop-only callback after a successful user selection.
    */
   constructor(
     private readonly sessions: Pick<TypertClientRemote['session'], 'selectModel'>,
@@ -74,6 +77,8 @@ export class ModelDirectory {
     private readonly available: () => boolean,
     private readonly catalog: Pick<ModelCatalogDirectory, 'store' | 'load' | 'reasoningFor'>,
     private readonly projected: ObservableSnapshot<unknown>,
+    private readonly isBlank: () => boolean,
+    private readonly track?: TrackProductEvent,
   ) {
     this.unsubscribeCatalog = catalog.store.subscribe(() => { this.syncInputs() })
     this.unsubscribeSelection = projected.subscribe(() => { this.syncInputs() })
@@ -100,6 +105,9 @@ export class ModelDirectory {
    */
   async select(selection: ModelSelection): Promise<RemoteResult<void>> {
     this.assertAvailable()
+    const previous = this.store.getSnapshot().current
+    const previousEffort = previous?.reasoningEffort ?? (previous === null ? undefined : this.catalog.reasoningFor(previous)?.defaultEffort)
+    const nextEffort = selection.reasoningEffort ?? this.catalog.reasoningFor(selection)?.defaultEffort
     const generation = ++this.generation
     const projected = modelSelectionProjection(this.projected.getSnapshot())
     const catalog = this.catalog.store.getSnapshot()
@@ -138,6 +146,14 @@ export class ModelDirectory {
       }
       this.store.update((s) => { s.status = 'ready'; s.pending = null; s.error = null })
       this.syncInputs()
+      if (previous !== null) {
+        const from = `${previous.provider}/${previous.model}`
+        const to = `${selection.provider}/${selection.model}`
+        if (from !== to) this.track?.('model_switch', { ...this.isBlank() ? {} : { session_id: this.sessionId }, switch_from: from, switch_to: to })
+        if (from === to && previousEffort !== nextEffort) this.track?.('thinking_level_switch', {
+          ...this.isBlank() ? {} : { session_id: this.sessionId }, model_name: to, switch_from: previousEffort ?? 'default', switch_to: nextEffort ?? 'default',
+        })
+      }
       return { ok: true, value: undefined }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -152,6 +168,7 @@ export class ModelDirectory {
       })
       return { ok: false, error: failure }
     }
+
   }
 
   /**

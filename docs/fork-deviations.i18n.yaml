@@ -59,6 +59,9 @@
 /active-fork-deviations/recorded-source-fixes/f-017-show-a-fixed-personal-brand-in-the-sidebar-badge:
   en: a6db86c27de08790
   zh: bba367ce08386a19
+/active-fork-deviations/recorded-source-fixes/f-018-keep-the-running-status-independent-of-upstream-artwork:
+  en: d31eac57ed5b5b6d
+  zh: 9557c925ca20aaad
 /active-fork-deviations/recorded-source-fixes/external-plugin-compatibility:
   en: d02fb9b803ec7335
   zh: d3305ff437f10c5c

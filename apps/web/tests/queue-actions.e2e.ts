@@ -110,8 +110,12 @@ describe('web e2e: queue row actions', () => {
     await input.fill(ACTIVE_PROMPT)
     await input.press('Enter')
     await expect.poll(() => existsSync(readyFile), { timeout: 15_000 }).toBe(true)
+    await page.getByText('partial', { exact: true }).waitFor({ state: 'visible' })
 
-    const admitted = page.waitForResponse('**/api/session/prompt')
+    const admitted = page.waitForResponse('**/api/session/prompt').then(
+      response => ({ kind: 'response' as const, response }),
+      error => ({ kind: 'failed' as const, error }),
+    )
     const received = Promise.withResolvers<undefined>()
     const release = Promise.withResolvers<undefined>()
     await page.route('**/api/session/prompt', async (route) => {
@@ -141,7 +145,9 @@ describe('web e2e: queue row actions', () => {
     } finally {
       release.resolve(undefined)
     }
-    expect((await admitted).ok()).toBe(true)
+    const admission = await admitted
+    if (admission.kind === 'failed') throw admission.error
+    expect(admission.response.ok()).toBe(true)
     await expect.poll(() => page.getByRole('button', { name: 'Remove queued message' }).isEnabled()).toBe(true)
     expect(await page.locator('[data-queue-dock] [data-submission-echo]').count()).toBe(0)
     expect(await page.locator('[data-queue-dock]').getByRole('status').count()).toBe(0)

@@ -128,6 +128,9 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
   'dynamic-tool-updates': {
     expectedFinalResponse: 'DONE',
   },
+  'tool-scheduler-recovery': {
+    patches: [fileURLToPath(new URL('./tool-scheduler-recovery/runtime.cordis.yml', import.meta.url))],
+  },
   'tool-error-details': {
     patches: [fileURLToPath(new URL('./tool-error-details/runtime.cordis.yml', import.meta.url))],
     expectedFinalResponse: 'ERROR_DETAILS_OK',
@@ -324,6 +327,7 @@ function contextOf(logs: readonly { content: string; header: Record<string, unkn
   return {
     sessionIds: logs.flatMap(log => typeof log.header.id === 'string' ? [log.header.id] : []),
     cwd,
+    cwdAliases: [JSON.stringify(cwd).slice(1, -1)],
   }
 }
 
@@ -349,7 +353,8 @@ async function hydrateReplayFixtures(scenario: CorpusScenario, cwd: string): Pro
   await mkdir(root, { recursive: true })
   return Promise.all((await fixtureFiles(scenario)).map(async (source) => {
     const destination = join(root, basename(source))
-    await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', cwd))
+    const jsonCwd = JSON.stringify(cwd).slice(1, -1)
+    await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', jsonCwd))
     return destination
   }))
 }
@@ -556,7 +561,8 @@ async function runScenario(scenario: CorpusScenario): Promise<{
   const patchRoot = join(cwd, '.snapshot-patches')
   await mkdir(patchRoot, { recursive: true })
   const assertions = SDK_ASSERTIONS[scenario.name] ?? {}
-  const patches = [...authoredPatches(scenario, !recording), ...assertions.patches ?? []]
+  const replayCommon = recording ? [] : [fileURLToPath(new URL('./cordis.replay-common.patch.yml', import.meta.url))]
+  const patches = [...authoredPatches(scenario, !recording), ...assertions.patches ?? [], ...replayCommon]
     .map((patch, index) => materializeProfilePatch(patch, cwd, 'sdk', patchRoot, index))
   let childSessionsRoot: string | undefined
   let childEnvironment: Record<string, string> = {}
@@ -646,6 +652,7 @@ async function runScenario(scenario: CorpusScenario): Promise<{
         })
         results.push(result)
         if (scenario.manifest.environment?.DSH_SNAPSHOT_FEEDBACK === '1') {
+          expect(result.events.find(event => event.type === 'turn/end')?.data['reason']).toEqual({ kind: 'completed' })
           const feedback = result.events.filter(event => event.type.startsWith('feedback/'))
           expect(feedback.map(event => event.type)).toEqual([
             'feedback/record', 'feedback/record', 'feedback/message-put', 'feedback/message-put', 'feedback/message-delete',
@@ -878,6 +885,25 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
         expect(events.filter(event => event.type === 'tool/result').at(-1)).toMatchObject({ data: { message: {
           toolCallId: 'call_dynamic_ping', isError: false, content: [{ type: 'text', text: 'pong' }],
         } } })
+      }
+      if (scenario.name === 'tool-scheduler-recovery') {
+        expect(results).toHaveLength(2)
+        const events = results.flatMap(result => result.events)
+        expect(results[1]?.finalResponse, JSON.stringify(events.filter(event => event.type === 'turn/end')))
+          .toBe('SCHEDULER_RECOVERY_OK')
+        expect(events.filter(event => event.type === 'turn/end').map(event => event.data['reason']))
+          .toEqual([
+            { kind: 'error', error: { message: 'Snapshot scheduler preparation failed', code: 'UNKNOWN' } },
+            { kind: 'completed' },
+          ])
+        expect(events.filter(event => event.type === 'tool/call').map(event => event.data['callId']))
+          .toEqual(['scheduler-complete', 'scheduler-fail'])
+        const toolResults = events.filter(event => event.type === 'tool/result')
+          .map(event => event.data['message'] as { role: string; toolCallId: string; isError: boolean })
+        expect(toolResults.map(result => [result.role, result.toolCallId, result.isError])).toEqual([
+          ['tool', 'scheduler-complete', false], ['tool', 'scheduler-fail', true], ['tool', 'scheduler-unstarted', true],
+        ])
+        expect(events.filter(event => event.type === 'todo/write')).toHaveLength(1)
       }
       if (scenario.name === 'subagent-activation-limit') {
         expect(ordered).toHaveLength(2)

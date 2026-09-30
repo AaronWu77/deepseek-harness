@@ -129,6 +129,14 @@ This is the working inventory of source behavior this fork carries across upstre
 - **Upstream status:** Upstream composes the same badge from `brand.localBuild` plus `DSH_CLIENT_VERSION`, `DSH_CLIENT_COMMIT_HASH` and `DSH_CLIENT_GIT_DIRTY`. The `sidebar.brand.mark` and `sidebar.brand.name` slots remain the profile-level override point.
 - **Retire when:** The personal mark and fixed title are no longer wanted, or a profile override replaces the source change.
 
+### F-018: Keep the running status independent of upstream artwork
+
+- **Behavior:** The running status uses the shared themed vector loader, including its reduced-motion handling, without a whale image or a separate animation clock; live duration and accessibility announcements remain unchanged.
+- **Local implementation:** [Running status](../packages/client/ui-chat/src/client/chat/RunningStatus.tsx) and its [stylesheet](../packages/client/ui-chat/src/client/chat/ChatView.module.css) reuse StateDot; the Client bundle has no running-image copy step.
+- **Regression guard:** [Running-status tests](../packages/client/ui-chat/tests/running-status.client.spec.tsx) and the [ChatView integration test](../packages/client/ui-chat/tests/chat-view.client.spec.tsx) check the decorative vector loader, live clock, polite announcement, and removal when the Session stops.
+- **Upstream status:** Version 0.2.0-rc.2 renders an animated whale mask and static whale fallback; this fork keeps the Aurora presentation described in the [Chat README](../packages/client/ui-chat/README.md).
+- **Retire when:** A supported profile-level override supplies the Aurora indicator with these behaviors, or upstream makes the running decoration brand-neutral.
+
 ### External plugin compatibility
 
 The six external bundles `dsh-codex-connect`, `dsh-better-sidebar`, `dsh-find-plugin`, `dsh-context`, `dsh-daily-planner`, and `dsh-pointer-trails` accept `0.1.7-rc.2` from their own repositories, each keeping the earlier versions its peers already admitted. Install, typecheck, build, and test runs pass against rc.2, and all six load in a rc.2 profile. Most of the compatibility edits are peer ranges and dependency pins; dsh-context additionally re-reads the platform balance on an interval so a mounted quota widget follows the account rather than its mount. Two consumer-path limits remain, both owned by the plugin repositories: the published rc.2 UI primitives and client-store bundles need `@deepseek-ai/dsh-util-code-language`, Zustand, and Immer, which the repository’s `verify-package-dependencies` gate requires these Client browser build inputs to keep as dev-only dependencies, so the affected plugins declare them for tests only; and Codex Connect’s `ModelDirectoryState` fixture carries the `pending` field rc.2 added. A published-package consumer path still needs a policy-compliant build or loader fix and its own standalone install check.

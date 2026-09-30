@@ -1,0 +1,12 @@
+# Recorded fixtures declare Bash explicitly; product defaults remain platform-specific.
+- id: bash-sandbox
+  disabled: false
+- id: tool-bash
+  disabled: false
+- id: tool-pwsh
+  disabled: true
+
+# Host-only diagnosis is outside the recorded model-facing skill catalog.
+- insert:
+    - id: snapshot-host-skill-pin
+      name: ../../apps/cli/tests/profiles/sdk/fixtures/pin-host-skills.mjs

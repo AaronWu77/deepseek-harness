@@ -129,6 +129,14 @@
 - **上游状态：**上游用 `brand.localBuild` 加上 `DSH_CLIENT_VERSION`、`DSH_CLIENT_COMMIT_HASH` 和 `DSH_CLIENT_GIT_DIRTY` 组合同一徽标。`sidebar.brand.mark` 与 `sidebar.brand.name` 插槽仍是 profile 级覆盖点。
 - **退出条件：**不再需要该个人标志与固定标题，或改用 profile 覆盖替代源码改动。
 
+### F-018：运行状态不依赖上游品牌插画
+
+- **行为：**运行状态使用共享的主题矢量加载图标及其减少动态效果处理，不使用鲸鱼图片或独立动画计时器；实时耗时和无障碍播报保持不变。
+- **本地实现：**[运行状态](../packages/client/ui-chat/src/client/chat/RunningStatus.tsx)及其[样式表](../packages/client/ui-chat/src/client/chat/ChatView.module.css)复用 StateDot；Client bundle 不包含运行图片复制步骤。
+- **回归保护：**[运行状态测试](../packages/client/ui-chat/tests/running-status.client.spec.tsx)及 [ChatView 集成测试](../packages/client/ui-chat/tests/chat-view.client.spec.tsx)检查装饰性矢量图标、实时计时、礼貌播报，以及 Session 停止后的移除。
+- **上游状态：**0.2.0-rc.2 使用动态鲸鱼遮罩和静态鲸鱼后备图标；本 fork 保留 [Chat README](../packages/client/ui-chat/README.zh.md)所述的 Aurora 呈现。
+- **退出条件：**受支持的 profile 级覆盖能提供相同行为的 Aurora 图标，或上游将运行装饰改为品牌无关实现。
+
 ### 外部插件兼容性
 
 六个树外 bundle `dsh-codex-connect`、`dsh-better-sidebar`、`dsh-find-plugin`、`dsh-context`、`dsh-daily-planner` 与 `dsh-pointer-trails` 已各自在所属仓库中接受 `0.1.7-rc.2`，并保留 peer 原本允许的较早版本。它们在 rc.2 上的安装、类型检查、构建与测试均通过，六个都能在 rc.2 profile 中加载。兼容改动主要是 peer 范围与依赖锁定；dsh-context 另按固定间隔重新读取平台余额，使常驻的额度组件跟随账户而不是跟随挂载时刻。仍有两项消费者路径限制，均由插件仓库自己承担：已发布的 rc.2 UI primitives 与 client-store bundle 需要 `@deepseek-ai/dsh-util-code-language`、Zustand 与 Immer，而仓库 `verify-package-dependencies` 门禁要求这些 Client 浏览器构建输入保持 dev dependency，因此相关插件仅在测试中声明它们；Codex Connect 的 `ModelDirectoryState` fixture 已带上 rc.2 新增的 `pending` 字段。已发布包的消费者路径仍需符合政策的构建或加载修复及独立安装验证。
