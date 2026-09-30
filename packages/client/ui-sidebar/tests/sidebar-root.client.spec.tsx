@@ -148,7 +148,7 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    expect(screen.getByText('Studio')).toBeTruthy()
+    expect(screen.getByText('STUDIO')).toBeTruthy()
     expect(screen.queryByText('1.2.3-rc.4-0123456-dirty')).toBeNull()
     expect(container.querySelector('svg')).not.toBeNull()
   })
@@ -168,7 +168,7 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    expect(screen.getByText('Studio')).toBeTruthy()
+    expect(screen.getByText('STUDIO')).toBeTruthy()
     expect(screen.queryByText(absent)).toBeNull()
   })
 
@@ -183,7 +183,7 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    expect(screen.getByText('Studio')).toBeTruthy()
+    expect(screen.getByText('STUDIO')).toBeTruthy()
   })
 
   it('hands the region its wide flag and clamps expandSidebar to the collapsed state', () => {

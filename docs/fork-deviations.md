@@ -124,8 +124,8 @@ This is the working inventory of source behavior this fork carries across upstre
 
 ### F-017: Show a fixed personal brand in the sidebar badge
 
-- **Behavior:** The sidebar brand renders the personal AW monogram and the fixed wordmark `Studio` in every locale, and never a build version, commit, or dirty marker.
-- **Local implementation:** [Brand mark component](../packages/client/ui-sidebar/src/client/BrandMark.tsx), [badge markup](../packages/client/ui-sidebar/src/client/SidebarRoot.tsx) and the `brand.wordmark` key, which the [zh](../packages/client/locale/src/locales/zh.ts) and [en](../packages/client/locale/src/locales/en.ts) dictionaries both set to `Studio`, guarded by the [sidebar badge tests](../packages/client/ui-sidebar/tests/sidebar-root.client.spec.tsx) and the [sidebar shell snapshots](../packages/client/ui-sidebar/tests/__snapshots__/sidebar-snapshot.client.spec.tsx.snap).
+- **Behavior:** The sidebar brand renders the personal AW monogram and the fixed wordmark `STUDIO` in every locale, and never a build version, commit, or dirty marker.
+- **Local implementation:** [Brand mark component](../packages/client/ui-sidebar/src/client/BrandMark.tsx), [badge markup](../packages/client/ui-sidebar/src/client/SidebarRoot.tsx) and the `brand.wordmark` key, which the [zh](../packages/client/locale/src/locales/zh.ts) and [en](../packages/client/locale/src/locales/en.ts) dictionaries both set to `STUDIO`, guarded by the [sidebar badge tests](../packages/client/ui-sidebar/tests/sidebar-root.client.spec.tsx) and the [sidebar shell snapshots](../packages/client/ui-sidebar/tests/__snapshots__/sidebar-snapshot.client.spec.tsx.snap).
 - **Upstream status:** Upstream composes the same badge from `brand.localBuild` plus `DSH_CLIENT_VERSION`, `DSH_CLIENT_COMMIT_HASH` and `DSH_CLIENT_GIT_DIRTY`. The `sidebar.brand.mark` and `sidebar.brand.name` slots remain the profile-level override point.
 - **Retire when:** The personal mark and fixed title are no longer wanted, or a profile override replaces the source change.
 

@@ -124,8 +124,8 @@
 
 ### F-017：侧边栏徽标固定显示个人品牌
 
-- **行为：**侧边栏品牌始终显示个人 AW 标志与固定的 `Studio` 字样，任何语言下都不再显示构建版本、提交或 dirty 标记。
-- **本地实现：**[标志组件](../packages/client/ui-sidebar/src/client/BrandMark.tsx)、[徽标标记](../packages/client/ui-sidebar/src/client/SidebarRoot.tsx)，以及 [zh](../packages/client/locale/src/locales/zh.ts) 与 [en](../packages/client/locale/src/locales/en.ts) 字典中值同为 `Studio` 的 `brand.wordmark` 键，由[侧边栏徽标测试](../packages/client/ui-sidebar/tests/sidebar-root.client.spec.tsx)和[侧边栏外壳快照](../packages/client/ui-sidebar/tests/__snapshots__/sidebar-snapshot.client.spec.tsx.snap)保护。
+- **行为：**侧边栏品牌始终显示个人 AW 标志与固定的 `STUDIO` 字样，任何语言下都不再显示构建版本、提交或 dirty 标记。
+- **本地实现：**[标志组件](../packages/client/ui-sidebar/src/client/BrandMark.tsx)、[徽标标记](../packages/client/ui-sidebar/src/client/SidebarRoot.tsx)，以及 [zh](../packages/client/locale/src/locales/zh.ts) 与 [en](../packages/client/locale/src/locales/en.ts) 字典中值同为 `STUDIO` 的 `brand.wordmark` 键，由[侧边栏徽标测试](../packages/client/ui-sidebar/tests/sidebar-root.client.spec.tsx)和[侧边栏外壳快照](../packages/client/ui-sidebar/tests/__snapshots__/sidebar-snapshot.client.spec.tsx.snap)保护。
 - **上游状态：**上游用 `brand.localBuild` 加上 `DSH_CLIENT_VERSION`、`DSH_CLIENT_COMMIT_HASH` 和 `DSH_CLIENT_GIT_DIRTY` 组合同一徽标。`sidebar.brand.mark` 与 `sidebar.brand.name` 插槽仍是 profile 级覆盖点。
 - **退出条件：**不再需要该个人标志与固定标题，或改用 profile 覆盖替代源码改动。
 
