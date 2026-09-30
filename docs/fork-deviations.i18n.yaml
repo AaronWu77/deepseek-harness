@@ -3,8 +3,8 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/fork-deviations.md
 /active-fork-deviations:
-  en: fd2d6802b8a60a57
-  zh: c1604f1fb9a4d21d
+  en: cce16aead8bffd26
+  zh: b100a056d7d1f0f6
 /active-fork-deviations/recorded-source-fixes:
   en: 3d1675bbe58d81cd
   zh: bbaa5a042e778afe
@@ -60,11 +60,11 @@
   en: a6db86c27de08790
   zh: bba367ce08386a19
 /active-fork-deviations/recorded-source-fixes/external-plugin-compatibility:
-  en: 6ffbbbb65b48beb6
-  zh: 8145aed1182187d7
+  en: d02fb9b803ec7335
+  zh: d3305ff437f10c5c
 /active-fork-deviations/other-local-changes-and-unresolved-checks:
-  en: 29fc9a2ece857248
-  zh: a66ad6d0d89ee382
+  en: 6383ac97920acfb0
+  zh: 2cfc5a2b30c87778
 /active-fork-deviations/finish-the-baseline:
   en: d751e15bdc421007
   zh: 96125506a53c04d6

@@ -2,7 +2,7 @@
 
 [English](fork-deviations.md) | 中文
 
-这里登记 fork 在合入上游更新时可能仍需保留的源码行为，不是所有提交的清单：本地视觉风格和 profile 偏好由其他位置负责。源码基线仍在盘点中。隔离的 rc.2 合并结果已通过模型选择专项测试、GUI 测试与 TypeScript 检查；尚未完成撤去本地修复后的测试与树外插件兼容验收，用户同意本轮 Windows 本地试验暂缓 Linux/POSIX bash Web 回放；该项仍未经验证，不能宣称通过。不能只凭本页批准日常分支同步。[同步流程](cookbook/syncing-the-fork.zh.md)规定准入和退出条件。
+这里登记 fork 在合入上游更新时需要保留的源码行为，不是所有提交的清单：本地视觉风格和 profile 偏好由其他位置负责。日常分支现已包含 `dsh-v0.1.7-rc.2` 合并，并已在该分支通过以下检查：TypeScript 检查、GUI 测试、文档门禁、配置目录与包依赖门禁。尚未有撤去本地修复的测试使任何偏差退出，用户同意本轮 Windows 本地 fork 暂缓 Linux/POSIX bash Web 回放；该项仍未经验证，不能宣称通过。[同步流程](cookbook/syncing-the-fork.zh.md)规定准入和退出条件。
 
 ## 已记录的源码修复
 
@@ -131,7 +131,7 @@
 
 ### 外部插件兼容性
 
-五个树外 bundle `dsh-codex-connect`、`dsh-better-sidebar`、`dsh-find-plugin`、`dsh-context` 与 `dsh-daily-planner` 的 peer 范围都拒绝 `0.1.7-rc.2`；未授予版本豁免。disposable copy 使用已发布 rc.2 包时，Better Sidebar、dsh-context、find-plugin 和 Daily Planner 的安装、类型检查与构建通过。Codex Connect 安装和构建通过，但未修改的测试 fixture 缺少新版 `ModelDirectoryState.pending`，类型检查失败；仅在 disposable 副本中给 fixture 补 `pending: null` 后，类型检查和七项 fast-mode 专项测试通过。Better Sidebar 的测试在缺少 code-language 时无法导入已发布的 UI primitives bundle；Daily Planner 的 client 测试在缺少 Zustand 时无法导入已发布的 client-store bundle。仅在 disposable 消费者中补充 code-language、Zustand 和 Immer 后，Daily Planner 的 62 项测试全部通过。仓库 `verify-package-dependencies` 门禁要求这些 Client 浏览器构建输入只列为 dev dependency；直接改为运行时依赖的尝试已被拒绝并撤回。已发布包的消费者路径还需要符合政策的构建或加载修复及独立安装验证。`dsh-pointer-trails` 没有 DSH peer，disposable copy 构建通过，但 lint 缺少无关的 `@stylistic/eslint-plugin`。审阅兼容更新前，保持所有原插件 checkout 和 live profile 不变。
+六个树外 bundle `dsh-codex-connect`、`dsh-better-sidebar`、`dsh-find-plugin`、`dsh-context`、`dsh-daily-planner` 与 `dsh-pointer-trails` 已各自在所属仓库中接受 `0.1.7-rc.2`，并保留 peer 原本允许的较早版本。它们在 rc.2 上的安装、类型检查、构建与测试均通过，六个都能在 rc.2 profile 中加载。兼容改动主要是 peer 范围与依赖锁定；dsh-context 另按固定间隔重新读取平台余额，使常驻的额度组件跟随账户而不是跟随挂载时刻。仍有两项消费者路径限制，均由插件仓库自己承担：已发布的 rc.2 UI primitives 与 client-store bundle 需要 `@deepseek-ai/dsh-util-code-language`、Zustand 与 Immer，而仓库 `verify-package-dependencies` 门禁要求这些 Client 浏览器构建输入保持 dev dependency，因此相关插件仅在测试中声明它们；Codex Connect 的 `ModelDirectoryState` fixture 已带上 rc.2 新增的 `pending` 字段。已发布包的消费者路径仍需符合政策的构建或加载修复及独立安装验证。
 
 ## 其他本地改动及待核查项
 
@@ -139,7 +139,7 @@
 
 历史 Workspace 导航修复与 fork 已集成的上游基线之间已无源码差异；现存[导航测试](../packages/client/ui-workspace/tests/workspaces-service.client.spec.ts)仍有价值，但这不是当前 fork 专有实现。一份旧版默认 preset 恢复决策仍声称会把已退役的 preset 标识映射为 PTC，但原 agent-presets 包及回归测试已不在当前源码树中。新的[预设注册表策略](../packages/preset/agent-preset-registry/src/index.ts)读取默认选择时没有显式映射。先查明旧设置值能否进入新注册表，再判定是否回归或退出[原始决策记录](../.agents/notes/implemented/bug-fix/2026-09-17-retired-preset-default-recovery.zh.md)；若能进入，补充现行路径测试。
 
-[Windows Queue 操作回放](../apps/web/tests/queue-actions.e2e.ts)仍未通过：排队中的消息正在发送时，正在运行的 Turn-process 控件处于禁用且折叠态，但现有 golden 预期禁用且展开并显示部分推理。随后出现的 replay 未完全消耗及等待响应错误由该断言失败引起。[本包 live-Turn 测试](../packages/client/ui-chat/tests/chat-view.client.spec.tsx)通过，且要求禁用但展开的控件，因此浏览器差异不是已批准的显示策略变更。仍需查明组装后状态更新的原因；没有削弱产品行为或 golden。
+[Windows Queue 操作回放](../apps/web/tests/queue-actions.e2e.ts)在本平台仍未通过：排队中的消息正在发送时，正在运行的 Turn-process 控件处于禁用且折叠态，但现有 golden 预期禁用且展开并显示部分推理。随后出现的 replay 未完全消耗及等待响应错误由该断言失败引起。[本包 live-Turn 测试](../packages/client/ui-chat/tests/chat-view.client.spec.tsx)通过，且要求禁用但展开的控件，因此浏览器差异不是已批准的显示策略变更。turn-process 视图、其样式表、共享的 disclosure 原语与 golden 均与上一版本一致，因此该浏览器差异早于本次合并，仍需继续查明；没有削弱产品行为或 golden。
 
 ## 完成基线盘点
 
