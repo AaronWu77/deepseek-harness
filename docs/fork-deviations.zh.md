@@ -122,6 +122,13 @@
 - **上游状态：**Aurora 外边距使顶端色带位于 rc.2 的 chrome 标题拖动区之外。新增色带后，五项 macOS 浏览器拖动检查均通过，Desktop runtime 构建也通过；Electron 原生窗口交互仍待验证。
 - **退出条件：**移除这段拖动样式后，顶端没有无法拖动的区域，交互控件也不会变为窗口拖动目标。
 
+### F-017：侧边栏徽标固定显示个人品牌
+
+- **行为：**侧边栏品牌始终显示个人 AW 标志与固定的 `Studio` 字样，任何语言下都不再显示构建版本、提交或 dirty 标记。
+- **本地实现：**[标志组件](../packages/client/ui-sidebar/src/client/BrandMark.tsx)、[徽标标记](../packages/client/ui-sidebar/src/client/SidebarRoot.tsx)，以及 [zh](../packages/client/locale/src/locales/zh.ts) 与 [en](../packages/client/locale/src/locales/en.ts) 字典中值同为 `Studio` 的 `brand.wordmark` 键，由[侧边栏徽标测试](../packages/client/ui-sidebar/tests/sidebar-root.client.spec.tsx)和[侧边栏外壳快照](../packages/client/ui-sidebar/tests/__snapshots__/sidebar-snapshot.client.spec.tsx.snap)保护。
+- **上游状态：**上游用 `brand.localBuild` 加上 `DSH_CLIENT_VERSION`、`DSH_CLIENT_COMMIT_HASH` 和 `DSH_CLIENT_GIT_DIRTY` 组合同一徽标。`sidebar.brand.mark` 与 `sidebar.brand.name` 插槽仍是 profile 级覆盖点。
+- **退出条件：**不再需要该个人标志与固定标题，或改用 profile 覆盖替代源码改动。
+
 ### 外部插件兼容性
 
 五个树外 bundle `dsh-codex-connect`、`dsh-better-sidebar`、`dsh-find-plugin`、`dsh-context` 与 `dsh-daily-planner` 的 peer 范围都拒绝 `0.1.7-rc.2`；未授予版本豁免。disposable copy 使用已发布 rc.2 包时，Better Sidebar、dsh-context、find-plugin 和 Daily Planner 的安装、类型检查与构建通过。Codex Connect 安装和构建通过，但未修改的测试 fixture 缺少新版 `ModelDirectoryState.pending`，类型检查失败；仅在 disposable 副本中给 fixture 补 `pending: null` 后，类型检查和七项 fast-mode 专项测试通过。Better Sidebar 的测试在缺少 code-language 时无法导入已发布的 UI primitives bundle；Daily Planner 的 client 测试在缺少 Zustand 时无法导入已发布的 client-store bundle。仅在 disposable 消费者中补充 code-language、Zustand 和 Immer 后，Daily Planner 的 62 项测试全部通过。仓库 `verify-package-dependencies` 门禁要求这些 Client 浏览器构建输入只列为 dev dependency；直接改为运行时依赖的尝试已被拒绝并撤回。已发布包的消费者路径还需要符合政策的构建或加载修复及独立安装验证。`dsh-pointer-trails` 没有 DSH peer，disposable copy 构建通过，但 lint 缺少无关的 `@stylistic/eslint-plugin`。审阅兼容更新前，保持所有原插件 checkout 和 live profile 不变。
