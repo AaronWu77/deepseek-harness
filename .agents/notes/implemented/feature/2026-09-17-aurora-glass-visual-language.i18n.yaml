@@ -1,6 +1,31 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-17-aurora-glass-visual-language.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-17-aurora-glass-visual-language.md
-2026-09-17-aurora-glass-visual-language.md: f4b5d8a1aa1d7ad05bc74f3cfb6bfb68fb0509dc
-2026-09-17-aurora-glass-visual-language.zh.md: 30dc097dcf6536e6e945017e82c248e8dbfa429f
+/agent-note-aurora-glass-visual-language:
+  en: ed7afd9ff66c4af1
+  zh: f896860e9160a9f4
+/agent-note-aurora-glass-visual-language/problem:
+  en: 50d86641f73a9679
+  zh: dc0fadeb73d5d792
+/agent-note-aurora-glass-visual-language/decision:
+  en: d98e85ee944d2cb1
+  zh: 84dcdd2a4ed37d25
+/agent-note-aurora-glass-visual-language/the-prefix-pair-the-minifier-collapses:
+  en: 028c0add624cf348
+  zh: b3c87dfd21406c79
+/agent-note-aurora-glass-visual-language/glass-is-a-leaf-layer:
+  en: 951e06e6ac042a6c
+  zh: 3dfa01bb4c70a529
+/agent-note-aurora-glass-visual-language/alternatives-considered:
+  en: eec12908787f4010
+  zh: b8ef7438baf088dd
+/agent-note-aurora-glass-visual-language/consequences:
+  en: 4e7dbac3a9f55743
+  zh: 0a6036754bfef666
+/agent-note-aurora-glass-visual-language/why-the-aurora-is-one-layer:
+  en: b68844bb4262cb5c
+  zh: 2d5478a46918155d
+/agent-note-aurora-glass-visual-language/testing:
+  en: 272c4617b9812e36
+  zh: 8bcbd51cb67013ed

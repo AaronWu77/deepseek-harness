@@ -38,10 +38,11 @@ function fixture(
     error: null,
   }
   const catalogStore = createSnapshotStore(catalogState)
-  const catalog = {
+  const catalog: Pick<ModelCatalogDirectory, 'store' | 'load' | 'reasoningFor'> = {
     store: catalogStore,
     load: async () => catalogStore.getSnapshot().value!,
-  } as ModelCatalogDirectory
+    reasoningFor: () => undefined,
+  }
   const projection = createSnapshotStore<ModelSelectionProjection | undefined>({ lastUsed: null, next })
   const directory = new ModelDirectory(sessions, sid, () => true, catalog, projection)
   return { directory, projection }

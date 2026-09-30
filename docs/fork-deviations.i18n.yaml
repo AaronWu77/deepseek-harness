@@ -1,6 +1,67 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for fork-deviations.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/fork-deviations.md
-fork-deviations.md: fe70779ed6e5d8f24fdc9d494f85957fff0231eb
-fork-deviations.zh.md: c78adb85f304a66252e298b788a0751bd5eff52b
+/active-fork-deviations:
+  en: fd2d6802b8a60a57
+  zh: c1604f1fb9a4d21d
+/active-fork-deviations/recorded-source-fixes:
+  en: 3d1675bbe58d81cd
+  zh: bbaa5a042e778afe
+/active-fork-deviations/recorded-source-fixes/f-001-preserve-execution-under-an-effective-sandbox-mode:
+  en: 4ffd80b7fe12db53
+  zh: 1552aedcc9180a50
+/active-fork-deviations/recorded-source-fixes/f-002-ignore-a-non-widening-run-code-request:
+  en: 1e89be165b3448e6
+  zh: 6c0c57b96912e615
+/active-fork-deviations/recorded-source-fixes/f-003-keep-a-stable-tool-scheduler-identity:
+  en: 0cbfa2794f6bb180
+  zh: ad850860e6725fd2
+/active-fork-deviations/recorded-source-fixes/f-004-acknowledge-session-model-selection-before-profile-persistence:
+  en: 1b832b7690ccc740
+  zh: 27372a550546ca3f
+/active-fork-deviations/recorded-source-fixes/f-005-explain-ptc-syntax-failures-without-retrying-a-sandbox:
+  en: cc6ff4bc6d9b3bcf
+  zh: 23849bd017b2b7d2
+/active-fork-deviations/recorded-source-fixes/f-006-reserve-escalation-for-explicit-sandbox-denials:
+  en: 21043d4d12ca891c
+  zh: 4c029253a953ccaf
+/active-fork-deviations/recorded-source-fixes/f-007-validate-string-minlength-in-tool-schemas:
+  en: 98602fc5356c495b
+  zh: 678ab7469c4fece9
+/active-fork-deviations/recorded-source-fixes/f-008-reveal-windows-files-with-one-explorer-argument:
+  en: 0646db0b0939019f
+  zh: ed3c30d514b7b8f3
+/active-fork-deviations/recorded-source-fixes/f-009-keep-settings-dialogs-above-shell-columns:
+  en: 7b4a8adc35179363
+  zh: 51a80ec6d0a1e411
+/active-fork-deviations/recorded-source-fixes/f-010-suppress-the-collapsed-right-sidebar-scrim:
+  en: c6567fb77f375cd2
+  zh: 28bcb480a9b53635
+/active-fork-deviations/recorded-source-fixes/f-011-preserve-the-latest-model-selection-outcome:
+  en: a0e457de73fec4d2
+  zh: 38d3ce1d7999cbdc
+/active-fork-deviations/recorded-source-fixes/f-012-keep-windows-repository-checks-executable:
+  en: 64f22602a4befd51
+  zh: 2b12bfeeb506f091
+/active-fork-deviations/recorded-source-fixes/f-013-skip-absent-virtual-manifests-in-notices-generation:
+  en: c9ec831b070c5855
+  zh: 46c26cc161af9e3b
+/active-fork-deviations/recorded-source-fixes/f-014-keep-vendor-rescoping-out-of-ui-locale-identifiers:
+  en: df59e460216f1729
+  zh: 8939d83f38598d98
+/active-fork-deviations/recorded-source-fixes/f-015-anchor-fullscreen-right-panels-to-the-viewport:
+  en: 02ddeef495ee4c95
+  zh: c9e2326a7f2eb556
+/active-fork-deviations/recorded-source-fixes/f-016-drag-the-exposed-macos-aurora-top-strip:
+  en: 3ab1530b7e1005b8
+  zh: 4f3dbe0f4971201e
+/active-fork-deviations/recorded-source-fixes/external-plugin-compatibility:
+  en: 6ffbbbb65b48beb6
+  zh: 8145aed1182187d7
+/active-fork-deviations/other-local-changes-and-unresolved-checks:
+  en: 29fc9a2ece857248
+  zh: a66ad6d0d89ee382
+/active-fork-deviations/finish-the-baseline:
+  en: d751e15bdc421007
+  zh: 96125506a53c04d6

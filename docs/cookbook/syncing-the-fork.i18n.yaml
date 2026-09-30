@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for syncing-the-fork.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/cookbook/syncing-the-fork.md
-syncing-the-fork.md: 8b66f9ebef4daddbe646b67234834f5bad8a2694
-syncing-the-fork.zh.md: a5ef11d84d23d857bcd3ecb5d3f355f538bb498e
+/synchronizing-the-personal-fork:
+  en: d8b3a9ab55123e82
+  zh: 422db3b621128424
+/synchronizing-the-personal-fork/before-changing-the-fork:
+  en: fc71230af2b40caa
+  zh: 2a198a1587b5cc8b
+/synchronizing-the-personal-fork/integrate-an-upstream-revision:
+  en: 3e492751e1affb4e
+  zh: 00cc5fc45a847697
+/synchronizing-the-personal-fork/desktop-qualification:
+  en: 3c572996cc227dc0
+  zh: 5c5c9b30ff1137f8
+/synchronizing-the-personal-fork/verify-readiness:
+  en: 627abb08208e156b
+  zh: 1b1cb9749ff6240e

@@ -18,7 +18,7 @@
 .root[data-expanded] {
   margin: 6px 0;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: var(--dsw-radius-lg);
   /* The card holds the scrolling bodies (.bodyScroll, .ioSection), so it takes
      the l2 thumb pair per the ui-theme rebinding contract. */
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
@@ -281,13 +281,14 @@
   flex-direction: column;
   margin: 4px 0 4px 4px;
   border: 0.5px solid var(--dsw-alias-border-l1);
-  border-radius: 12px;
+  border-radius: var(--dsw-radius-md);
   /* Ink surface: rebind the label scale this element inherits, so its title,
      line numbers, and captions read on the dark fill. Same surface-scoped
      rebinding the elevation stroke and the scrollbar pair use. */
   --dsw-alias-label-primary: var(--dsw-code-ink);
   --dsw-alias-label-secondary: var(--dsw-code-ink-secondary);
   --dsw-alias-label-tertiary: var(--dsw-code-ink-tertiary);
+
   background: var(--dsw-alias-markdown-code-block);
   font: var(--dsw-font-markdown-code-block-small);
 }
@@ -310,7 +311,7 @@
 .ioSection::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   background-clip: padding-box;
-  border-radius: 6px;
+  border-radius: var(--dsw-radius-sm);
 }
 
 /* Track end-margins keep the thumb's travel out of the rounded corners. */

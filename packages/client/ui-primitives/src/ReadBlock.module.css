@@ -1,5 +1,5 @@
 .block {
-  --dsl-read-radius: 12px;
+  --dsl-read-radius: var(--dsw-radius-md);
   --dsl-read-line-height: 22px;
   /* Fixed-width gutter column for the line numbers, so the content edge stays
      put down the whole window regardless of how wide the numbers grow. */

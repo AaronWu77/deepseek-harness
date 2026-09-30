@@ -108,7 +108,7 @@ const RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION
 const RUN_CODE_CONTROLS = {
   timeoutMs: { type: 'number', description: 'Positive elapsed-time budget in milliseconds, capped by the deployment maximum.' },
   sandbox_permissions: { type: 'string', enum: [...ESCALATION_TARGETS], description: 'Wider sandbox mode for this complete program execution; provide it only after an explicit sandbox denial, together with a non-empty justification, request the narrowest mode strictly wider than the current mode, and omit both fields when the current mode is danger-full-access.' },
-  justification: { type: 'string', minLength: 1, description: 'One non-empty sentence explaining why this complete program needs wider access, shown to the user for approval.' },
+  justification: { type: 'string', minLength: 1, description: 'One non-empty sentence explaining why this complete program needs wider access, shown to the user for approval. Use the language of the user’s current request.' },
 } as const
 
 /** Build actionable guidance when the model sends malformed run_code sandbox fields. */

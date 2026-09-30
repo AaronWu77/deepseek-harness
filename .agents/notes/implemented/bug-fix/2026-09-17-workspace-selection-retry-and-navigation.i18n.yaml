@@ -1,6 +1,22 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-17-workspace-selection-retry-and-navigation.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-17-workspace-selection-retry-and-navigation.md
-2026-09-17-workspace-selection-retry-and-navigation.md: f154427dcea447758f20ca9305c54ea5c590deb7
-2026-09-17-workspace-selection-retry-and-navigation.zh.md: 15edefd2940a2278ee0129c9346583a9d115c0f6
+/agent-note-workspace-selection-remains-recoverable-across-navigation-races:
+  en: e33db5fcb774115a
+  zh: 2412ca0551d05470
+/agent-note-workspace-selection-remains-recoverable-across-navigation-races/problem:
+  en: c6c416fa6b689bd7
+  zh: 26575152c0d4fbb4
+/agent-note-workspace-selection-remains-recoverable-across-navigation-races/decision:
+  en: 318a1de9bb03af50
+  zh: 3f0c0be4db85f17a
+/agent-note-workspace-selection-remains-recoverable-across-navigation-races/alternatives-considered:
+  en: 2a8d0d9bde4fac00
+  zh: 40d7b2b24d8783bb
+/agent-note-workspace-selection-remains-recoverable-across-navigation-races/consequences:
+  en: 9f47d3342777e2ed
+  zh: f2d89abb2786db6d
+/agent-note-workspace-selection-remains-recoverable-across-navigation-races/verification:
+  en: 4307e8bdb810fdec
+  zh: c71fff5bf6498478

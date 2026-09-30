@@ -24,6 +24,7 @@ import {
   compareOrRefreshGolden,
   launchWebScaffold,
   seedSession,
+  readPersistedEvents,
   watchConsole,
   webSnapshotMode,
   type WebScaffold,
@@ -181,10 +182,12 @@ describe.skipIf(MODE === 'record')('web e2e: file and session references through
     await expect.poll(() => menu.getByRole('option').count(), { timeout: 15_000 }).toBeGreaterThanOrEqual(2)
     // Session rows are dated from the live Host list, so their age bucket
     // advances while the suite runs.
+    const displayCwd = abbreviateHomePath(scaffold.workspaceCwd, homedir())
     const snapshot = await captureStableAria(
       page, '[role="listbox"]', scaffold.workspaceCwd, {
         normalizeAge: true,
-        replacements: [[abbreviateHomePath(scaffold.workspaceCwd, homedir()), '{{cwd}}']],
+        // Playwright quotes Windows paths in ariaSnapshot with escaped separators.
+        replacements: [[displayCwd.replaceAll('\\', '\\\\'), '{{cwd}}'], [displayCwd, '{{cwd}}']],
       },
     )
     await compareOrRefreshGolden(MENU_EXPECTED, snapshot, MODE)
@@ -403,9 +406,8 @@ describe.skipIf(MODE === 'record')('web e2e: file and session references through
     await target.waitFor({ timeout: 15_000 })
     await target.click()
     await page.locator('[data-chat-flow-kind="user"]').filter({ hasText: 'Research notes' }).waitFor({ timeout: 15_000 })
-    const session = scaffold.ctx.sessions.get(SessionId(TARGET_SESSION_ID))
-    if (session === undefined) throw new Error('reference target session is unavailable')
-    const inputs = session.snapshotEvents().filter(event => event.type === 'user/message')
+    const events = await readPersistedEvents(scaffold, SessionId(TARGET_SESSION_ID))
+    const inputs = events.filter(event => event.type === 'user/message')
     expect(inputs.map(event => event.data.source.kind)).toEqual(['user', 'session-reference'])
     expect(inputs[0]?.seq).toBeLessThan(inputs[1]!.seq)
     expect(JSON.stringify(inputs[1]?.data)).toContain('<referenced-sessions>snapshot</referenced-sessions>')

@@ -258,9 +258,8 @@ describe('AppFrame', () => {
   it('mounts the shell.leading seat only while the darwin collapse hides the column', () => {
     document.documentElement.dataset.platform = 'darwin'
     const { frame, instance, sidebarOwner, queryByTestId } = mountFrame()
-    // The window drag band composes app-regions in DOM order: it must render
-    // before all column content so every later no-drag subtracts from it.
-    expect(frame.querySelector('[data-shell-window]')?.firstElementChild?.hasAttribute('data-shell-leading-band')).toBe(true)
+    // Chrome rows own the drag region; the inset glass frame adds no drag band.
+    expect(frame.querySelector('[data-shell-leading-band]')).toBeNull()
     expect(queryByTestId('shell.leading-content')).toBeNull()
     act(() => { instance.actions.toggleSidebar() })
     expect(tracks(frame)).toEqual([0, 0])
@@ -282,8 +281,6 @@ describe('AppFrame', () => {
       expect(slotCalls).toEqual([{ key: 'main', props: {}, options: { entryKey: panelId ?? 'conversation' } }])
       expect(getByTestId('main-content').getAttribute('data-entry-key')).toBe(panelId ?? 'conversation')
       expect(instance.getSnapshot().panelInfo).toEqual({ activePanelId: panelId })
-      // The deepened conversation drag band keys off this frame marker.
-      expect(frame.querySelector('[data-shell-window]')?.hasAttribute('data-panel-conversation')).toBe(panelId === null)
       expect(instance.getSnapshot().layoutInfo).toBe(layoutInfo)
       expect(tracks(frame)).toEqual([280, 0])
       expect(selectedSession).toBe(sessionId)

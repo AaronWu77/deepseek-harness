@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-19-stable-tool-scheduler-identity.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-19-stable-tool-scheduler-identity.md
-2026-09-19-stable-tool-scheduler-identity.md: f1865011d1e34e2ab813a6847b81ae69e9f00f98
-2026-09-19-stable-tool-scheduler-identity.zh.md: d41eacfa30547a27da0018530d16d64bd2aff394
+/agent-note-stable-scheduler-identity-across-source-and-profile-entry-points:
+  en: 520de65f7e907d7f
+  zh: 5b96c27bc52c85e2
+/agent-note-stable-scheduler-identity-across-source-and-profile-entry-points/problem:
+  en: f38678bc0b4f5a11
+  zh: e1b3011763b9bf8a
+/agent-note-stable-scheduler-identity-across-source-and-profile-entry-points/decision:
+  en: 369afe03b0f1ae7d
+  zh: 162cb20213ec5b9d
+/agent-note-stable-scheduler-identity-across-source-and-profile-entry-points/alternatives-considered:
+  en: 8b9d94299c5ffc3b
+  zh: 448ccca3d5fc0653
+/agent-note-stable-scheduler-identity-across-source-and-profile-entry-points/consequences:
+  en: a8f0c6c55970aa98
+  zh: 9064109f387fa9ab

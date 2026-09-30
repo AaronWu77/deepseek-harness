@@ -1,5 +1,5 @@
 .block {
-  --dsl-diff-radius: 12px;
+  --dsl-diff-radius: var(--dsw-radius-md);
   --dsl-diff-line-height: 22px;
 
   position: relative;

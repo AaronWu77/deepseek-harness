@@ -1,6 +1,22 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-17-retired-preset-default-recovery.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-17-retired-preset-default-recovery.md
-2026-09-17-retired-preset-default-recovery.md: 9ca4df02fd3212ac83595a2a0ea7509ec0dc99c6
-2026-09-17-retired-preset-default-recovery.zh.md: 2433549b9c541bc5f66f554dabece10ce2cb10b1
+/agent-note-retired-preset-defaults-recover-after-the-code-to-ptc-rename:
+  en: f54b3d76440d1155
+  zh: 783e9a466a9d5eac
+/agent-note-retired-preset-defaults-recover-after-the-code-to-ptc-rename/problem:
+  en: d2cd5e7a92342bcd
+  zh: b4d8004bf60ad9c2
+/agent-note-retired-preset-defaults-recover-after-the-code-to-ptc-rename/decision:
+  en: 39bdf8b017fbe20c
+  zh: 41fc9de9f565633c
+/agent-note-retired-preset-defaults-recover-after-the-code-to-ptc-rename/alternatives-considered:
+  en: a3d0beba10ac5219
+  zh: 7a63b36761258691
+/agent-note-retired-preset-defaults-recover-after-the-code-to-ptc-rename/consequences:
+  en: 343aeb91e64e04bc
+  zh: 9b2880fe7c41f7da
+/agent-note-retired-preset-defaults-recover-after-the-code-to-ptc-rename/verification:
+  en: 0a88767825805b2a
+  zh: 0065c39df8af7f7f
