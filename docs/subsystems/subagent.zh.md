@@ -6,9 +6,9 @@
 
 ## 能力与 activation 请求
 
-所有后端都使用 startActivation。能力标记校验请求选项；prepareContinuable 选择本地 Agent 创建，start 选择一次外部执行。面向模型的工具采用 parent 回传。Workflow 与 code mode 消费者可以等待 caller 结果，不额外向父代理注入消息。历史子会话的 descriptor 不可用时，以 `mode: 'unknown'` 保持可发现性，但不授予继续执行能力；[包 README](../../packages/subagent/subagent/README.zh.md) 定义目录持久化语义。
+所有后端都使用 startActivation。能力标记校验请求选项；prepareContinuable 默认选择本地可续接 Agent，start 选择一次外部执行；显式 `lifecycle: 'one-shot'` 通过 prepareLocalOneShot 选择本地一次性 Agent。面向模型的工具采用 parent 回传。Workflow 与 code mode 消费者可以等待 caller 结果，不额外向父代理注入消息。历史子会话的 descriptor 不可用时，以 `mode: 'unknown'` 保持可发现性，但不授予继续执行能力；[包 README](../../packages/subagent/subagent/README.zh.md) 定义目录持久化语义。
 
-可选的 `request.cwd` 指定子级的初始目录；相对路径以父级当前有效目录为基准解析。省略时，在准入阶段捕获该目录。本地子 Session 保留父级的原始项目，冷恢复保留其日志中的目录状态。
+可选的 `request.cwd` 指定子级的初始目录；相对路径以父级当前有效目录为基准解析。省略时，在准入阶段捕获该目录。可续接子 Session 保留父级原始项目，冷恢复保留其目录日志；one-shot 子 Session 以所选初始目录作为 origin。
 
 ```ts type-equiv
 /**
@@ -31,13 +31,18 @@ interface SubagentCapabilities {
 interface SubagentActivationSpec {
   /** Registered backend to use. */
   readonly provider: string
+  /** Explicit local lifetime; omitted preserves existing provider dispatch. */
+  readonly lifecycle?: 'one-shot' | 'continuable'
   /** Short task label retained in cataloged child membership. */
   readonly label: string
   /** Optional reserved identity for a local child; external backends allocate their own ids. */
   readonly childId?: SessionId
   /** Task, parent, and backend-supported execution options. */
   readonly request: Omit<SubagentStartRequest, 'label' | 'signal'>
-  /** Cancellation before publication; callers own later cancellation through dispose. */
+  /**
+   * Startup cancellation; local one-shot and external executions also cancel after publication.
+   * Continuable callers use dispose after publication.
+   */
   readonly signal: AbortSignal
   /** Parent delivery notifies the model; caller delivery only returns the result. Local children always enter the parent catalog. */
   readonly delivery: 'parent' | 'caller'
@@ -76,7 +81,7 @@ interface SubagentStartRequest {
   readonly prompt: ContentBlock[]
   /**
    * The spawning agent. Its effective directory supplies the default cwd;
-   * in-process children retain its origin, lineage, and delegation depth.
+   * continuable children retain its project origin; all local children retain lineage and delegation depth.
    */
   readonly parent: Agent
   /**
@@ -176,6 +181,31 @@ interface ContinuableCreateSpec {
    * `CreateAgentOptions.seed`: contiguous from seq 0, lossless JSON, balanced.
    */
   readonly seed?: readonly SessionEvent[]
+}
+```
+
+一次性本地子级使用已有 one-shot descriptor/catalog 格式，并保留真实父子 Session 关系。manager 先检查在线父级、身份、深度和能力，再执行分离的创建 hook；provider 不创建或返回 Agent/handle。setup 挂载显式角色 preset，preflight 在发布前探测子级，任一 hook 失败都会回滚。manager 统一管理权限继承、工作目录、执行和清理；发布后 signal 取消、中断和 dispose 均终止一次性子级，后续消息及冷恢复始终拒绝。
+
+```ts type-equiv
+/** Reserved local identity and task admitted before one-shot preparation. */
+interface LocalOneShotCreateRequest extends ResolvedSubagentStartRequest {
+  /** Manager-reserved durable child identity. */
+  readonly sessionId: SessionId
+}
+```
+
+```ts type-equiv
+/** Detached one-shot creation hooks; the manager alone creates and owns the child. */
+interface LocalOneShotCreateSpec {
+  /** Explicit child preset metadata; setup mounts its implementation. */
+  readonly agentPreset?: string
+  /** Scoped composition before publication; must not start child execution. */
+  readonly setup?: CreateAgentOptions['setup']
+  /**
+   * Startup probe after creation; its signal includes caller, manager and parent disposal cancellation.
+   * Rejection disposes the unpublished child.
+   */
+  readonly preflight?: (child: Agent, signal: AbortSignal) => Promise<void>
 }
 ```
 
@@ -366,8 +396,8 @@ interface SubagentProvider {
    * OPTIONAL (continuable-creation capability): contribute the detached
    * creation inputs that distinguish this provider's continuable children —
    * only whether the child session is seeded with parent history. Method
-   * presence selects local activation execution. Providers without it execute
-   * through start and do not accept subsequent messages.
+   * presence selects local continuable activation by default. Explicit one-shot
+   * lifetime uses prepareLocalOneShot; external executions use start.
    *
    * This is the provider's ONLY participation in a continuable child. The
    * continuation manager owns identity reservation, composition, Agent
@@ -377,6 +407,16 @@ interface SubagentProvider {
    * data belonging only to `request.sessionId`.
    */
   prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
+  /**
+   * Prepare a fresh local one-shot child without creating or returning an Agent or handle.
+   * Selected only by explicit lifecycle: 'one-shot'; the manager owns execution,
+   * cancellation, result capture and quiescent disposal. Hooks may compose and
+   * probe the child, never deliver prompts or retain its lifecycle ownership.
+   * Preparation observes request.signal and returns hooks without awaiting native
+   * probes or child execution. The second signal is manager-owned startup cancellation
+   * and must stop provider work when the parent or manager drains.
+   */
+  prepareLocalOneShot?(request: LocalOneShotCreateRequest, managedSignal: AbortSignal): Promise<LocalOneShotCreateSpec>
 }
 ```
 
@@ -587,8 +627,8 @@ listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<Subagen
 /**
  * Register a provider under its name. Registration is effect-scoped and HMR
  * safe; removing a provider blocks new starts but does not revoke runs that
- * were already returned to their holders. Providers without either execution
- * method are rejected with UNSUPPORTED_CAPABILITY before registration.
+ * were already returned to their holders. Providers without `start`, `prepareContinuable`,
+ * or `prepareLocalOneShot` are rejected with UNSUPPORTED_CAPABILITY before registration.
  * @param provider - the trusted provider implementation.
  * @returns the exact Cordis effect disposer.
  */

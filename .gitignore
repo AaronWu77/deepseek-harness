@@ -9,6 +9,7 @@ lib/
 pnpm-debug.log
 .pnpm-store/
 .cache/
+/.local/
 examples/*/*.jsonl
 .storages/
 .sessions/

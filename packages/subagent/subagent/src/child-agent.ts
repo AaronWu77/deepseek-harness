@@ -156,6 +156,8 @@ export function childSessionMeta(
 
 /** The scoped composition a child agent's creation window applies. */
 export interface ChildComposition {
+  /** Explicit one-shot presets mount in setup instead of joining the parent's preset. */
+  readonly inheritPreset?: false
   /** Per-child persona shadowing the deployment persona. */
   readonly persona?: string | undefined
   /** Per-child tool scoping. */
@@ -174,8 +176,9 @@ export const SUBAGENT_DELEGATION_CONTEXT
     + 'limitation in your reply so the delegating agent can handle it.'
 
 /**
- * Compose one child inside its creation window: join its parent's preset,
- * register the fixed delegation-scope statement, then apply the child's own
+ * Compose one child inside its creation window: join its parent's preset unless
+ * setup mounts an explicit one-shot preset, register the fixed delegation-scope
+ * statement, then apply the child's own
  * shadowing persona section and tool restriction, all owned by the child's
  * scope and therefore invisible to its parent and siblings. Creation and cold
  * resume both pass through here.
@@ -189,8 +192,8 @@ export const SUBAGENT_DELEGATION_CONTEXT
  * composed without the join is exactly the defect this function exists to
  * prevent: with every model-facing row on the agent plane, a child that joins
  * no preset sees an empty tool registry and none of its parent's prompt
- * sections. Taking the parent as a parameter is what makes that omission
- * unrepresentable at the call sites.
+ * sections. An explicit one-shot preset instead mounts through creation setup
+ * after these registrations; it does not inherit the parent's preset.
  * @param childCtx - the child agent's scoped creation context.
  * @param parent - the delegating parent whose composition the child joins.
  * @param composition - the per-child persona and tool filter to install.
@@ -200,7 +203,7 @@ export function applyChildComposition(
   parent: Agent,
   composition: ChildComposition,
 ): void {
-  childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
+  if (composition.inheritPreset !== false) childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
   childCtx.systemPrompt.context({
     name: 'subagent:delegation',
     order: childCtx.systemPrompt.getContextOrder('SUBAGENT_DELEGATION'),

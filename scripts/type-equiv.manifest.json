@@ -1603,6 +1603,16 @@
     },
     {
       "doc": "docs/subsystems/subagent.md",
+      "symbol": "LocalOneShotCreateRequest",
+      "source": "packages/subagent/subagent/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "LocalOneShotCreateSpec",
+      "source": "packages/subagent/subagent/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
       "symbol": "SubagentResult",
       "source": "packages/subagent/subagent/src/types.ts"
     },

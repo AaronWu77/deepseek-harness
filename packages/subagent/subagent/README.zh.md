@@ -58,7 +58,7 @@ kind: "package-reference"
 
 ### 本地与外部子级
 
-`startActivation({ provider, label, request, signal, delivery })` 返回 `{ childId, messageId?, result, dispose }`。提供 `childId` 会选择本地后端，并保证返回 `messageId`。本地子级接受后续消息并支持冷恢复；外部子级只暴露一次执行，拒绝继续输入。`request.agentOptions` 覆盖后端支持的子级模型设置。`delivery: 'parent'` 提供面向模型的完成通知；`delivery: 'caller'` 让工作流等待结果，不发送父级通知，也不附加初始返回指导。本地父级投递需要持久化，调用方投递可以使用临时本地会话；冷恢复需要持久化与 Session 查询服务。
+`startActivation({ provider, lifecycle?, childId?, label, request, signal, delivery })` 返回 `{ childId, messageId?, result, dispose }`，本地子级返回 `messageId`。省略 `lifecycle` 时，`prepareContinuable` 选择本地可续接子级，`start` 选择外部执行，保留已有分派。显式 `lifecycle: 'one-shot'` 必须使用 `prepareLocalOneShot`，创建真实本地子级并记录 one-shot descriptor/catalog，不接受后续输入或冷恢复。分离的 preparation 提供创建 hook，不返回 Agent 或 handle。manager 在 hook 前检查在线父级、深度、能力和重复身份，再统一管理子级创建、工作目录、权限继承、执行与清理。显式 one-shot preset 取代父级 preset 组合；setup 挂载该 preset，preflight 探测尚未发布的子级。调用方信号取消启动；本地 one-shot 与外部执行在发布后仍绑定 `signal`，直到终止清理完成。可续接调用方在发布后使用 `dispose()`。dispose 和中断也会终止并释放子级。`request.agentOptions` 覆盖后端支持的子级模型设置。`delivery: 'parent'` 提供模型完成通知，`delivery: 'caller'` 不发送通知或初始返回指导。one-shot 父级投递可以使用临时持久化；可续接父级投递需要持久化，调用方投递可以使用临时会话。可续接子级保留父级项目 origin，one-shot 子级以所选初始目录作为 origin。冷恢复需要持久化与 Session 查询服务。
 
 ### 消息、中断与发现
 
@@ -66,7 +66,7 @@ kind: "package-reference"
 
 ### 失败与恢复
 
-缺少 `agents` 服务时，启动请求以 `CONTINUATION_UNAVAILABLE` 拒绝；运行时可用但父级缺失或被替换时，以 `UNAUTHORIZED` 拒绝。未实现任何执行方法的提供方会在注册时以 `UNSUPPORTED_CAPABILITY` 被拒绝；请求不受支持的能力会以同一码使创建失败。调用方信号仅取消尚未发布的工作；发布后通过 `dispose()` 取消该次 activation，并等待其后代（包括正在启动的后代）及其资源清理完成。`result` 在清理与通知结束后完成，携带输出、可选结构化数据与停止原因；结果捕获故障在清理后使其拒绝。清理失败使 `dispose()` 拒绝，并将生命周期结束事件标记为失败；结果 promise 与父级通知保留已捕获的执行结果。
+缺少 `agents` 服务时，启动请求以 `CONTINUATION_UNAVAILABLE` 拒绝；运行时可用但父级缺失或被替换时，以 `UNAUTHORIZED` 拒绝。未实现 `start`、`prepareContinuable` 或 `prepareLocalOneShot` 任一方法的提供方会在注册时以 `UNSUPPORTED_CAPABILITY` 被拒绝；请求不受支持的能力会以同一码使创建失败。调用方信号取消启动；本地 one-shot 与外部执行在发布后仍绑定 `signal`，直到终止清理完成。可续接调用方在发布后使用 `dispose()`。发布后通过 `dispose()` 取消该次 activation，并等待其后代（包括正在启动的后代）及其资源清理完成。`result` 在清理与通知结束后完成，携带输出、可选结构化数据与停止原因；结果捕获故障在清理后使其拒绝。清理失败使 `dispose()` 拒绝，并将生命周期结束事件标记为失败；结果 promise 与父级通知保留已捕获的执行结果。
 
 -----
 

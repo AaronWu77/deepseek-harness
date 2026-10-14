@@ -33,7 +33,7 @@ import { SubagentError } from './error.ts'
 import { isAdjacentAgentSendMessageTool } from './internal.ts'
 import type { ActivationObserver } from './lifecycle.ts'
 import type {
-  ContinuableCreateRequest, ContinuableCreateSpec, SubagentInterruptAuthority,
+  ContinuableCreateRequest, ContinuableCreateSpec, LocalOneShotCreateRequest, LocalOneShotCreateSpec, SubagentInterruptAuthority,
   SubagentActivationSpec, SubagentActivation, SubagentStartRequest, SubagentRun,
   SubagentSendMessageOptions, SubagentResult, ResolvedSubagentStartRequest,
 } from './types.ts'
@@ -61,6 +61,7 @@ interface SubagentHost {
   startExternal(name: string, request: ResolvedSubagentStartRequest): Promise<SubagentRun>
   /** Resolve one provider's detached continuable-creation contribution. */
   prepareContinuable(name: string, request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
+  prepareLocalOneShot(name: string, request: LocalOneShotCreateRequest, managedSignal: AbortSignal): Promise<LocalOneShotCreateSpec>
   /** Build the lifecycle observer for one Activation residency epoch. */
   observeActivation(provider: string, childId: SessionId, parent: Agent): ActivationObserver
 }
@@ -78,6 +79,8 @@ interface MaterializeBase {
 type MaterializeInputs = MaterializeBase & (
   | {
     kind: 'local'
+    lifecycle?: 'one-shot' | 'continuable'
+    preparation?: LocalOneShotCreateSpec
     /**
      * Creation inputs; absent for a cold resume, which loads the persisted
      * session — including the delegation policy events a fresh creation seeded,
@@ -108,6 +111,8 @@ type MaterializeInputs = MaterializeBase & (
  * keep waiting even if an intermediate Agent leaves the registry meanwhile.
  */
 interface Materialization {
+  /** Only local one-shot startup follows destruction of its live parent lineage. */
+  readonly lifecycle?: 'one-shot'
   readonly lineage: readonly Agent[]
   readonly settled: Promise<void>
   readonly controller: AbortController
@@ -168,6 +173,16 @@ export class SubagentManager {
     this.ownerCtx = scope.ctx
     ctx.on('agent/disposed', ({ agent }) => {
       this.closingScopes.delete(agent)
+      for (const materialization of this.materializations) {
+        if (materialization.lifecycle === 'one-shot' && materialization.lineage.includes(agent)) {
+          materialization.controller.abort(new Error('local one-shot parent disposed during startup'))
+        }
+      }
+      for (const activation of this.resident.values()) {
+        if (activation.kind !== 'local' || activation.lifecycle !== 'one-shot' || activation.parent !== agent) continue
+        activation.cancelled = true
+        void this.dispose(activation).catch(error => this.reportTeardownFailure(activation, error))
+      }
     })
     ctx.effect(function* (this: SubagentManager) {
       yield scope.dispose
@@ -219,7 +234,10 @@ export class SubagentManager {
     if (activation.closing !== undefined) return
     const kind = authority.kind === 'user' ? 'user' : 'parent'
     if (activation.kind === 'local') {
-      activation.handle.agent.cancel({ kind }, { keepInbox: true })
+      if (activation.lifecycle === 'one-shot') {
+        activation.cancelled = true
+        void this.dispose(activation).catch(error => this.reportTeardownFailure(activation, error))
+      } else activation.handle.agent.cancel({ kind }, { keepInbox: true })
     } else {
       activation.controller.abort({ kind })
       // The settlement observer reports teardown failures.
@@ -370,7 +388,7 @@ export class SubagentManager {
   }
 
   /**
-   * Start one continuable background child and resolve at initial inbox acceptance.
+   * Start one local child with its selected lifetime and resolve at initial inbox acceptance.
    * Every earlier failure disposes any created handle and rolls back Activation
    * and parent ownership without returning either id.
    * @param spec - provider, delegation request, and caller cancellation.
@@ -378,9 +396,10 @@ export class SubagentManager {
    */
   async startLocal(spec: SubagentActivationSpec): Promise<SubagentActivation & { messageId: MessageId }> {
     const request = spec.request
+    const oneShot = spec.lifecycle === 'one-shot'
     const parent = request.parent
     this.assertAdmitting(parent)
-    const persistence = spec.delivery === 'caller' ? this.ctx.get('sessionPersistence') : this.requirePersistence()
+    const persistence = oneShot || spec.delivery === 'caller' ? this.ctx.get('sessionPersistence') : this.requirePersistence()
     assertSubagentMaxDepth(request.maxDepth)
     const childId = spec.childId ?? brandString<SessionId>(randomUUID())
     this.assertChildIdAvailable(childId)
@@ -391,16 +410,18 @@ export class SubagentManager {
     const agentProvider = agentOptions.provider
     const agentModel = agentOptions.model
     const agentReasoningEffort = agentOptions.reasoningEffort
-    const descriptor = snapshotSubagentDescriptor({
-      mode: 'continuable',
-      provider: spec.provider,
-      label: spec.label,
-      ...agentProvider !== undefined ? { agentProvider } : {},
-      ...agentModel !== undefined ? { agentModel } : {},
-      ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
-      ...request.persona !== undefined ? { persona: request.persona } : {},
-      ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
-    })
+    const descriptor: SubagentDescriptorData = oneShot
+      ? snapshotSubagentDescriptor({ mode: 'one-shot', provider: spec.provider, label: spec.label })
+      : snapshotSubagentDescriptor({
+        mode: 'continuable',
+        provider: spec.provider,
+        label: spec.label,
+        ...agentProvider !== undefined ? { agentProvider } : {},
+        ...agentModel !== undefined ? { agentModel } : {},
+        ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
+        ...request.persona !== undefined ? { persona: request.persona } : {},
+        ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
+      })
     // Capture before the first await: a later parent switch belongs to the
     // parent's future, not to this child.
     const delegatedPolicies = captureDelegatedPolicyOverrides(parent)
@@ -408,72 +429,109 @@ export class SubagentManager {
     // An idle continuation-managed parent must not settle while a caller is
     // still creating its child. A turn-scoped delegation does not need this,
     // but the service is also callable outside a turn.
-    const releaseHold = this.holdOwnership(parent, childId)
+    const startup = oneShot ? (() => {
+      const completion = Promise.withResolvers<void>()
+      const materialization: Materialization = {
+        lifecycle: 'one-shot', lineage: this.liveLineage(parent),
+        controller: new AbortController(), settled: completion.promise,
+      }
+      return { materialization, completion }
+    })() : undefined
+    if (startup !== undefined) this.materializations.add(startup.materialization)
+    const managedSignal = startup === undefined ? spec.signal : AbortSignal.any([spec.signal, startup.materialization.controller.signal])
+    let releaseHold = (): void => {}
     try {
-      const cwd = await this.resolveDirectory(request, spec.signal)
-      const prepared = await this.host.prepareContinuable(spec.provider, {
+      releaseHold = this.holdOwnership(parent, childId)
+      const cwd = await this.resolveDirectory(request, managedSignal)
+      const prepared = oneShot ? {} : await this.host.prepareContinuable(spec.provider, {
         sessionId: childId,
         cwd,
         parent,
         signal: spec.signal,
       })
-      spec.signal.throwIfAborted()
+      managedSignal.throwIfAborted()
       this.assertAdmitting(parent)
 
       const inheritedEventCount = SessionLogOffset(prepared.seed?.length ?? 0)
       const seed = prepared.seed
       let established!: Activation
       const messageId = await this.locks.run(childId, async () => {
-        spec.signal.throwIfAborted()
+        managedSignal.throwIfAborted()
         this.assertAdmitting(parent)
         this.assertChildIdAvailable(childId)
         if (spec.childId !== undefined) {
-          const persisted = await persistence?.stat(childId, { signal: spec.signal })
-          spec.signal.throwIfAborted()
+          const persisted = await persistence?.stat(childId, { signal: managedSignal })
+          managedSignal.throwIfAborted()
           this.assertAdmitting(parent)
           this.assertChildIdAvailable(childId)
           if (persisted !== undefined) {
             throw new SubagentError(`subagent "${childId}" already exists`, 'DUPLICATE_CHILD')
           }
         }
+        this.assertLiveParent(parent, childId)
+        const preparation = oneShot ? await this.host.prepareLocalOneShot(spec.provider, {
+          ...request, label: spec.label, sessionId: childId, cwd, signal: spec.signal,
+        }, managedSignal) : undefined
+        managedSignal.throwIfAborted()
+        this.assertAdmitting(parent)
+        this.assertLiveParent(parent, childId)
         const activation = await this.materialize({
           kind: 'local',
+          lifecycle: oneShot ? 'one-shot' : 'continuable',
+          ...(preparation === undefined ? {} : { preparation }),
           childId,
           provider: spec.provider,
           parent,
           create: {
             cwd,
             seed,
-            meta: childSessionMeta(parent, childDepth, prepared.seed !== undefined),
+            meta: { ...childSessionMeta(parent, childDepth, prepared.seed !== undefined),
+              ...(oneShot ? { cwd } : {}),
+              ...(preparation?.agentPreset === undefined ? {} : { agentPreset: preparation.agentPreset }) },
             inheritedEventCount,
             delegatedPolicies,
             descriptor,
           },
           agentOptions,
           composition: { persona: request.persona, toolFilter: request.toolFilter },
-          signal: spec.signal,
+          signal: managedSignal,
           delivery: spec.delivery,
           outputSchema: spec.request.outputSchema,
-        })
+        }, startup?.materialization)
         established = activation
         const child = requireLocalActivation(activation).handle.agent
         const childHeader = child.session.header
         return await this.submitMaterialized(
           activation,
-          spec.delivery !== 'caller' && isAdjacentAgentSendMessageTool(this.ctx.get('tools')?.get('send_message', child))
+          !oneShot && spec.delivery !== 'caller' && isAdjacentAgentSendMessageTool(this.ctx.get('tools')?.get('send_message', child))
             ? withContinuableReturnGuidance(parent.id, request.prompt)
             : request.prompt,
-          { source: { kind: 'user' }, signal: spec.signal, delivery: 'queue' },
+          { source: { kind: 'user' }, signal: managedSignal, delivery: 'queue' },
           parent,
           () => {
             establishCatalogChild(parent.session, childHeader, descriptor)
           },
         )
-      })
+      }, oneShot ? managedSignal : undefined)
+      if (oneShot) {
+        const cancel = (): void => {
+          const local = requireLocalActivation(established)
+          local.cancelled = true
+          void this.dispose(established).catch(error => this.reportTeardownFailure(established, error))
+        }
+        spec.signal.addEventListener('abort', cancel, { once: true })
+        void established.result.promise.finally(() => spec.signal.removeEventListener('abort', cancel)).catch(() => undefined)
+        if (spec.signal.aborted) cancel()
+      }
       return { ...this.receipt(established), childId, messageId }
     } catch (error: unknown) {
       releaseHold()
       throw error
+    } finally {
+      if (startup !== undefined) {
+        this.materializations.delete(startup.materialization)
+        startup.completion.resolve()
+      }
     }
   }
 
@@ -558,6 +616,7 @@ export class SubagentManager {
     const senderActivation = this.resident.get(sender.id)
     if (senderActivation !== undefined
       && senderActivation.kind === 'local'
+      && senderActivation.lifecycle === 'continuable'
       && senderActivation.handle.agent === sender
       && senderActivation.parent.id === targetId) {
       options.signal.throwIfAborted()
@@ -738,29 +797,32 @@ export class SubagentManager {
    * @param inputs - reconstruction and admission inputs for the residency epoch.
    * @returns the published process-local Activation.
    */
-  private materialize(inputs: MaterializeInputs): Promise<Activation> {
+  private materialize(inputs: MaterializeInputs, tracked?: Materialization): Promise<Activation> {
     this.assertAdmitting(inputs.parent)
     inputs.signal.throwIfAborted()
-    const lineage = this.liveLineage(inputs.parent)
+    const lineage = tracked?.lineage ?? this.liveLineage(inputs.parent)
     const pool = this.resident.get(inputs.parent.id)?.pool ?? this.rootPool(inputs.parent)
     const releaseSlot = pool.reserve(this.maxActiveSubagents())
     const settled = Promise.withResolvers<void>()
     const controller = new AbortController()
-    const materialization: Materialization = {
+    const materialization = tracked ?? {
+      ...(inputs.kind === 'local' && inputs.lifecycle === 'one-shot' ? { lifecycle: 'one-shot' as const } : {}),
       lineage,
       settled: settled.promise,
       controller,
     }
     this.materializations.add(materialization)
     return this.materializeTracked(
-      { ...inputs, signal: AbortSignal.any([inputs.signal, controller.signal]) }, lineage, pool, releaseSlot,
+      { ...inputs, signal: AbortSignal.any([inputs.signal, materialization.controller.signal]) }, lineage, pool, releaseSlot,
     ).catch((error: unknown) => {
       releaseSlot()
       if (error instanceof Error && error.name === 'AbortError') this.assertAdmitting(inputs.parent)
       throw error
     }).finally(() => {
-      this.materializations.delete(materialization)
-      settled.resolve()
+      if (tracked === undefined) {
+        this.materializations.delete(materialization)
+        settled.resolve()
+      }
     })
   }
 
@@ -889,7 +951,9 @@ export class SubagentManager {
           if (workingDirectory === undefined) throw new Error('local subagents require the working-directory service')
           await workingDirectory.set(child, create.cwd, inputs.signal)
         }
-        applyChildComposition(childCtx, parent, inputs.composition)
+        applyChildComposition(childCtx, parent, { ...inputs.composition,
+          ...(inputs.preparation?.agentPreset === undefined ? {} : { inheritPreset: false }) })
+        await inputs.preparation?.setup?.(childCtx, child)
         if (inputs.outputSchema !== undefined) {
           structured = attachStructuredRuntime(childCtx, inputs.outputSchema, () =>
             this.resident.get(childId)?.ownedChildren.size === 0
@@ -917,7 +981,14 @@ export class SubagentManager {
           setup,
         })
 
-      resource = { kind: 'local', handle, outputStart: handle.agent.session.seq, structured, failureAt: undefined, poke: Promise.withResolvers<void>() }
+      try {
+        await inputs.preparation?.preflight?.(handle.agent, inputs.signal)
+        inputs.signal.throwIfAborted()
+      } catch (error: unknown) {
+        await handle.dispose()
+        throw error
+      }
+      resource = { kind: 'local', lifecycle: inputs.lifecycle ?? 'continuable', cancelled: false, handle, outputStart: handle.agent.session.seq, structured, failureAt: undefined, poke: Promise.withResolvers<void>() }
     }
     const observer = this.host.observeActivation(provider, childId, parent)
 
@@ -1109,6 +1180,7 @@ export class SubagentManager {
         result = await activation.run.result
       } else {
         if (stop) {
+          if (activation.lifecycle === 'one-shot') activation.cancelled = true
           activation.handle.agent.cancel({ kind: 'parent' })
           const idle = activation.handle.agent.whenIdle()
           const children = [...activation.ownedChildren]
@@ -1186,7 +1258,7 @@ export class SubagentManager {
       const parent = this.ctx.agents.get(activation.parent.id)
       if (parent !== activation.parent) return
       const message = createSettlementMessage(
-        activation.childId, terminal, activationAgent(activation) !== undefined,
+        activation.childId, terminal, activation.kind === 'local' && activation.lifecycle === 'continuable',
       )
       if (this.closingTeardownFor(parent) !== undefined) {
         parent.inject(message)
@@ -1250,7 +1322,9 @@ export class SubagentManager {
       const live = await this.locks.run(childId, async () => {
         const activation = this.resident.get(childId)
         if (activation === undefined) return this.coldResume(parent, childId, content, options)
-        requireLocalActivation(activation)
+        if (requireLocalActivation(activation).lifecycle !== 'continuable') {
+          throw new SubagentError('one-shot subagents do not accept follow-up input', 'NOT_CONTINUABLE')
+        }
         const disposal = activation.closing
         /* v8 ignore next 3 -- the send-versus-dispose cutoff needs a delivery to
          * observe the transaction inside the same critical section that opened it. */
