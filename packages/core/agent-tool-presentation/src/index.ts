@@ -67,6 +67,6 @@ export function apply(ctx: Context, config: Config): void {
   // The wait is the loud failure: an entry still pending on `ptcRuntime` is
   // what `dsh-agent-preset-registry` reports as an unusable row, naming this id.
   ctx.inject(['ptcRuntime'], (runtimeCtx: Context) => {
-    runtimeCtx.tools.presentAs(config.mode)
+    runtimeCtx.tools.presentAs(config.mode, runtimeCtx.ptcRuntime)
   })
 }

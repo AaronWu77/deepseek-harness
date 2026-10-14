@@ -57,7 +57,7 @@ const scenarios: Scenario[] = controllerCases.map((controller) => {
   const toolSchemasSource = localScenarioSource(manifest.header.toolSchemasSource)
   return {
     ...controller,
-    recorded: manifest.recording === 'live',
+    recorded: manifest.recording === 'live' || manifest.recording === 'scripted',
     ...(manifest.sessionFormat === undefined ? {} : { sessionFormat: manifest.sessionFormat }),
     ...(manifest.replay?.override === true ? { overridden: true } : {}),
     ...(manifest.header.pin === true ? { pinsHeader: true } : {}),

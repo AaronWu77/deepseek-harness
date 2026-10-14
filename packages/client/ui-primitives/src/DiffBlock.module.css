@@ -1,5 +1,37 @@
 .block {
+  --dsl-diff-radius: var(--dsw-radius-md);
+  --dsl-diff-line-height: 22px;
+
+  position: relative;
+  margin: 16px 0;
+  /* Ink surface: rebind the label scale this element inherits, so its title,
+     line numbers, and captions read on the dark fill. Same surface-scoped
+     rebinding the elevation stroke and the scrollbar pair use. */
+  --dsw-alias-label-primary: var(--dsw-code-ink);
+  --dsw-alias-label-secondary: var(--dsw-code-ink-secondary);
+  --dsw-alias-label-tertiary: var(--dsw-code-ink-tertiary);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-markdown-code-block);
+  border-radius: var(--dsl-diff-radius);
   overflow: hidden;
+}
+
+/* The copy control floats in the top-right corner over the body, so the card
+   has no empty banner row above its first diff line (the TUI diff card has no
+   banner either — only the footer). The block is position: relative, so this
+   anchors to the card. */
+.copyButton {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 1;
+  background-color: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font: var(--dsw-font-xs-13);
 }
 
 .body {

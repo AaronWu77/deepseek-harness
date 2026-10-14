@@ -545,7 +545,7 @@ Execute a TypeScript program against the available tools. Takes two required arg
     },
     "sandbox_permissions": {
       "type": "string",
-      "description": "Wider sandbox mode for this complete program execution; requires justification and approval.",
+      "description": "Wider sandbox mode for this complete program execution; provide it only after an explicit sandbox denial, together with a non-empty justification, request the narrowest mode strictly wider than the current mode, and omit both fields when the current mode is danger-full-access.",
       "enum": [
         "workspace-write",
         "danger-full-access"
@@ -553,7 +553,8 @@ Execute a TypeScript program against the available tools. Takes two required arg
     },
     "justification": {
       "type": "string",
-      "description": "Reason this complete program needs wider access, shown to the user for approval. Use the language of the user’s current request."
+      "description": "One non-empty sentence explaining why this complete program needs wider access, shown to the user for approval. Use the language of the user’s current request.",
+      "minLength": 1
     }
   },
   "required": [

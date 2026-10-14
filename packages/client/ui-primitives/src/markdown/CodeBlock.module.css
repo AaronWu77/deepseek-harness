@@ -12,6 +12,12 @@
 
   position: relative;
   margin: 16px 0;
+  /* Ink surface: rebind the label scale this element inherits, so its title,
+     line numbers, and captions read on the dark fill. Same surface-scoped
+     rebinding the elevation stroke and the scrollbar pair use. */
+  --dsw-alias-label-primary: var(--dsw-code-ink);
+  --dsw-alias-label-secondary: var(--dsw-code-ink-secondary);
+  --dsw-alias-label-tertiary: var(--dsw-code-ink-tertiary);
   color: var(--dsw-alias-label-primary);
   background: var(--dsl-code-block-background);
   border-radius: var(--dsl-code-block-border-radius);
@@ -25,7 +31,12 @@
   position: sticky;
   top: 0;
   z-index: 6;
-  background-color: var(--dsw-alias-bg-base);
+  /* Sticky over the code's own scroll: an opaque fill would square off the
+     rounded card, and a plain translucent one would let the scrolled lines read
+     through the banner — the thin blur is the mask. */
+  background-color: var(--dsw-alias-markdown-code-block-banner);
+  -webkit-backdrop-filter: var(--dsw-glass-blur-thin);
+  backdrop-filter: var(--dsw-glass-blur-thin);
   border-top-left-radius: var(--dsl-code-block-border-radius);
   border-top-right-radius: var(--dsl-code-block-border-radius);
 }

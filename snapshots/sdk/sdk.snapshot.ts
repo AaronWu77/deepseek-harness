@@ -35,7 +35,6 @@ import {
   restorePinnedToolSchemas,
   scrubModelRequestBulk,
   scrubSessionSnapshot,
-  scrubSystemPrompts,
   sessionFixtureName,
   systemPromptPrecedesRequests,
   sessionFixtureNames,
@@ -94,10 +93,6 @@ const dshSdkChildConfig = fileURLToPath(new URL(
   '../../packages/subagent/subagent-dsh-sdk/tests/fixtures/loader/child.patch.yml',
   import.meta.url,
 ))
-
-function dirOf(url: string): string {
-  return fileURLToPath(new URL('.', url))
-}
 
 interface SdkAssertions {
   /** Additional profile patches applied after the shared composition. */
@@ -191,7 +186,7 @@ interface CorpusScenario {
   readonly dir: string
   readonly manifest: SnapshotManifest & {
     composition: string
-    recording: 'live' | 'authored'
+    recording: 'live' | 'scripted' | 'authored'
     header: NonNullable<SnapshotManifest['header']>
   }
 }

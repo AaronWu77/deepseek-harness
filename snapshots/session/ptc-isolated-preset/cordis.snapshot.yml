@@ -1,0 +1,63 @@
+- id: llm-deepseek
+  disabled: true
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: ptc-runtime
+  name: '@deepseek-ai/dsh-ptc-runtime-node'
+  config:
+    timeoutMs: 1000
+    maxTimeoutMs: 1000
+    maxOldGenerationSizeMb: 32
+- id: tools
+  name: '@deepseek-ai/dsh-tools'
+  config:
+    mode: native
+- insert:
+    - id: isolated-preset-registry
+      name: '@deepseek-ai/dsh-agent-preset-registry'
+      config:
+        default: ptc-isolated
+    - id: isolated-preset
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: ptc-isolated
+        plugins:
+          - id: private-runtime-group
+            name: cordis:group
+            group: true
+            isolate:
+              ptcRuntime: true
+            config:
+              - id: private-node-runtime
+                name: '@deepseek-ai/dsh-ptc-runtime-node'
+                config:
+                  timeoutMs: 3000
+                  maxTimeoutMs: 4000
+                  maxOldGenerationSizeMb: 64
+              - id: private-ptc-presentation
+                name: '@deepseek-ai/dsh-agent-tool-presentation'
+                config:
+                  mode: ptc
+    - id: headless-preset-selection
+      name: ./select-preset.ts
+- insert:
+    - id: llm-replay
+      name: '@deepseek-ai/dsh-llm-replay'
+      config:
+        providers:
+          - id: ptc-isolated-scripted
+            name: Isolated PTC scripted fixture
+            models:
+              - id: ptc-isolated-model
+# Native shell and ACL hints are not inputs to this portable scenario.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: sandbox
+  config:
+    runnerCommand: [snapshot-no-confinement-runner]
+    runnerFailureSignatures: [snapshot-no-confinement-runner]
+- insert:
+    - id: snapshot-proof-tool
+      name: ./proof-tool.ts

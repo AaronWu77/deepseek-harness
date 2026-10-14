@@ -475,10 +475,12 @@ export interface ToolRuntimeScheduler {
 }
 
 /**
- * Scheduler entry point omitted from the generated named service API.
+ * Scheduler entry point omitted from the generated named service API. A global
+ * symbol keeps the scheduler available when source launch and profile plugins
+ * load different entry points for this package in one process.
  * @internal
  */
-export const TOOL_RUNTIME_SCHEDULER: unique symbol = Symbol('@deepseek-ai/dsh-tools.scheduler')
+export const TOOL_RUNTIME_SCHEDULER = Symbol.for('@deepseek-ai/dsh-tools.scheduler')
 
 /** Canonical error code for cancellation after a tool body was invoked. */
 export const TOOL_ABORTED = 'ABORTED'
@@ -742,6 +744,7 @@ class ToolLayer implements ScopeLayer {
    * "which form does the model see" is a contradiction, not a merge.
    */
   mode: ToolPresentationMode | undefined
+  runtime: PtcRuntime | undefined
 
   constructor(scope: ScopeKey | undefined) {
     this.tools = new NamedEntries(name => new Error(scope === undefined
@@ -752,7 +755,7 @@ class ToolLayer implements ScopeLayer {
   /** Whether every contribution table in this aggregate layer is empty. */
   isEmpty(): boolean {
     return this.tools.isEmpty() && this.restrictions.isEmpty() && this.guards.isEmpty()
-      && this.mode === undefined
+      && this.mode === undefined && this.runtime === undefined
   }
 
   /** Whether every compiled restriction in this layer admits a global tool name. */
@@ -844,10 +847,13 @@ export class ToolRuntime extends Service {
    * a PTC mode is no longer known when the service is constructed, and the
    * transport is stateless beyond its closures over `this`.
    */
-  private ptcTransport: ToolDefinition | undefined
+  private readonly deploymentRuntime: () => PtcRuntime | undefined
+  private readonly ptcTransports = new WeakMap<PtcRuntime, ToolDefinition>()
+  private absentRuntimeTransport: ToolDefinition | undefined
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'tools')
+    this.deploymentRuntime = () => ctx.get('ptcRuntime')
     // The schema already defaulted an omitted mode; the ?? narrows the
     // optional-input type for direct (non-Loader) construction in tests.
     this.defaultMode = config.mode ?? 'native'
@@ -903,7 +909,7 @@ export class ToolRuntime extends Service {
       text: (context) => {
         const mode = this.modeFor(context.scope)
         if (mode === 'native') return ''
-        const runtime = this.requirePtcRuntime(mode)
+        const runtime = this.requirePtcRuntime(mode, context.scope)
         // Own-property read: a language like `toString`/`constructor` would
         // otherwise resolve an inherited Object.prototype member as a renderer.
         const render = SDK_RENDERERS[runtime.language]
@@ -933,17 +939,18 @@ export class ToolRuntime extends Service {
     return this.defaultMode
   }
 
-  /**
-   * The reserved `run_code` transport, built on first need.
-   *
-   * It never enters the global layer: per-agent restrictions must not remove
-   * it, and a scoped registration must not shadow it. The visibility resolver
-   * appends it after resolving the filterable global/scoped capability layers,
-   * and only for scopes whose mode actually presents it.
-   * @returns the shared transport definition.
-   */
-  private requirePtcTransport(): ToolDefinition {
-    this.ptcTransport ??= createRunCodeTool(this, {
+  /** Resolve the nearest presentation provider, falling back to the owning deployment. */
+  private runtimeFor(scope?: ScopeKey): PtcRuntime | undefined {
+    const declaration = this.layers.chainLayers(scope).findLast(layer => layer.mode !== undefined)
+    return declaration?.runtime ?? this.deploymentRuntime()
+  }
+
+  /** Resolve a transport bound to the calling scope's selected provider. */
+  private requirePtcTransport(scope?: ScopeKey): ToolDefinition {
+    const runtime = this.runtimeFor(scope)
+    const existing = runtime === undefined ? this.absentRuntimeTransport : this.ptcTransports.get(runtime)
+    if (existing !== undefined) return existing
+    const transport = createRunCodeTool(this, {
       resolveWorkingDirectory: async (exec) => {
         // Only Agent-owned PTC requires directory state; native registries
         // and unowned programs can run without this service.
@@ -952,7 +959,10 @@ export class ToolRuntime extends Service {
         if (directories === undefined) throw new Error('dsh-tools: run_code with an Agent requires workingDirectory')
         return directories.ensure(exec.agent, exec.signal)
       },
-      requireRuntime: () => this.requirePtcRuntime(this.defaultMode),
+      requireRuntime: () => {
+        if (runtime === undefined) throw new Error('dsh-tools: run_code requires a PTC runtime')
+        return runtime
+      },
       peekApprover: () => this.ctx.get('approval'),
       resolveSandboxPolicy: (exec) => {
         const policy = this.ctx.get('sandboxPolicy')
@@ -962,11 +972,13 @@ export class ToolRuntime extends Service {
       // The language-aware description/parameters getters read the runtime
       // without demanding one, so a native-default process can still project
       // the transport for an agent that chose code.
-      peekRuntime: () => this.ctx.get('ptcRuntime'),
+      peekRuntime: () => runtime,
       maxParallel: this.maxParallelSubCalls,
       shapeDispatchLog: dispatch => this.shapeDispatchLog(dispatch),
     })
-    return this.ptcTransport
+    if (runtime === undefined) this.absentRuntimeTransport = transport
+    else this.ptcTransports.set(runtime, transport)
+    return transport
   }
 
   /**
@@ -978,9 +990,10 @@ export class ToolRuntime extends Service {
    * composes PTC mode agents beside native ones in the same process, and a
    * process-global override would be the `mode` config field instead.
    * @param mode - the presentation the covered agents' models see.
+   * @param runtime - scoped PTC provider shared by SDK projection and execution; omitted uses the deployment provider.
    * @returns the exact disposer that restores the deployment default.
    */
-  presentAs(mode: ToolPresentationMode): () => void {
+  presentAs(mode: ToolPresentationMode, runtime?: PtcRuntime): () => void {
     const ctx = this.ctx
     if (scopeOf(ctx) === undefined) {
       throw new Error('tools.presentAs() requires a scoped context (agent.ctx): a context-global presentation is the `mode` config field on the tools row')
@@ -993,7 +1006,8 @@ export class ToolRuntime extends Service {
             throw new Error(`tools.presentAs("${mode}") conflicts with "${layer.mode}" already declared for this scope; one composition selects one presentation`)
           }
           layer.mode = mode
-          return () => { layer.mode = undefined }
+          layer.runtime = runtime
+          return () => { layer.mode = undefined; layer.runtime = undefined }
         },
         { label: 'tools.presentAs()' },
       )
@@ -1026,7 +1040,7 @@ export class ToolRuntime extends Service {
     // flavor-table guard would otherwise surface first. This keeps the
     // renderer-table rejection the canonical assembly-time error for a
     // language with no SDK renderer.
-    this.requirePtcRuntime(mode)
+    this.requirePtcRuntime(mode, scope)
     const schemas = [...view.visible.values()].map(definition => this.schemaOf(definition, false))
     return {
       schemas: schemas.filter(schema => schema.name === RUN_CODE_NAME),
@@ -1041,15 +1055,12 @@ export class ToolRuntime extends Service {
    * behind it — hostage to a PTC runtime existing even under `mode:
    * 'native'`.
    *
-   * Assembly and `run_code` execution read separately, so the language is not
-   * bound to a request. Harmless while one published backend exists — both
-   * reads return the same flavor — but a reload that swapped in a second
-   * language between them would hand a program written against one SDK to the
-   * other. Binding it is deferred until a second backend ships (the first
-   * point it is testable).
+   * Scoped declarations select the same provider for SDK, schema and execution.
+   * Deployment reads resolve the current provider; each transport retains the
+   * provider selected when that definition was created.
    */
-  private requirePtcRuntime(mode: ToolPresentationMode): PtcRuntime {
-    const runtime = this.ctx.get('ptcRuntime')
+  private requirePtcRuntime(mode: ToolPresentationMode, scope?: ScopeKey): PtcRuntime {
+    const runtime = this.runtimeFor(scope)
     if (!runtime) {
       throw new Error(`dsh-tools: mode "${mode}" requires a PTC runtime — load a ctx.ptcRuntime implementation (e.g. @deepseek-ai/dsh-ptc-runtime-node) or set tools mode to "native"`)
     }
@@ -1219,7 +1230,7 @@ export class ToolRuntime extends Service {
     // changes. Per scope: a native agent must not find `run_code` in its
     // dispatch table because some other agent in the process presents it.
     if (this.modeFor(scope) !== 'native') {
-      visible.set(RUN_CODE_NAME, this.requirePtcTransport())
+      visible.set(RUN_CODE_NAME, this.requirePtcTransport(scope))
     }
     return { visible, knownNames, restrictableNames }
   }

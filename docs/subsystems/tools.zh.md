@@ -517,9 +517,10 @@ Tool registry and execution pipeline. Scoped registrations shadow globals; one v
  * composes PTC mode agents beside native ones in the same process, and a
  * process-global override would be the `mode` config field instead.
  * @param mode - the presentation the covered agents' models see.
+ * @param runtime - scoped PTC provider shared by SDK projection and execution; omitted uses the deployment provider.
  * @returns the exact disposer that restores the deployment default.
  */
-presentAs(mode: ToolPresentationMode): () => void
+presentAs(mode: ToolPresentationMode, runtime?: PtcRuntime): () => void
 
 /**
  * Register globally or in the calling agent scope. Scoped tools shadow
@@ -595,7 +596,7 @@ executionMode(exec: ToolExecutionInput): ToolExecutionMode
 async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>
 ```
 
-Types: [ScopeKey](scope.zh.md)
+Types: [PtcRuntime](ptc-runtime.zh.md) · [ScopeKey](scope.zh.md)
 
 Source: [`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index.ts)
 

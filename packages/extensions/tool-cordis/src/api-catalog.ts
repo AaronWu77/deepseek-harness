@@ -3326,9 +3326,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Tool registry and execution pipeline. Scoped registrations shadow globals; one visibility resolver feeds presentation, lookup, and dispatch.',
     methods: [
       {
-        signature: 'presentAs(mode: ToolPresentationMode): () => void',
+        signature: 'presentAs(mode: ToolPresentationMode, runtime?: PtcRuntime): () => void',
         description: 'Present the calling scope\'s tools in `mode` instead of the deployment default. Nearest scope on the chain wins, so a preset\'s standing declaration covers every agent joined under it.\n\nScoped only, and one declaration per scope: this is how an agent preset composes PTC mode agents beside native ones in the same process, and a process-global override would be the `mode` config field instead.',
-        parameters: [{ name: 'mode', description: 'the presentation the covered agents\' models see.' }],
+        parameters: [{ name: 'mode', description: 'the presentation the covered agents\' models see.' }, { name: 'runtime', description: 'scoped PTC provider shared by SDK projection and execution; omitted uses the deployment provider.' }],
         returns: 'the exact disposer that restores the deployment default.',
       },
       {
@@ -5740,7 +5740,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'JsonSchemaNode',
-    declaration: 'export interface JsonSchemaNode {\n    type?: JsonSchemaType;\n    oneOf?: JsonSchemaNode[];\n    properties?: Record<string, JsonSchemaNode>;\n    required?: string[];\n    additionalProperties?: boolean;\n    items?: JsonSchemaNode;\n    enum?: JsonSchemaScalar[];\n    const?: JsonSchemaScalar;\n    description?: string;\n    title?: string;\n    default?: JsonValue;\n    examples?: JsonValue;\n}',
+    declaration: 'export interface JsonSchemaNode {\n    type?: JsonSchemaType;\n    oneOf?: JsonSchemaNode[];\n    properties?: Record<string, JsonSchemaNode>;\n    required?: string[];\n    additionalProperties?: boolean;\n    items?: JsonSchemaNode;\n    enum?: JsonSchemaScalar[];\n    minLength?: number;\n    const?: JsonSchemaScalar;\n    description?: string;\n    title?: string;\n    default?: JsonValue;\n    examples?: JsonValue;\n}',
   },
   {
     name: 'JsonSchemaScalar',
@@ -6417,6 +6417,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PtcRunSpec',
     declaration: 'export interface PtcRunSpec extends PtcRunRequest {\n    cwd: string;\n    timeoutMs: number | null;\n}',
+  },
+  {
+    name: 'PtcRuntime',
+    declaration: 'export abstract class PtcRuntime extends Service {\n    abstract readonly language: string;\n    abstract readonly isolation: string;\n    get executionInstructions(): string;\n    get sandboxMode(): SandboxMode | undefined;\n    get timeout(): {\n        defaultMs: number;\n        maxMs: number;\n    } | undefined;\n    constructor(ctx: Context);\n    abstract resolve(request: PtcRunRequest): PtcRunSpec;\n    abstract run(spec: PtcRunSpec): Promise<PtcRunResult>;\n}',
   },
   {
     name: 'QueueAction',
@@ -8032,7 +8036,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolRuntime',
-    declaration: 'export class ToolRuntime extends Service {\n    static inject;\n    static Config: z<Config>;\n    readonly [TOOL_RUNTIME_SCHEDULER]: ToolRuntimeScheduler;\n    constructor(ctx: Context, config: Config = {});\n    presentAs(mode: ToolPresentationMode): () => void;\n    register(definition: ToolDefinition): () => void;\n    restrict(filter: ToolRestriction): () => void;\n    guard(guard: ToolGuard): () => void;\n    get(name: string, scope?: ScopeKey): ToolDefinition | undefined;\n    schemas(scope?: ScopeKey): ToolSchema[];\n    executionMode(exec: ToolExecutionInput): ToolExecutionMode;\n    async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>;\n}',
+    declaration: 'export class ToolRuntime extends Service {\n    static inject;\n    static Config: z<Config>;\n    readonly [TOOL_RUNTIME_SCHEDULER]: ToolRuntimeScheduler;\n    constructor(ctx: Context, config: Config = {});\n    presentAs(mode: ToolPresentationMode, runtime?: PtcRuntime): () => void;\n    register(definition: ToolDefinition): () => void;\n    restrict(filter: ToolRestriction): () => void;\n    guard(guard: ToolGuard): () => void;\n    get(name: string, scope?: ScopeKey): ToolDefinition | undefined;\n    schemas(scope?: ScopeKey): ToolSchema[];\n    executionMode(exec: ToolExecutionInput): ToolExecutionMode;\n    async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>;\n}',
   },
   {
     name: 'ToolRuntimeScheduler',

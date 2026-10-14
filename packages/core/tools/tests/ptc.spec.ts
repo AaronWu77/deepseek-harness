@@ -385,7 +385,7 @@ describe('mode-aware wire contribution', () => {
     expect(transports[0]?.description).toContain('Execute a TypeScript program')
     expect(assembly.sections.find(section => section.name === 'scoped-note')?.text).toBe('safe note')
     expect(assembly.sections.find(section => section.name === 'tools:sdk')?.text).toContain('scoped_safe:')
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBe(ctx.tools.get(RUN_CODE_NAME))
+    expect(ctx.tools.get(RUN_CODE_NAME, agent)?.name).toBe(ctx.tools.get(RUN_CODE_NAME)?.name)
     const result = await runCode(ctx, 'return 1', { agent })
     expect(result.content).toEqual([{ type: 'text', text: '(run_code completed with no output)' }])
   })
@@ -1500,6 +1500,20 @@ describe('the run_code dispatch bridge', () => {
     expect(text).toContain('got this far')
   })
 
+  it('adds source-serialization guidance to parser failures', async () => {
+    const { ctx, runtime } = await setup({ mode: 'ptc' })
+    runtime.behavior = () => Promise.resolve({
+      logs: [],
+      error: { kind: 'exception', message: "Expected ',', got 'ident'" },
+    })
+
+    const result = await runCode(ctx, 'program')
+
+    expect(result.isError).toBe(true)
+    expect((result.content[0] as { text: string }).text).toContain('failed to parse before execution')
+    expect((result.content[0] as { text: string }).text).toContain('quote or JSON-serialize Markdown')
+  })
+
   it('CodeRunFailedError is a HarnessError with the CODE_RUN_FAILED code', () => {
     const error = new CodeRunFailedError('boom')
     expect(error.code).toBe('CODE_RUN_FAILED')
@@ -2041,6 +2055,37 @@ describe('the run_code dispatch bridge', () => {
  * shadow, not a process-wide fact.
  */
 describe('per-agent presentation', () => {
+  it('binds SDK, wire schema and dispatch to isolated providers without replacing the deployment runtime', async () => {
+    const { ctx, systemPrompt, runtime: deployment } = await setup({ mode: 'ptc', runtime: { language: 'python' } })
+    const owner = await mintAgentScope(ctx, 'private-runtime')
+    const sibling = await mintAgentScope(ctx, 'deployment-runtime')
+    const world = ctx.isolate('ptcRuntime')
+    const fiber = await world.plugin(FakeRuntime, { language: 'typescript' })
+    const provider = world.ptcRuntime as FakeRuntime
+    const privateCalls: PtcRunRequest[] = [], ordinaryCalls: PtcRunRequest[] = []
+    provider.behavior = async (request) => { privateCalls.push(request); return { logs: ['private runtime'] } }
+    deployment.behavior = async (request) => { ordinaryCalls.push(request); return { logs: ['deployment runtime'] } }
+    const remove = owner.scope.ctx.tools.presentAs('ptc', provider)
+    try {
+      const privateAssembly = await systemPrompt.assemble({ scope: owner.agent })
+      const ordinaryAssembly = await systemPrompt.assemble({ scope: sibling.agent })
+      expect(privateAssembly.sections.find(section => section.name === 'tools:sdk')?.text).toContain('TypeScript')
+      expect(ordinaryAssembly.sections.find(section => section.name === 'tools:sdk')?.text).toContain('Python')
+      const privateParameters = privateAssembly.tools[0]?.parameters as JsonSchemaNode
+      const ordinaryParameters = ordinaryAssembly.tools[0]?.parameters as JsonSchemaNode
+      expect(privateParameters.properties?.code).not.toEqual(ordinaryParameters.properties?.code)
+      const results = await Promise.all([runCode(ctx, 'private program', { agent: owner.agent }), runCode(ctx, 'ordinary program', { agent: sibling.agent })])
+      expect(results.map(result => result.isError)).toEqual([false, false])
+      expect(results.map(result => result.value)).toEqual([{ logs: ['private runtime'] }, { logs: ['deployment runtime'] }])
+      expect(privateCalls.at(-1)?.program).toBe('private program')
+      expect(ordinaryCalls.at(-1)?.program).toBe('ordinary program')
+      expect(ctx.ptcRuntime.language).toBe('python')
+      remove()
+      await runCode(ctx, 'after removal', { agent: owner.agent })
+      expect(ordinaryCalls.at(-1)?.program).toBe('after removal')
+      expect(privateCalls.at(-1)?.program).toBe('private program')
+    } finally { remove(); await fiber.dispose(); await ctx.fiber.dispose() }
+  })
   it('gives one agent PTC mode while the deployment stays native', async () => {
     const { ctx, systemPrompt } = await setup({ mode: 'native' })
     const calls = registerEcho(ctx)
@@ -2256,13 +2301,16 @@ describe('PTC standing file policy and sandbox outcomes', () => {
 })
 
 describe('per-program execution controls', () => {
-  async function controlledSetup(approval = true) {
+  async function controlledSetup(
+    approval = true,
+    sandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access' = 'read-only',
+  ) {
     const state = await setup()
     await state.ctx.plugin(SessionProjections)
-    await state.ctx.plugin(SandboxPolicy, { mode: 'read-only', workspaceRoot: process.cwd() })
+    await state.ctx.plugin(SandboxPolicy, { mode: sandboxMode, workspaceRoot: process.cwd() })
     if (approval) await state.ctx.plugin(ApprovalService, { policy: 'ask' })
     Object.defineProperties(state.runtime, {
-      sandboxMode: { get: () => 'read-only' },
+      sandboxMode: { get: () => sandboxMode },
       executionInstructions: { get: () => 'Programs start with an empty environment.' },
       timeout: { get: () => ({ defaultMs: 120_000, maxMs: 600_000 }) },
     })
@@ -2282,7 +2330,10 @@ describe('per-program execution controls', () => {
       const schema = tools.schemas().find(tool => tool.name === RUN_CODE_NAME)!
       expect(JSON.stringify(schema.parameters)).toContain('Default 120000; capped at 600000')
       expect(JSON.stringify(schema.parameters)).toContain('sandbox_permissions')
+      expect(JSON.stringify(schema.parameters)).toContain('minLength')
       expect(schema.description).toContain('Nested tools retain their own policies')
+      expect(schema.description).toContain('Ordinary programs and read-only operations must omit both `sandbox_permissions` and `justification`')
+      expect(JSON.stringify(schema.parameters)).toContain('only after an explicit sandbox denial')
       expect(schema.description).toContain('Programs start with an empty environment.')
       expect(schema.description).toContain("Each program starts in the Session's current directory. Running programs keep their initial directory.")
     } finally { await ctx.fiber.dispose() }
@@ -2345,6 +2396,31 @@ describe('per-program execution controls', () => {
       expect((await execute(args)).isError).toBe(true)
       expect(ask).not.toHaveBeenCalled()
       expect(runtime.lastRequest).toBeUndefined()
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('renders actionable guidance when justification is empty', async () => {
+    const { ctx, runtime, execute } = await controlledSetup()
+    try {
+      const result = await execute({ sandbox_permissions: 'workspace-write', justification: '' })
+      expect(result.isError).toBe(true)
+      const text = (result.content[0] as { text: string }).text
+      expect(text).toContain('Invalid run_code sandbox arguments')
+      expect(text).toContain('Omit both sandbox_permissions and justification')
+      expect(text).toContain('non-empty justification sentence')
+      expect(runtime.lastRequest).toBeUndefined()
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('drops a non-widening sandbox request under danger-full-access and still runs', async () => {
+    const { ctx, runtime, execute } = await controlledSetup(true, 'danger-full-access')
+    const ask = vi.fn(() => Promise.resolve<ApprovalOutcome>('allowed-once'))
+    ctx.on('approval/request', ask)
+    try {
+      const result = await execute({ sandbox_permissions: 'workspace-write', justification: 'Need workspace writes' })
+      expect(result.isError).toBe(false)
+      expect(ask).not.toHaveBeenCalled()
+      expect(runtime.lastRequest).toBeDefined()
     } finally { await ctx.fiber.dispose() }
   })
 

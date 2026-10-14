@@ -4304,10 +4304,10 @@ describe('ChatView', () => {
     expect(column.lastElementChild).toBe(status)
     expect(within(status as HTMLElement).getByRole('status').textContent).toBe('深度求索中')
     expect(status?.lastElementChild?.textContent).toBe('深度求索中')
-    const icon = status?.querySelector('svg')?.parentElement
+    const icon = status?.querySelector('svg[data-state="ongoing"]')
     expect(icon?.getAttribute('aria-hidden')).toBe('true')
-    expect(icon?.firstElementChild?.tagName).toBe('SPAN')
-    expect(icon?.querySelectorAll('path')).toHaveLength(1)
+    expect(icon?.querySelectorAll('circle')).toHaveLength(2)
+    expect(status?.querySelector('img')).toBeNull()
     expect(icon?.getAttribute('style')).toBeNull()
     expect(status?.querySelector('animate')).toBeNull()
     act(() => { h.setSession({ running: false }) })

@@ -29,7 +29,7 @@
   animation: modalEnter var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
-/* Dialogs use the prominent elevation on the secondary layer. */
+/* Dialog card: r24, elevation-prominent, glass fill over the blurred mask, pb 24. */
 .dialog {
   box-sizing: border-box;
   position: relative;
@@ -41,8 +41,12 @@
   padding: 0 0 24px;
   overflow: hidden;
   border: 0;
-  border-radius: var(--dsw-radius-panel);
-  background: var(--dsw-alias-bg-layer-2);
+  border-radius: 24px;
+  background: var(--dsw-glass-fill-raised);
+  -webkit-backdrop-filter: var(--dsw-glass-blur-strong);
+  backdrop-filter: var(--dsw-glass-blur-strong);
+  --dsw-elevation-stroke-color: var(--dsw-glass-stroke);
+
   box-shadow: var(--dsw-elevation-prominent);
   animation: modalEnter var(--ds-transition-duration) var(--ds-ease-in-out);
 }

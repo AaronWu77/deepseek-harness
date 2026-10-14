@@ -63,6 +63,8 @@ The roster shows every member with its role (`lead` or `teammate`) and current s
 
 Only the Lead can create teammates or interrupt them.
 
+Provider-owned subagents outside the Lead's durable roster are not Team members, including before their first descriptor is recorded and after a cold resume. They receive neither the generic Team tools nor the collaboration policy from `dsh-experimental-tool-agent-team`. Ordinary host forks remain independent Leads. A rostered `provisioning` or `active` teammate retains its membership even when its Session header has `origin: subagent`; that header excludes nonmembers but does not authorize continuation or messaging.
+
 ### Messages between teammates
 
 Any member can send to another member or the Lead. Each attempt either returns the target inbox `MessageId` or throws. Team does not retain unaccepted send intent, retry new messages after restart, or deduplicate explicit resends.

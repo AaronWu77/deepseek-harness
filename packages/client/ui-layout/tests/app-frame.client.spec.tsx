@@ -116,10 +116,12 @@ function mountFrame(windowWidth = frameWidth) {
    specs read the specified tracks): [sidebar px, rightbar growth limit].
    The centre's protected minimum must accompany an open right track. */
 function tracks(frame: HTMLElement): number[] {
-  const match = /^([\d.]+)px minmax\((0|400)px, 1fr\) minmax\(0px, ([\d.]+)px\)$/.exec(frame.style.gridTemplateColumns)
-  if (match === null) throw new Error(`unexpected template: ${frame.style.gridTemplateColumns}`)
+  const window = frame.querySelector<HTMLElement>('[data-shell-window]')
+  if (window === null) throw new Error('missing shell window')
+  const match = /^([\d.]+)px minmax\((0|400)px, 1fr\) minmax\(0px, ([\d.]+)px\)$/.exec(window.style.gridTemplateColumns)
+  if (match === null) throw new Error(`unexpected template: ${window.style.gridTemplateColumns}`)
   const rightbar = Number(match[3])
-  if ((match[2] === '400') !== (rightbar > 0)) throw new Error(`centre minimum out of step: ${frame.style.gridTemplateColumns}`)
+  if ((match[2] === '400') !== (rightbar > 0)) throw new Error(`centre minimum out of step: ${window.style.gridTemplateColumns}`)
   return [Number(match[1]), rightbar]
 }
 
@@ -257,8 +259,7 @@ describe('AppFrame', () => {
   it('mounts the shell.leading seat only while the darwin collapse hides the column', () => {
     document.documentElement.dataset.platform = 'darwin'
     const { frame, instance, sidebarOwner, queryByTestId } = mountFrame()
-    // The frame declares no window drag of its own: every chrome row owns its
-    // run (ui-sidebar, ui-dockkit, ui-conversation, ui-plugin-manager).
+    // Chrome rows own the drag region; the inset glass frame adds no drag band.
     expect(frame.querySelector('[data-shell-leading-band]')).toBeNull()
     expect(queryByTestId('shell.leading-content')).toBeNull()
     act(() => { instance.actions.toggleSidebar() })
@@ -290,7 +291,7 @@ describe('AppFrame', () => {
 })
 
 describe('AppFrame normal width concessions', () => {
-  it('measures the frame, not the window, before choosing the first-open preference', () => {
+  it('measures the inset window before choosing the first-open preference', () => {
     frameWidth = 1000
     const { instance, rightOwner } = mountFrame(1920)
     expect(instance.getSnapshot().layoutInfo.viewportWidth).toBe(1000)
@@ -427,12 +428,12 @@ describe('AppFrame right panel presentation', () => {
     expect(frame.dataset.animating).toBe('true')
     // Foreign transition ends (e.g. the handle's left) do not settle it...
     act(() => {
-      frame.dispatchEvent(Object.assign(new Event('transitionend'), { propertyName: 'left' }))
+      frame.querySelector('[data-shell-window]')!.dispatchEvent(Object.assign(new Event('transitionend'), { propertyName: 'left' }))
     })
     expect(frame.dataset.animating).toBe('true')
     // ...the track transition's own end does.
     act(() => {
-      frame.dispatchEvent(Object.assign(new Event('transitionend'), { propertyName: 'grid-template-columns' }))
+      frame.querySelector('[data-shell-window]')!.dispatchEvent(Object.assign(new Event('transitionend'), { propertyName: 'grid-template-columns' }))
     })
     expect(frame.dataset.animating).toBeUndefined()
   })

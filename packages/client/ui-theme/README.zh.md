@@ -85,6 +85,8 @@ kind: "package-reference"
 
 `onboarding.css` 管理引导强调色、以紫色/蓝色/青色命名的渐变，以及卡片、复选框和次要操作的浅色与暗黑配色。卡片阴影的偏移与模糊尺寸由业务组件管理。
 
+`design-platform.css` 持有玻璃面套件与环境画布。`--dsw-glass-fill`/`--dsw-glass-fill-raised`/`--dsw-glass-fill-thick`/`--dsw-glass-fill-sunken` 是表面按层级选用的半透明填充——厚档用于大块内容面板，那里的可读性必须由填充自己承担，而壳层档可以交给画布，`--dsw-glass-stroke` 与 `--dsw-glass-highlight` 是它的发丝描边与高光边，`--dsw-glass-blur`/`--dsw-glass-blur-strong`/`--dsw-glass-blur-thin` 是三档 `backdrop-filter`，`--dsw-glass-scrim` 是会话列铺的薄纱，让正文在环境色之上保住对比度。`--dsw-aurora-1` 至 `--dsw-aurora-4` 是四个漂移色团，`--dsw-aurora-drift` 是它们的周期；shell 负责绘制它们，玻璃面负责模糊它们——这正是 `backdrop-filter` 可见的前提。`--dsw-glass-canvas` 是不渲染极光层时的静态退化。`base.css` 声明这些表面所用的运动 token：`--dsw-motion-spring`、`--dsw-motion-duration`、`--dsw-motion-duration-fast` 与 `--dsw-motion-duration-slow`。
+
 ### 滚动条重新绑定
 
 `scrollbar.css` 在 `body` 上把 `--dsh-scrollbar-thumb` 与 `--dsh-scrollbar-thumb-hover` 绑定到 l1 基础表面 token；高层级表面（菜单、浮层、对话框）在自己的容器上把它们重新绑定为 l2 token；这组变量的另一个合法目标是 `transparent`（ui-sidebar 在指针不在栏内时就这样重新绑定自己的列）。WebKit 系浏览器默认使用 5px 的 `--dsh-scrollbar-width`，并读取 `--dsh-scrollbar-thumb-border` 与 `--dsh-scrollbar-track-margin`；滚动表面可重新绑定它们，在较窄的可见滑块外保留较宽的拖动区域，或让轨道避开圆角两端。两条渲染路径在构造上互斥：Firefox 走 `@supports not selector(::-webkit-scrollbar)` 内的标准细滚动条，WebKit 系引擎走伪元素，因此几何与 hover 定制只经由伪元素路径生效。

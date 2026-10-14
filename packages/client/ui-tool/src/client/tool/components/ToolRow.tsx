@@ -356,7 +356,13 @@ export const ToolRow = memo(function ToolRow({
     variant, bodyText, cardBody, outputText, state,
   ])
   return (
-    <div className={css.root} data-variant={variant} data-tool={toolName} data-state={state}>
+    <div
+      className={css.root}
+      data-variant={variant}
+      data-tool={toolName}
+      data-state={state}
+      data-expanded={open || undefined}
+    >
       {status !== null && <span className={css.visuallyHidden}>{status}</span>}
       <DisclosureRow
         rowClassName={css.row}

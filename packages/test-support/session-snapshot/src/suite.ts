@@ -1304,7 +1304,7 @@ export function defineAcpSnapshotSuite(options: SnapshotSuiteOptions): void {
 
   scenarioSuite('snapshot scenarios', () => {
     for (const scenario of scenarios) {
-      // In RECORD mode, only re-run the `recorded` (live-API) scenarios; the `authored` ones
+      // Record mode regenerates executable recordings; authored Sessions remain immutable inputs.
       // (sidecar-driven errors/cancel) are never re-recorded. `posixOnly` scenarios skip on Windows;
       // `pwshOnly` scenarios skip when the caller's `hasPwsh` probe is false.
       it.skipIf(scenarioSkipped(scenario, RECORDING, process.platform, options.hasPwsh))(`snapshot: ${scenario.name} matches the expected outputs`, async ({ expect }) => {

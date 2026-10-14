@@ -37,6 +37,8 @@ List rows carry `formatStatus` when available, so Clients can identify migration
 
 Host list generation yields between complete rows only when its configured work slice is exhausted; cheap remaining work returns without a forced yield. Request cancellation is checked per row and after each yield and rejects without partial results. Each row is synchronous; the list does not promise one cross-Session snapshot. A Session already queued as cold remains a cached row if it attaches during a yield: Client in-flight mutation replay corrects its availability, and sequenced projections supersede cached hints.
 
+`session.selectModel` confirms the Session-local selection without waiting for the profile default write. Default writes stay in selection order and are best-effort; a write failure is logged without undoing the Session selection.
+
 Client list rows and resident Sessions use the current `sessionListMetadata` projection to reject stale blank-session hints; recency is the later of the summary timestamp and the projected last user prompt. When SessionManager creates an instance before its list row arrives, it reconciles blankness with metadata already retained for that Session. An opened conversation is therefore not reused by New Session even when an older list response still marks it blank.
 
 Explicit-id `session.create` adopts a live Session or resumes a persisted Session while retaining its writer lock. Writer contention returns `session/writer-held`; callers may try another blank without suppressing unrelated failures. `session.list` includes persisted blanks using cached metadata, without opening cold log bodies.

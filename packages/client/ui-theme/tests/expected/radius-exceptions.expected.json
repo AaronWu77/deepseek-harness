@@ -1,9 +1,14 @@
 {
-  "ui-deliverables/src/client/ChangedFiles.module.css": [
-    ".tile: border-radius: 10px"
+  "ui-chat/src/client/chat/MessageItem.module.css": [
+    ".bubble: border-radius: 22px"
   ],
-  "ui-deliverables/src/client/Deliverables.module.css": [
-    ".fileIcon: border-radius: 10px"
+  "ui-conversation/src/client/skeleton/InputBar.module.css": [
+    ".card: border-radius: 22px",
+    ".add: border-radius: 9px",
+    ".select: border-radius: 9px"
+  ],
+  "ui-primitives/src/Modal.module.css": [
+    ".dialog: border-radius: 24px"
   ],
   "ui-schedule/src/client/ClockPicker.module.css": [
     ".option: border-radius: 10px"
@@ -63,5 +68,11 @@
     ".keyBadge: border-radius: 10px",
     ".unbound: border-radius: 10px",
     ".recorder: border-radius: 10px"
+  ],
+  "ui-deliverables/src/client/ChangedFiles.module.css": [
+    ".tile: border-radius: 10px"
+  ],
+  "ui-deliverables/src/client/Deliverables.module.css": [
+    ".fileIcon: border-radius: 10px"
   ]
 }

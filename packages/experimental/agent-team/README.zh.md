@@ -63,6 +63,8 @@ roster 显示每个成员的职责（`lead` 或 `teammate`）与当前状态：`
 
 只有 Lead 可以创建 teammate 或中断它们。
 
+Lead 持久 roster 之外、由提供方创建的 subagent 不是 Team 成员，包括首次记录 descriptor 之前及冷恢复之后。它们不会收到 `dsh-experimental-tool-agent-team` 提供的通用 Team 工具或协作策略。普通宿主 fork 仍是独立的 Lead。roster 中处于 `provisioning` 或 `active` 状态的 teammate 即使会话头含有 `origin: subagent`，仍保留成员身份；该字段仅用于排除非成员，不授予 continuation 或消息权限。
+
 ### teammate 之间的消息
 
 任何成员都可向其他成员或 Lead 发送消息。每次尝试要么返回目标 inbox 的 `MessageId`，要么抛出错误。Team 不保留尚未接收的发送意图，不在重启后重试新消息，也不对显式重发去重。

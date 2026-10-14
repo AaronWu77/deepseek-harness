@@ -3,11 +3,14 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/fork-deviations.md
 /:
-  en: 1b18597f171399cf
-  zh: b0542ec2f5d1e918
+  en: 6f2e1cb34f163ca7
+  zh: 001650be7b7302ac
 /fork-deviations:
   en: cf8abe8fcba16999
   zh: e89e579552d5408d
 /fork-deviations/local-one-shot-activation:
   en: ee9dc8b6672a2e9f
   zh: 62e65672c30d6e17
+/fork-deviations/preservation-registry:
+  en: b376ab4894c42d1d
+  zh: 7a57e59b310b8788

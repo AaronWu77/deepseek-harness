@@ -41,6 +41,13 @@ export const WIDER_MODES: Record<string, readonly SandboxMode[]> = {
 export const ESCALATION_TARGETS: readonly SandboxMode[] = ['workspace-write', 'danger-full-access']
 
 /**
+ * Every mode the sandbox vocabulary knows, ascending by access. A request for
+ * one of these that cannot strictly widen the call's effective mode runs under
+ * that mode instead of failing; anything outside this set is malformed input.
+ */
+const KNOWN_SANDBOX_MODES: readonly SandboxMode[] = ['read-only', 'workspace-write', 'danger-full-access']
+
+/**
  * Validate the escalation argument pairing a tool schema cannot express:
  * `sandbox_permissions` and `justification` travel together — an approval
  * prompt without a reason, or a reason driving nothing, is a malformed ask —
@@ -159,9 +166,9 @@ export interface EscalationRequest {
 }
 
 /**
- * Resolve a sandbox permission request before execution. Repeating the call's
- * effective mode returns it without approval. A strictly wider mode requires
- * approval and applies only to this call. Narrower or unsupported targets,
+ * Resolve a sandbox permission request before execution. A supported equal or
+ * narrower target keeps the call's effective mode without approval. A strictly
+ * wider mode requires approval and applies only to this call. Unsupported targets,
  * missing approval services or agents for widening, and non-grant outcomes
  * throw before execution.
  * @param request - the escalation to judge (see {@link EscalationRequest}).
@@ -175,7 +182,14 @@ export async function approveEscalation<A, C>(request: EscalationRequest, approv
   // deliberately not a schema constraint (the enum is the closed target
   // vocabulary; the effective mode is per-call truth).
   if (!(WIDER_MODES[effectiveMode] ?? []).includes(mode as SandboxMode)) {
-    throw new Error(`sandbox escalation to "${mode}" is not strictly wider than this call's current "${effectiveMode}" mode`)
+    // A mode the vocabulary knows but that is not wider than the call's own:
+    // the effective mode already grants equal or wider access, so nothing is
+    // approved and the call runs under it. Rejecting the call instead failed
+    // whole runs whose model repeated the arguments out of habit. An unknown
+    // mode is still malformed input and fails closed.
+    if (KNOWN_SANDBOX_MODES.includes(mode as SandboxMode)
+      && KNOWN_SANDBOX_MODES.includes(effectiveMode)) return effectiveMode
+    throw new Error(`sandbox escalation to "${mode}" is not strictly wider than this call's current "${effectiveMode}" mode; the current mode already grants equal or wider access, so omit sandbox_permissions and justification`)
   }
   if (approval.approver === undefined) {
     throw new Error(`sandbox escalation to "${mode}" requires approval, but no approval service is composed`)

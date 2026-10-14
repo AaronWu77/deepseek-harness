@@ -1,11 +1,12 @@
 /**
  * Window drag-region ownership, asserted against the CSS and the markup on disk.
- * The shell declares `-webkit-app-region: drag` exactly once — ui-web base.css,
- * for any element that marks itself `data-window-drag` — so a chrome row's own box
+ * The shell declares `-webkit-app-region: drag` for marked chrome rows — ui-web
+ * base.css — while the layout frame owns the platform-specific glass gap and Windows
+ * caption regions. A chrome row's own box
  * is the window's draggable geometry and no fixed band has to match any row's
  * height. CHROME_ROWS pairs every row's mark with its sheet and its pinned
  * geometry, so a row that stops marking itself, an unmarked row added to the
- * composition, and a mark on a container that owns no chrome row all fail here.
+ * composition, and an unowned drag region all fail here.
  * Electron composes app-regions from window geometry in DOM order, ignoring
  * stacking: a drag rule on a content container overrides the no-drag of any
  * overlay mounted earlier, so its text and labels drag the window instead of
@@ -25,10 +26,13 @@ const SHELL_SHEET = 'client/web/src/base.css'
 /** The mark that stylesheet's rule selects, as authored. */
 const SHELL_DRAG_SELECTOR = "html[data-platform='darwin'] [data-window-drag]"
 
-/** The frame's Windows caption row, relative to packages/; the other platform's chrome. */
-const WINDOWS_CAPTION = 'client/ui-layout/src/client/AppFrame.module.css'
+/** The frame-owned platform drag regions, relative to packages/. */
+const FRAME_SHEET = 'client/ui-layout/src/client/AppFrame.module.css'
 
-/** That caption row's selector, as authored. */
+/** The exposed macOS glass gap, as authored. */
+const DARWIN_GLASS_GAP_SELECTOR = ":global([data-platform='darwin']) .frame::before"
+
+/** The Windows caption row, as authored. */
 const WINDOWS_CAPTION_SELECTOR = ':global([data-windows-titlebar]) .frame::before'
 
 /** The mark a chrome row puts on the element that owns its drag. */
@@ -238,13 +242,11 @@ describe('window drag-region ownership', () => {
     expect(dragSelectors('.a { app-region: no-drag !important; }')).toEqual([])
   })
 
-  it('declares the window drag surface in exactly two places', () => {
-    // Rows mark themselves instead of each sheet declaring its own drag, so the
-    // tree holds one darwin rule — the mark rule in the shell sheet — plus the
-    // Windows caption row, which is that platform's own chrome. A third
-    // declaration, a per-sheet row rule, or a darwin band on the frame fails here.
+  it('declares only the owned window drag surfaces', () => {
+    // Rows mark themselves instead of each sheet declaring its own drag. The frame
+    // owns the exposed macOS glass gap and Windows caption; ui-web owns marked rows.
     expect(dragOwners()).toEqual([
-      { file: WINDOWS_CAPTION, selectors: [WINDOWS_CAPTION_SELECTOR] },
+      { file: FRAME_SHEET, selectors: [DARWIN_GLASS_GAP_SELECTOR, WINDOWS_CAPTION_SELECTOR] },
       { file: SHELL_SHEET, selectors: [SHELL_DRAG_SELECTOR] },
     ])
   })

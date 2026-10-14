@@ -375,6 +375,21 @@ describe('web e2e: shipped right Sidebar', () => {
       expect(answered).toBe(true)
     })
 
+    it('does not paint a collapsed Sidebar scrim over the conversation', async () => {
+      await expandOf(page).waitFor({ timeout: 15_000 })
+      const panel = page.locator('[data-rightbar-col] [data-sidebar-right-panel]')
+      const paint = async () => panel.evaluate((node) => {
+        const style = getComputedStyle(node)
+        return { opacity: style.opacity, visibility: style.visibility }
+      })
+      await expect.poll(paint).toEqual({ opacity: '0', visibility: 'hidden' })
+      await expandOf(page).click()
+      await expect.poll(paint).toEqual({ opacity: '1', visibility: 'visible' })
+      await panel.locator('[data-sidebar-right-toggle]').click()
+      await expandOf(page).waitFor({ timeout: 10_000 })
+      await expect.poll(paint).toEqual({ opacity: '0', visibility: 'hidden' })
+    })
+
     it('starts collapsed behind a header button and squeezes the conversation when opened', async () => {
       onTestFailed(() => saveFailureShot(page, 'web-e2e-sidebar-right'))
       const frame = page.locator('[class*="frame"]').first()
@@ -529,16 +544,21 @@ describe('web e2e: shipped right Sidebar', () => {
       const panel = column.locator('[data-sidebar-right-panel]')
       const viewport = page.viewportSize()
       if (viewport === null) throw new Error('expected a fixed viewport')
-      const geometry = () => frame.evaluate(node => ({
-        columns: getComputedStyle(node).gridTemplateColumns,
-        transition: getComputedStyle(node).transitionProperty,
-        handles: [...node.querySelectorAll('[data-side="sidebar"], [data-side="rightbar"]')]
-          .map(handle => getComputedStyle(handle).transitionProperty),
-        animatingGrid: node.getAnimations().some(animation =>
-          'transitionProperty' in animation && animation.transitionProperty === 'grid-template-columns'
-          && animation.playState !== 'finished' && animation.playState !== 'idle'),
-      }))
-      await frame.evaluate(async (node) => { await Promise.allSettled(node.getAnimations().map(animation => animation.finished)) })
+      const glass = frame.locator('[class*="window"]').first()
+      const geometry = () => frame.evaluate((node) => {
+        const grid = node.querySelector('[class*="window"]')
+        if (grid === null) throw new Error('glass grid is not rendered')
+        return {
+          columns: getComputedStyle(grid).gridTemplateColumns,
+          transition: getComputedStyle(grid).transitionProperty,
+          handles: [...node.querySelectorAll('[data-side="sidebar"], [data-side="rightbar"]')]
+            .map(handle => getComputedStyle(handle).transitionProperty),
+          animatingGrid: grid.getAnimations().some(animation =>
+            'transitionProperty' in animation && animation.transitionProperty === 'grid-template-columns'
+            && animation.playState !== 'finished' && animation.playState !== 'idle'),
+        }
+      })
+      await glass.evaluate(async (node) => { await Promise.allSettled(node.getAnimations().map(animation => animation.finished)) })
       const normalColumns = (await geometry()).columns
       await column.locator('[data-sidebar-right-mode="fullscreen"]').click()
       await expect.poll(() => panel.boundingBox()).toEqual({ x: 0, y: 0, ...viewport })
@@ -547,7 +567,7 @@ describe('web e2e: shipped right Sidebar', () => {
         panel.evaluate(async (node) => {
           await Promise.allSettled(node.getAnimations({ subtree: true }).map(animation => animation.finished))
         }),
-        frame.evaluate(async (node) => { await Promise.allSettled(node.getAnimations().map(animation => animation.finished)) }),
+        glass.evaluate(async (node) => { await Promise.allSettled(node.getAnimations().map(animation => animation.finished)) }),
       ])
       const closedColumns = (await geometry()).columns
       expect(closedColumns).not.toBe(normalColumns)
@@ -634,10 +654,17 @@ describe('web e2e: shipped right Sidebar', () => {
       const sidebar = page.locator('[class*="sidebarCol"]').first()
       const panel = column.locator('[data-sidebar-right-panel]')
       try {
-        await page.setViewportSize({ width: 1024, height: viewport.height })
+        // Keep the inset grid above its 1024px auto-collapse breakpoint while
+        // leaving too little room for a 420px sidebar and a right panel.
+        await page.setViewportSize({ width: 1100, height: viewport.height })
+        const glass = frame.locator('[data-shell-window]')
+        await expect.poll(async () => await width(glass)).toBeGreaterThan(1024)
+        await expect.poll(() => frame.getAttribute('data-sidebar-collapsed')).toBe(null)
         const leftGrip = frame.locator('[data-side="sidebar"]')
         const grip = await centre(leftGrip)
-        await dragElement(page, leftGrip, { x: 420, y: grip.y })
+        const glassBox = await glass.boundingBox()
+        if (glassBox === null) throw new Error('glass grid is not rendered')
+        await dragElement(page, leftGrip, { x: glassBox.x + 420, y: grip.y })
         await expect.poll(async () => await width(sidebar)).toBe(420)
         await expect.poll(async () => await column.locator('[data-sidebar-right-open]').count()).toBe(0)
         await page.setViewportSize(viewport)
@@ -659,7 +686,9 @@ describe('web e2e: shipped right Sidebar', () => {
       } finally {
         await page.setViewportSize(viewport)
         const grip = await centre(frame.locator('[data-side="sidebar"]'))
-        await dragElement(page, frame.locator('[data-side="sidebar"]'), { x: 280, y: grip.y })
+        const glassBox = await frame.locator('[class*="window"]').first().boundingBox()
+        if (glassBox === null) throw new Error('glass grid is not rendered')
+        await dragElement(page, frame.locator('[data-side="sidebar"]'), { x: glassBox.x + 280, y: grip.y })
         await expect.poll(async () => await width(sidebar)).toBe(280)
         await ensureExpanded(page, column)
       }
