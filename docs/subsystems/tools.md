@@ -464,6 +464,8 @@ interface JsonSchemaNode {
   items?: JsonSchemaNode
   /** Allowed values for a scalar node. */
   enum?: JsonSchemaScalar[]
+  /** Minimum Unicode code-point length for a string node. */
+  minLength?: number
   /** The single allowed value for a scalar node. */
   const?: JsonSchemaScalar
   /** Annotation, ignored for validation. */

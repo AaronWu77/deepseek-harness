@@ -39,5 +39,6 @@ description: "记录本地 Host 源码偏离及退役条件。"
 | F-019 | [SDK、schema 与执行使用同一个局部 PTC 提供方](../packages/core/tools/src/index.ts) | [检查](../packages/core/agent-tool-presentation/tests/loader-composition.spec.ts) | 真实 YAML Loader 检查通过；profile 回放需要构建 Typert 产物 |
 | F-020 | [非 roster 中的提供方子 agent 不属于 Team](../packages/experimental/agent-team/src/roster.ts) | [检查](../packages/experimental/agent-team/tests/non-team-subagent-membership.spec.ts) | 真实 YAML Loader 与本地一次性调用检查通过；旧同版本格式录制尚未解决 |
 | F-021 | [明确首次录制输入与 scripted 模型类别](../packages/test-support/session-snapshot/src/session-files.ts) | [检查](../packages/test-support/session-snapshot/tests/record-inventory.spec.ts) | 辅助函数与 manifest 检查通过；完整 profile 回放待验证 |
+| F-022 | [浮动层与代码表面的玻璃与墨色表面语言](../packages/client/ui-theme/src/styles/design-platform.css) | [检查](../packages/client/ui-theme/tests/backdrop-filter-styles.client.spec.ts) | 样式检查通过；浏览器与原生桌面待验证 |
 
 只有专项检查与相关正式 profile、模型可见输出、浏览器或原生平台用例无需本地实现就通过时，才退役该条目。仅凭结构检查不会退役任何条目。生产同版本格式的 Team 共存录制使用已移除的委派参数；其不可变前代输入保留为外部演练数据，直到当前 API owner 完成验证。

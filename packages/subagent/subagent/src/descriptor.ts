@@ -231,6 +231,11 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
  * @throws when a field is not losslessly JSON-serializable.
  */
 export function snapshotSubagentDescriptor(input: OneShotSubagentDescriptorInput): OneShotSubagentDescriptorData
+/**
+ * Validate and detach a continuable child descriptor input.
+ * @param input - the caller-collected authority, composition, and filter fields.
+ * @returns the versioned, detached descriptor payload with its original mode.
+ */
 export function snapshotSubagentDescriptor(input: ContinuableSubagentDescriptorInput): ContinuableSubagentDescriptorData
 export function snapshotSubagentDescriptor(
   input: OneShotSubagentDescriptorInput | ContinuableSubagentDescriptorInput,
