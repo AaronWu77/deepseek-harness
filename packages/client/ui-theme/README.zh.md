@@ -85,7 +85,7 @@ kind: "package-reference"
 
 `onboarding.css` 管理引导强调色、以紫色/蓝色/青色命名的渐变，以及卡片、复选框和次要操作的浅色与暗黑配色。卡片阴影的偏移与模糊尺寸由业务组件管理。
 
-`design-platform.css` 持有玻璃面套件与环境画布。`--dsw-glass-fill`/`--dsw-glass-fill-raised`/`--dsw-glass-fill-thick`/`--dsw-glass-fill-sunken` 是表面按层级选用的半透明填充——厚档用于大块内容面板，那里的可读性必须由填充自己承担，而壳层档可以交给画布，`--dsw-glass-stroke` 与 `--dsw-glass-highlight` 是它的发丝描边与高光边，`--dsw-glass-blur`/`--dsw-glass-blur-strong`/`--dsw-glass-blur-thin` 是三档 `backdrop-filter`，`--dsw-glass-scrim` 是会话列铺的薄纱，让正文在环境色之上保住对比度。`--dsw-aurora-1` 至 `--dsw-aurora-4` 是四个漂移色团，`--dsw-aurora-drift` 是它们的周期；shell 负责绘制它们，玻璃面负责模糊它们——这正是 `backdrop-filter` 可见的前提。`--dsw-glass-canvas` 是不渲染极光层时的静态退化。`base.css` 声明这些表面所用的运动 token：`--dsw-motion-spring`、`--dsw-motion-duration`、`--dsw-motion-duration-fast` 与 `--dsw-motion-duration-slow`。
+`design-platform.css` 持有玻璃面套件与环境画布。`--dsw-glass-fill`/`--dsw-glass-fill-raised`/`--dsw-glass-fill-thick`/`--dsw-glass-fill-sunken` 是表面按层级选用的半透明填充——厚档用于大块内容面板，那里的可读性必须由填充自己承担，而壳层档可以交给画布，`--dsw-glass-stroke` 与 `--dsw-glass-highlight` 是它的发丝描边与高光边，`--dsw-glass-blur`/`--dsw-glass-blur-strong`/`--dsw-glass-blur-thin` 是三档 `backdrop-filter`，`--dsw-glass-scrim` 是会话列铺的薄纱，让正文在环境色之上保住对比度。`--dsw-aurora-1` 至 `--dsw-aurora-5` 是五个漂移色团，`--dsw-aurora-drift` 是它们的周期；shell 负责绘制它们，玻璃面负责模糊它们——这正是 `backdrop-filter` 可见的前提。`--dsw-glass-canvas` 是不渲染极光层时的静态退化。`base.css` 声明 `--dsw-motion-spring`，供 composer 控件用作缓动曲线。
 
 ### 滚动条重新绑定
 

@@ -16,9 +16,6 @@
   --ds-transition-duration-fast: 0.1s;
   --ds-transition-duration-slow: 0.3s;
   --dsw-motion-spring: cubic-bezier(0.32, 0.72, 0, 1);
-  --dsw-motion-duration-fast: 0.16s;
-  --dsw-motion-duration: 0.24s;
-  --dsw-motion-duration-slow: 0.34s;
   --dsw-radius-xs: 4px;
   --dsw-radius-sm: 8px;
   --dsw-radius-md: 12px;
