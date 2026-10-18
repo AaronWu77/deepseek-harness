@@ -130,6 +130,7 @@ export function apply(ctx: Context) {
 | 记忆 | section 提供方 + 工具 |
 | 定时任务（cron） | 插件注册面向模型的调度工具；定时器到期后通过 `followup(…, {source: {kind: 'schedule'}})` 投递 |
 | UI（GUI；CLI（命令行界面）输出 JSONL） | 监听 `agent/assistant-stream` 的实时 chunk，并监听 `session/event` 的持久 settlement、边界与工具活动；输入 → `followup()` |
+| 可选 Web 皮肤 | 注册 `sidebar.brand.*` 槽，并通过可逆 effect 安装一个文档样式表；只针对稳定的语义 hooks，布局、浮层、拖拽区域和滚动条仍由 Host 拥有 |
 | Web Client Chat 业务节点 | 注册 `ConversationNodeDefinition` 与 `conversation.chat.node` keyed renderer |
 | 遥测 / 可回放 trace | `session/event` → JSONL；回放 = `sessions.create(id, { seed })` |
 | 模型适配器 | 通过 `registerAdapter` 注册 `LlmAdapter` 子类（`dsh-llm-deepseek`、`dsh-llm-pi-ai`） |

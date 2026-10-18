@@ -126,6 +126,7 @@ Every product feature maps to a listener on a documented extension point — the
 | Memory | section provider + tool |
 | Scheduled tasks (cron) | a plugin registers model-callable scheduling tools; a due timer delivers through `followup(…, {source: {kind: 'schedule'}})` |
 | UI (GUI; CLI emits JSONL) | listen to `agent/assistant-stream` for live chunks and `session/event` for durable settlements, boundaries, and tool activity; input → `followup()` |
+| Optional Web skin | register `sidebar.brand.*` slots and install one document stylesheet as a reversible effect; target stable semantic hooks and leave layout, overlays, drag regions, and scrollbars Host-owned |
 | Web Client Chat business node | register a `ConversationNodeDefinition` and `conversation.chat.node` keyed renderer |
 | SessionTelemetryBackend / replayable trace | `session/event` → JSONL; replay = `sessions.create(id, { seed })` |
 | Model adapters | `LlmAdapter` subclass via `registerAdapter` (`dsh-llm-deepseek`, `dsh-llm-pi-ai`) |

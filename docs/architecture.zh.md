@@ -158,6 +158,7 @@ seam 正是替换一个提供方就能改变整个产品的原因。文件系统
 | 拦截请求、工具或轮次 | 使用相应的 `agent/*` 或 `tools/*` 事件；`agent/turn-stopping` 会停止轮次 |
 | 添加模型可见上下文 | 调用 `agent.inject()`；它会落到下一次获准的请求中 |
 | 添加 UI 或编辑器集成 | 驱动 `ctx.agents` 并从 `session/event` 渲染 |
+| Web 皮肤 | 品牌槽 + 可逆样式；交互由 Host 拥有 |
 | 添加 Web Client Chat 节点 | 注册 `ConversationNodeDefinition` + keyed renderer |
 | 添加持久会话状态 | 扩展 `SessionEventMap`；从日志渲染和回放 |
 | 生成会话标题 | 注册唯一的 `ctx.sessionTitle` 提供方 |
@@ -166,4 +167,4 @@ seam 正是替换一个提供方就能改变整个产品的原因。文件系统
 | 在新后端存储会话 | 基于共享的句柄脚手架实现 `SessionPersistence`（`create`/`open`/`stat`/`list`/`export`） |
 | 将注册项限定到单个 agent | 使用该 agent 的 `agent.ctx` |
 
-[扩展实操手册](cookbook/extension-cookbook.zh.md)将功能映射到能力，并索引[包](cookbook/adding-a-package.zh.md)、[工具](cookbook/adding-a-tool.zh.md)、[LLM（大语言模型）适配器](cookbook/adding-an-llm-adapter.zh.md)和[设置页](cookbook/adding-a-settings-card.zh.md)的分步指南。[Conversation 子系统](subsystems/conversation.zh.md)负责 Chat node 组装。
+[扩展实操手册](cookbook/extension-cookbook.zh.md)链接[包](cookbook/adding-a-package.zh.md)、[工具](cookbook/adding-a-tool.zh.md)、[LLM](cookbook/adding-an-llm-adapter.zh.md)和[设置](cookbook/adding-a-settings-card.zh.md)指南；[Conversation](subsystems/conversation.zh.md)负责 Chat node 组装。

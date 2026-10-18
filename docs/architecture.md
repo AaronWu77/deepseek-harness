@@ -154,6 +154,7 @@ New behavior attaches to a documented extension point. Changing the loop itself 
 | Intercept a request, tool, or turn | use its `agent/*` or `tools/*` event; `agent/turn-stopping` stops a turn |
 | Add model-facing context | call `agent.inject()`; it lands in the next admitted request |
 | Add UI or editor integration | drive `ctx.agents` and render from `session/event` |
+| Web skin | brand slots + reversible styles; Host owns interaction |
 | Add a Web Client Chat node | register a `ConversationNodeDefinition` + keyed renderer |
 | Add durable session state | extend `SessionEventMap`; render and replay from the log |
 | Generate session titles | register the sole `ctx.sessionTitle` provider |
@@ -162,4 +163,4 @@ New behavior attaches to a documented extension point. Changing the loop itself 
 | Store sessions in a new backend | implement `SessionPersistence` (`create`/`open`/`stat`/`list`/`export`) over the shared handle scaffolding |
 | Scope a registration to one agent | use that agent's `agent.ctx` |
 
-The [extension cookbook](cookbook/extension-cookbook.md) maps features to capabilities and indexes the step-by-step guides for [packages](cookbook/adding-a-package.md), [tools](cookbook/adding-a-tool.md), [LLM adapters](cookbook/adding-an-llm-adapter.md), and [settings pages](cookbook/adding-a-settings-card.md). The [Conversation subsystem](subsystems/conversation.md) owns Chat-node assembly.
+The [extension cookbook](cookbook/extension-cookbook.md) links [package](cookbook/adding-a-package.md), [tool](cookbook/adding-a-tool.md), [LLM](cookbook/adding-an-llm-adapter.md), and [settings](cookbook/adding-a-settings-card.md) guides; [Conversation](subsystems/conversation.md) owns Chat-node assembly.
