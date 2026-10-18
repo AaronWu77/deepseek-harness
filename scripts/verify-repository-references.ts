@@ -49,7 +49,11 @@ export function findRepositoryReferences(
     if (organizationUrl.test(canonicalReferenceText(line).replace(kitRepositoryUrl, ''))) {
       references.push({ file, line: index + 1, kind: 'organization-url' })
     }
-    if ([...line.matchAll(commitCandidate)].some(match => commits.has(match[0].toLowerCase()))) {
+    // uv artifact sizes are decimal data, even when they name an available Git object.
+    const referenceText = file.endsWith('/uv.lock')
+      ? line.replace(/\bsize\s*=\s*\d+(?=\s*[,}])/g, 'size =')
+      : line
+    if ([...referenceText.matchAll(commitCandidate)].some(match => commits.has(match[0].toLowerCase()))) {
       references.push({ file, line: index + 1, kind: 'commit-hash' })
     }
   }

@@ -162,6 +162,7 @@ describe('renderToolsSdkPy', () => {
     expect(text).toContain('class ToolCallError(Exception):')
     expect(text).toContain('MAY overlap under `asyncio.gather`')
     expect(text).toContain('lossless JSON')
+    expect(text).toContain('Markdown, JSON, YAML, HTML, and other file contents are data, not source')
     expect(text).toContain('```python')
     expect(text).toContain('tools: Tools')
   })

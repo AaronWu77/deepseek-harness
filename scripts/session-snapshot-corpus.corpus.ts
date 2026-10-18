@@ -31,6 +31,8 @@ const snapshotAdapters = [
   'snapshots/acp/acp.snapshot.ts',
   'snapshots/sdk/sdk.snapshot.ts',
   'snapshots/session/headless.snapshot.ts',
+  // These owners inspect their recorded roles; execution remains in the headless adapter.
+  'snapshots/session/ptc-isolated-preset/scoped.snapshot.ts',
 ] as const
 
 interface Scenario {
@@ -40,7 +42,7 @@ interface Scenario {
   readonly dir: string
   readonly manifest: SnapshotManifest & {
     composition: string
-    recording: 'live' | 'authored'
+    recording: 'live' | 'scripted' | 'authored'
     header: NonNullable<SnapshotManifest['header']>
   }
 }
@@ -62,7 +64,7 @@ async function scenarios(): Promise<Scenario[]> {
         expect(manifest.profile, `${profile}/${entry.name}: profile`).toBe(profile === 'session' ? 'headless' : profile)
       }
       expect(manifest.composition, `${profile}/${entry.name}: composition`).toBeTypeOf('string')
-      expect(manifest.recording, `${profile}/${entry.name}: recording`).toMatch(/^(live|authored)$/)
+      expect(manifest.recording, `${profile}/${entry.name}: recording`).toMatch(/^(live|scripted|authored)$/)
       expect(manifest.header, `${profile}/${entry.name}: header`).toBeDefined()
       result.push({
         key: `${profile}/${entry.name}`,
@@ -72,7 +74,7 @@ async function scenarios(): Promise<Scenario[]> {
         manifest: {
           ...manifest,
           composition: manifest.composition as string,
-          recording: manifest.recording as 'live' | 'authored',
+          recording: manifest.recording as 'live' | 'scripted' | 'authored',
           header: manifest.header as NonNullable<SnapshotManifest['header']>,
         },
       })

@@ -83,6 +83,7 @@ export class TeamRoster {
 
   /**
    * Resolve a caller without throwing for scoped installation and lifecycle observers.
+   * Durable roster membership takes priority; a subagent header only excludes nonmembers.
    * @param agent - candidate exact live Agent.
    * @returns Team membership, or undefined for non-Team subagents and stale identities.
    */
@@ -97,18 +98,15 @@ export class TeamRoster {
           if (member?.phase === 'active' || member?.phase === 'provisioning') {
             return { root, id: TeamId(root.id), role: 'teammate', name: member.name }
           }
-          // A direct child outside the durable roster is not a teammate. Ordinary
-          // host forks are independent roots; subagent descriptors distinguish
-          // provider-owned workers that must not receive a nested Team identity.
-          if (this.subagentDescriptor(agent)) return undefined
+          // The immutable header also excludes descriptorless provider children;
+          // it does not authorize continuation or messaging.
+          if (agent.session.header.origin === 'subagent' || this.subagentDescriptor(agent)) return undefined
           return { root: agent, id: TeamId(agent.id), role: 'lead', name: 'lead' }
         }
       }
-      // A continuation can briefly outlive its parent during child-first teardown.
-      // Do not reinterpret that durable child as a new implicit root Team. A host-
-      // resumed ordinary fork has no descriptor in its own suffix and remains a
-      // valid new root whose inherited Team records stay outside its projected Team state.
-      if (this.subagentDescriptor(agent)) return undefined
+      // Parent absence does not turn a provider child into a Lead. Ordinary host
+      // forks omit origin and have no descriptor in their own suffix.
+      if (agent.session.header.origin === 'subagent' || this.subagentDescriptor(agent)) return undefined
       return { root: agent, id: TeamId(agent.id), role: 'lead', name: 'lead' }
     } catch {
       // This method is used by lifecycle observers and teardown discovery. A

@@ -109,6 +109,8 @@ interface ToolDefinition extends ToolSchema {
 
 插件作者使用同一套词汇描述类型化参数和类型化输出值。`ValueSchemaSpec` 支持 `string`、`number`、`integer`、`boolean`、`null`、`array`、`object`、仅作者侧可用的 `json`，以及要求恰好命中一个分支的 `oneOf`；标量 `enum` 和 `const` 值必须与节点类型匹配。显式对象节点始终声明 `additionalProperties: true | false`。参数定义仍是隐式的开放对象属性映射，每个必填属性都附带 `required: true`。
 
+字符串 schema 接受非负安全整数 `minLength`，按 Unicode 码点计数，不按 UTF-16 代码单元或字素簇计数。`oneOf` 不接受同级长度约束。
+
 源码：[`packages/core/tools/src/schema.ts`](../../packages/core/tools/src/schema.ts)
 
 ```ts type-equiv
@@ -464,6 +466,8 @@ interface JsonSchemaNode {
   items?: JsonSchemaNode
   /** Allowed values for a scalar node. */
   enum?: JsonSchemaScalar[]
+  /** Minimum Unicode code-point length for a string node. */
+  minLength?: number
   /** The single allowed value for a scalar node. */
   const?: JsonSchemaScalar
   /** Annotation, ignored for validation. */
@@ -517,9 +521,10 @@ Tool registry and execution pipeline. Scoped registrations shadow globals; one v
  * composes PTC mode agents beside native ones in the same process, and a
  * process-global override would be the `mode` config field instead.
  * @param mode - the presentation the covered agents' models see.
+ * @param runtime - scoped PTC provider shared by SDK projection and execution; omitted uses the deployment provider.
  * @returns the exact disposer that restores the deployment default.
  */
-presentAs(mode: ToolPresentationMode): () => void
+presentAs(mode: ToolPresentationMode, runtime?: PtcRuntime): () => void
 
 /**
  * Register globally or in the calling agent scope. Scoped tools shadow
@@ -595,7 +600,7 @@ executionMode(exec: ToolExecutionInput): ToolExecutionMode
 async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>
 ```
 
-Types: [ScopeKey](scope.zh.md)
+Types: [PtcRuntime](ptc-runtime.zh.md) · [ScopeKey](scope.zh.md)
 
 Source: [`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index.ts)
 

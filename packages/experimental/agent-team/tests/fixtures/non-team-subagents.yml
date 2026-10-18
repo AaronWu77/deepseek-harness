@@ -1,0 +1,22 @@
+- name: '@deepseek-ai/dsh-session'
+- name: '@deepseek-ai/dsh-session-projection'
+- name: '@deepseek-ai/dsh-llm'
+- name: '@deepseek-ai/dsh-system-prompt'
+- name: '@deepseek-ai/dsh-tools'
+- name: '@deepseek-ai/dsh-fs-local'
+  config:
+    cwd: '{{root}}'
+- name: '@deepseek-ai/dsh-working-directory'
+- name: '@deepseek-ai/dsh-agent'
+- name: '@deepseek-ai/dsh-agent-loop'
+- name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: '{{root}}/sessions'
+- name: '@deepseek-ai/dsh-session-query-sqlite'
+  config:
+    path: ':memory:'
+    openAt: never
+- name: '@deepseek-ai/dsh-subagent'
+- name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+- name: '@deepseek-ai/dsh-experimental-agent-team'
+- name: '@deepseek-ai/dsh-experimental-tool-agent-team'

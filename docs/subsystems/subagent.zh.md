@@ -31,13 +31,18 @@ interface SubagentCapabilities {
 interface SubagentActivationSpec {
   /** Registered backend to use. */
   readonly provider: string
+  /** Explicit local lifetime; omitted preserves existing provider dispatch. */
+  readonly lifecycle?: 'one-shot' | 'continuable'
   /** Short task label retained in cataloged child membership. */
   readonly label: string
   /** Optional reserved identity for a local child; external backends allocate their own ids. */
   readonly childId?: SessionId
   /** Task, parent, and backend-supported execution options. */
   readonly request: Omit<SubagentStartRequest, 'label' | 'signal'>
-  /** Cancellation before publication; callers own later cancellation through dispose. */
+  /**
+   * Startup cancellation; local one-shot and external executions also cancel after publication.
+   * Continuable callers use dispose after publication.
+   */
   readonly signal: AbortSignal
   /** Parent delivery notifies the model; caller delivery only returns the result. Local children always enter the parent catalog. */
   readonly delivery: 'parent' | 'caller'
@@ -82,7 +87,7 @@ interface SubagentStartRequest {
   readonly prompt: ContentBlock[]
   /**
    * The spawning agent. Its effective directory supplies the default cwd;
-   * in-process children retain its origin, lineage, and delegation depth.
+   * continuable children retain its project origin; all local children retain lineage and delegation depth.
    */
   readonly parent: Agent
   /**
@@ -129,7 +134,7 @@ interface ResolvedSubagentStartRequest extends SubagentStartRequest {
 
 只有 spawn 支持独立的 `agentPreset`；省略选择与 fork 都继承父方的活跃组装。[子级 preset 规则](../../packages/subagent/subagent/README.zh.md#restoring-child-composition)定义显式选择、事件顺序和历史恢复行为。
 
-本地子代理拥有持久 Session，最多有一个在线 activation。Manager 预留身份和容量，通过后端准备子代理，并管理输入准入、冷恢复以及先子后父的释放顺序。activation 结果在资源释放和完成通知之后结算。释放操作单独报告清理失败，不会覆盖已捕获的结果。结构化结果提交会关闭该 activation 的输入；之后的冷恢复不会继承输出 schema。
+可续接的本地子代理拥有持久 Session，最多有一个在线 activation。Manager 预留身份和容量，通过后端准备子代理，并管理输入准入、冷恢复以及先子后父的释放顺序。activation 结果在资源释放和完成通知之后结算。释放操作单独报告清理失败，不会覆盖已捕获的结果。结构化结果提交会关闭该 activation 的输入；之后的冷恢复不会继承输出 schema。
 
 ```ts type-equiv
 /**
@@ -170,6 +175,31 @@ interface ContinuableCreateSpec {
   readonly seed?: readonly SessionEvent[]
 }
 ```
+
+```ts type-equiv
+/** Reserved local identity and task admitted before one-shot preparation. */
+interface LocalOneShotCreateRequest extends ResolvedSubagentStartRequest {
+  /** Manager-reserved durable child identity. */
+  readonly sessionId: SessionId
+}
+```
+
+```ts type-equiv
+/** Detached one-shot creation hooks; the manager alone creates and owns the child. */
+interface LocalOneShotCreateSpec {
+  /** Explicit child preset metadata; setup mounts its implementation. */
+  readonly agentPreset?: string
+  /** Scoped composition before publication; must not start child execution. */
+  readonly setup?: CreateAgentOptions['setup']
+  /**
+   * Startup probe after creation; its signal includes caller, manager and parent disposal cancellation.
+   * Rejection disposes the unpublished child.
+   */
+  readonly preflight?: (child: Agent, signal: AbortSignal) => Promise<void>
+}
+```
+
+显式 `lifecycle: 'one-shot'` 选择 `prepareLocalOneShot`。Manager 管理执行、取消和清理；受信的准备钩子可以组装并预检子级。one-shot 子级拒绝后续输入和冷恢复。
 
 ## 消息与中断
 
@@ -358,8 +388,8 @@ interface SubagentProvider {
    * OPTIONAL (continuable-creation capability): contribute the detached
    * creation inputs that distinguish this provider's continuable children —
    * only whether the child session is seeded with parent history. Method
-   * presence selects local activation execution. Providers without it execute
-   * through start and do not accept subsequent messages.
+   * presence selects local continuable activation by default. Explicit one-shot
+   * lifetime uses prepareLocalOneShot; external executions use start.
    *
    * This is the provider's ONLY participation in a continuable child. The
    * continuation manager owns identity reservation, composition, Agent
@@ -369,6 +399,16 @@ interface SubagentProvider {
    * data belonging only to `request.sessionId`.
    */
   prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
+  /**
+   * Prepare a fresh local one-shot child without creating or returning an Agent or handle.
+   * Selected only by explicit lifecycle: 'one-shot'; the manager owns execution,
+   * cancellation, result capture and quiescent disposal. Hooks may compose and
+   * probe the child, never deliver prompts or retain its lifecycle ownership.
+   * Preparation observes request.signal and returns hooks without awaiting native
+   * probes or child execution. The second signal is manager-owned startup cancellation
+   * and must stop provider work when the parent or manager drains.
+   */
+  prepareLocalOneShot?(request: LocalOneShotCreateRequest, managedSignal: AbortSignal): Promise<LocalOneShotCreateSpec>
 }
 ```
 
@@ -579,8 +619,8 @@ listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<Subagen
 /**
  * Register a provider under its name. Registration is effect-scoped and HMR
  * safe; removing a provider blocks new starts but does not revoke runs that
- * were already returned to their holders. Providers without either execution
- * method are rejected with UNSUPPORTED_CAPABILITY before registration.
+ * were already returned to their holders. Providers without `start`, `prepareContinuable`,
+ * or `prepareLocalOneShot` are rejected with UNSUPPORTED_CAPABILITY before registration.
  * @param provider - the trusted provider implementation.
  * @returns the exact Cordis effect disposer.
  */

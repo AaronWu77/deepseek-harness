@@ -1,0 +1,12 @@
+version: 1
+scenario: ptc-isolated-preset
+profile: headless
+composition: ptc-isolated-preset
+recording: scripted
+header:
+  class: ptc-isolated-preset
+  pin: true
+# This scenario checks provider binding and real SDK effects, not process confinement.
+permission: danger-full-access
+workspace:
+  final: true

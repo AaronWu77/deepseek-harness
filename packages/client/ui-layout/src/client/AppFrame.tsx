@@ -15,7 +15,7 @@
  * shares — zero cordis or framework imports, zero self-made hooks.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import type {
   PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
 } from '@deepseek-ai/dsh-client-ui-slots'
@@ -30,6 +30,18 @@ export type AppFrameProps =
   & PropsRenderSlots<'sidebar' | 'main' | 'rightbar' | 'shell.bottom' | 'shell.overlay' | 'shell.leading'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
   & PropsLocale<'common'>
+
+/**
+ * Ambient aurora canvas: the drifting colour fields every glass surface blurs.
+ * ui-theme owns the colours and the drift period; this module owns only the one
+ * element they are painted on. A single layer is deliberate — five full-viewport
+ * layers each re-rasterize their own large radial gradient and leave a visible
+ * tonal step where the fields meet. Decorative, so it is hidden from assistive
+ * technology, and its drift stops under prefers-reduced-motion.
+ */
+function AmbientCanvas() {
+  return <div className={css.ambient} aria-hidden="true" />
+}
 
 /** Center column grid item (session-body building block). */
 function CenterColumn(props: { children?: ReactNode }) {
@@ -130,7 +142,7 @@ export function AppFrame({
   const frameRef = useRef<HTMLDivElement | null>(null)
   const viewport = layoutInfo.viewportWidth
 
-  // Track the frame's own box (not the window): rAF-throttled ResizeObserver.
+  // Measure the inset window: its tracks must not include the ambient frame gap.
   useLayoutEffect(() => {
     const el = frameRef.current
     /* v8 ignore next -- the ref is always attached by effect time: the frame div renders unconditionally. */
@@ -257,14 +269,13 @@ export function AppFrame({
 
   return (
     <div
-      ref={frameRef}
       className={css.frame}
       style={{
+        /* The frame publishes the Windows sidebar inset for ui-sidebar-right's
+           fullscreen panel; the column tracks themselves live on .window. */
         ...(document.documentElement.hasAttribute('data-windows-titlebar')
           ? { '--dsh-windows-sidebar-width': `${cols.sidebar}px` } : {}),
-        gridTemplateColumns:
-          `${cols.sidebar}px minmax(${cols.rightbar === 0 ? 0 : CENTER_MIN}px, 1fr) minmax(0px, ${rightbarMax}px)`,
-      }}
+      } as CSSProperties}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-rightbar-collapsed={cols.rightbar === 0 || undefined}
       data-rightbar-fullscreen={layoutInfo.rightbarFullscreen || undefined}
@@ -272,36 +283,48 @@ export function AppFrame({
       data-dragging={dragging || undefined}
       data-animating={animating > 0 || undefined}
     >
-      <DocumentTitle
-        productTitle={productTitle}
-        useSessions={useSessions}
-        usePanelInfo={usePanelInfo}
-      />
-      <div className={css.sidebarCol}>
-        {sidebar}
-      </div>
-      <>
-        <CenterColumn>{main}</CenterColumn>
-        <RightbarColumn>
-          {renderSlot('rightbar', { width: normal.rightbar, viewportWidth: viewport, canShow: normal.rightbar > 0 })}
-        </RightbarColumn>
-      </>
-      <div className={css.bottomRow} data-shell-bottom>
-        {renderSlot('shell.bottom', {})}
-      </div>
-      <div className={css.overlayLayer} data-shell-overlay>
-        {overlays}
-      </div>
-      {leadingMounted && (
-        <div className={css.leadingSeat} data-shell-leading>
-          {leading}
+      <AmbientCanvas />
+      <div
+        ref={frameRef}
+        className={css.window}
+        data-shell-window
+        style={{
+          gridTemplateColumns:
+            `${cols.sidebar}px minmax(${cols.rightbar === 0 ? 0 : CENTER_MIN}px, 1fr) minmax(0px, ${rightbarMax}px)`,
+        }}
+      >
+        <DocumentTitle
+          productTitle={productTitle}
+          useSessions={useSessions}
+          usePanelInfo={usePanelInfo}
+        />
+        <div className={css.sidebarCol}>
+          <div className={css.sidebarGlass} aria-hidden="true" />
+          {sidebar}
         </div>
-      )}
-      {/* The collapsed rail is fixed-width: no resize handle while closed. */}
-      {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
-        <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
-      )}
+        <>
+          <CenterColumn>{main}</CenterColumn>
+          <RightbarColumn>
+            {renderSlot('rightbar', { width: normal.rightbar, viewportWidth: viewport, canShow: normal.rightbar > 0 })}
+          </RightbarColumn>
+        </>
+        <div className={css.bottomRow} data-shell-bottom>
+          {renderSlot('shell.bottom', {})}
+        </div>
+        <div className={css.overlayLayer} data-shell-overlay>
+          {overlays}
+        </div>
+        {leadingMounted && (
+          <div className={css.leadingSeat} data-shell-leading>
+            {leading}
+          </div>
+        )}
+        {/* The collapsed rail is fixed-width: no resize handle while closed. */}
+        {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
+        {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
+          <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
+        )}
+      </div>
     </div>
   )
 }

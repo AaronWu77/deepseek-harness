@@ -109,6 +109,8 @@ interface ToolDefinition extends ToolSchema {
 
 Plugin authors use one vocabulary for typed parameters and typed output values. `ValueSchemaSpec` supports `string`, `number`, `integer`, `boolean`, `null`, `array`, `object`, author-only `json`, and exact-one `oneOf`; scalar `enum` and `const` values must match their node type. An explicit object node always declares `additionalProperties: true | false`. Parameter definitions remain an implicit open object property map, with `required: true` attached to each required property.
 
+String schemas accept a non-negative safe-integer `minLength`, counted in Unicode code points rather than UTF-16 code units or grapheme clusters. `oneOf` accepts no sibling length constraint.
+
 Source: [`packages/core/tools/src/schema.ts`](../../packages/core/tools/src/schema.ts)
 
 ```ts type-equiv
@@ -464,6 +466,8 @@ interface JsonSchemaNode {
   items?: JsonSchemaNode
   /** Allowed values for a scalar node. */
   enum?: JsonSchemaScalar[]
+  /** Minimum Unicode code-point length for a string node. */
+  minLength?: number
   /** The single allowed value for a scalar node. */
   const?: JsonSchemaScalar
   /** Annotation, ignored for validation. */
@@ -517,9 +521,10 @@ Tool registry and execution pipeline. Scoped registrations shadow globals; one v
  * composes PTC mode agents beside native ones in the same process, and a
  * process-global override would be the `mode` config field instead.
  * @param mode - the presentation the covered agents' models see.
+ * @param runtime - scoped PTC provider shared by SDK projection and execution; omitted uses the deployment provider.
  * @returns the exact disposer that restores the deployment default.
  */
-presentAs(mode: ToolPresentationMode): () => void
+presentAs(mode: ToolPresentationMode, runtime?: PtcRuntime): () => void
 
 /**
  * Register globally or in the calling agent scope. Scoped tools shadow
@@ -595,7 +600,7 @@ executionMode(exec: ToolExecutionInput): ToolExecutionMode
 async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>
 ```
 
-Types: [ScopeKey](scope.md)
+Types: [PtcRuntime](ptc-runtime.md) · [ScopeKey](scope.md)
 
 Source: [`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index.ts)
 

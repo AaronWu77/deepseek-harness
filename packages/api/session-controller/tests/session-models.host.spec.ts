@@ -644,7 +644,9 @@ describe('Web session model selection', () => {
       await expect.poll(() => returned).toBe(true)
       expect(currentSelection(ctx, sessionId)).toMatchObject({ provider: 'deepseek-official', model })
     }
-    expect(saves).toHaveLength(2)
+    await expect.poll(() => saves.length).toBe(1)
+    release.resolve(undefined)
+    await expect.poll(() => saves.length).toBe(2)
   })
 
   it('saves an accepted selection as the default and survives a storage failure', async () => {
@@ -687,6 +689,49 @@ describe('Web session model selection', () => {
     ])
     await ctx.fiber.dispose()
   })
+
+  it('acknowledges a Session model selection before a slow default-profile write', async () => {
+    const { ctx, sessionId } = await harness()
+    let releaseSave: (() => void) | undefined
+    let notifySaveStarted: (() => void) | undefined
+    const saveStarted = new Promise<void>((resolve) => { notifySaveStarted = resolve })
+    const pendingSave = new Promise<void>((resolve) => { releaseSave = resolve })
+    const saved: string[] = []
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      saveDefaultModelSelection: async (selection) => {
+        saved.push(selection.model)
+        notifySaveStarted?.()
+        if (selection.model === 'deepseek-reasoner') await pendingSave
+      },
+      cwd: '/tmp',
+    })
+    const selecting = remote.selectModel(request({
+      sessionId, provider: 'deepseek-official', model: 'deepseek-reasoner',
+    }))
+    try {
+      await saveStarted
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const timedOut = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { reject(new Error('selection waited for default-profile persistence')) }, 3000)
+      })
+      try {
+        const selected = expectValue(await Promise.race([selecting, timedOut]))
+        expect(selected.selected.model).toBe('deepseek-reasoner')
+      } finally { if (timer !== undefined) clearTimeout(timer) }
+      expect(currentSelection(ctx, sessionId).model).toBe('deepseek-reasoner')
+      const second = expectValue(await remote.selectModel(request({
+        sessionId, provider: 'deepseek-official', model: 'deepseek-chat',
+      })))
+      expect(second.selected.model).toBe('deepseek-chat')
+      expect(saved).toEqual(['deepseek-reasoner'])
+    } finally {
+      releaseSave?.()
+      await selecting
+      await vi.waitFor(() => { expect(saved).toEqual(['deepseek-reasoner', 'deepseek-chat']) })
+      await ctx.fiber.dispose()
+    }
+  }, 10_000)
 
   it('admits saved selections without querying the advisory model catalog', async () => {
     const { ctx, sessionId, agent } = await harness()

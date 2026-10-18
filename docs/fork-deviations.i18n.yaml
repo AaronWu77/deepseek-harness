@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for fork-deviations.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/fork-deviations.md
+/:
+  en: 6f2e1cb34f163ca7
+  zh: 001650be7b7302ac
+/fork-deviations:
+  en: cf8abe8fcba16999
+  zh: e89e579552d5408d
+/fork-deviations/local-one-shot-activation:
+  en: 9c7a0d93f880c1c2
+  zh: 34232b17014dd389
+/fork-deviations/preservation-registry:
+  en: b0b872af70db0d2c
+  zh: 8644156ed400962c

@@ -22,6 +22,17 @@ function statusHarness(startTime?: number) {
 }
 
 describe('RunningStatus', () => {
+  it('uses the shared decorative loader without image masks or an extra animation clock', () => {
+    const view = statusHarness()
+    const icon = view.content()?.querySelector('[data-state="ongoing"]')
+    expect(icon?.tagName).toBe('svg')
+    expect(icon?.getAttribute('aria-hidden')).toBe('true')
+    expect(icon?.querySelectorAll('circle')).toHaveLength(2)
+    expect(view.container.querySelector('img, animate, [style]')).toBeNull()
+    expect(view.getByRole('status').textContent).toBe('深度求索中')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('waits for an open Turn start before allocating its clock', () => {
     const view = statusHarness()
     expect(view.content()?.textContent).toBe('深度求索中')

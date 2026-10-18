@@ -163,6 +163,21 @@ Selection semantics (resolved at execution time, never order-dependent):
 
 ```ts cordis-catalog
 /**
+ * Read the explicitly configured search provider id.
+ *
+ * Environment fallback is applied only when search executes, so an absent value
+ * here does not mean that no provider is configured for the process.
+ * @returns the current explicit provider id, or undefined when it is unset.
+ */
+getSearchProvider(): string | undefined
+
+/**
+ * Set or clear the explicitly configured search provider id.
+ * @param provider - provider id to pin, or undefined to restore automatic selection.
+ */
+setSearchProvider(provider: string | undefined): void
+
+/**
  * Register a search provider. Throws {@link WebError} `WEB_DUPLICATE_PROVIDER`
  * if its id is already registered for search. Returns a disposer; disposed
  * with the calling fiber.

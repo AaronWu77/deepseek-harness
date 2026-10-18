@@ -46,6 +46,8 @@ Load the service and let a single mounted backend auto-select, or pin a provider
 | `searchProvider` | (unset) | Pinned search provider id; unset auto-selects when exactly one is usable |
 | `fetchProvider` | (unset) | Pinned fetch provider id; unset auto-selects when exactly one is usable |
 
+A plugin that temporarily owns search selection uses `web.getSearchProvider()` and `web.setSearchProvider(id)`. Passing `undefined` clears the explicit pin; environment fallback still applies during execution. The plugin must restore the previous explicit value when it releases ownership.
+
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-web) is the exhaustive source for every accepted field and its JSDoc.
 
 ### Searching and fetching

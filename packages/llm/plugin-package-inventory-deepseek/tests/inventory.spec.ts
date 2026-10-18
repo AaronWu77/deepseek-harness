@@ -42,6 +42,8 @@ async function harness(
 ): Promise<{ ctx: Context; root: string; disposeInventory: () => Promise<void> }> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-packages-'))
   roots.push(root)
+  // Stop manifest lookup at the fixture root instead of inheriting a user's package.json.
+  await writeFile(join(root, 'package.json'), '{"private":true,"type":"module"}\n')
   const ctx = new Context()
   contexts.push(ctx)
   ctx.baseUrl = pathToFileURL(join(root, 'cordis.yml')).href

@@ -389,7 +389,7 @@ describe('mode-aware wire contribution', () => {
     expect(transports[0]?.description).toContain('Execute a TypeScript program')
     expect(assembly.sections.find(section => section.name === 'scoped-note')?.text).toBe('safe note')
     expect(assembly.sections.find(section => section.name === 'tools:sdk')?.text).toContain('scoped_safe:')
-    expect(ctx.tools.get(RUN_CODE_NAME, agent)).toBe(ctx.tools.get(RUN_CODE_NAME))
+    expect(ctx.tools.get(RUN_CODE_NAME, agent)?.name).toBe(ctx.tools.get(RUN_CODE_NAME)?.name)
     const result = await runCode(ctx, 'return 1', { agent })
     expect(result.content).toEqual([{ type: 'text', text: '(run_code completed with no output)' }])
   })
@@ -1520,6 +1520,44 @@ describe('the run_code dispatch bridge', () => {
     expect(text).toContain('got this far')
   })
 
+  it('adds source-serialization guidance to parser failures', async () => {
+    const { ctx, runtime } = await setup({ mode: 'ptc' })
+    runtime.behavior = () => Promise.resolve({
+      logs: [],
+      error: { kind: 'exception', message: "Expected ',', got 'ident'" },
+    })
+
+    const result = await runCode(ctx, 'program')
+
+    expect(result.isError).toBe(true)
+    expect((result.content[0] as { text: string }).text).toContain('earlier effects may already have completed')
+    expect((result.content[0] as { text: string }).text).toContain('quote or JSON-serialize Markdown')
+  })
+
+  it('reports a SyntaxError after a completed write without claiming the program never executed', async () => {
+    const { mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const root = await mkdtemp(join(tmpdir(), 'dsh-ptc-syntax-'))
+    const file = join(root, 'effect.txt')
+    const { ctx, runtime } = await setup({ mode: 'ptc' })
+    runtime.behavior = async () => {
+      await writeFile(file, 'completed effect')
+      try { throw new SyntaxError('SyntaxError: failure after write') } catch (error: unknown) {
+        return { logs: ['write completed'], error: { kind: 'exception', message: String(error) } }
+      }
+    }
+    try {
+      const result = await runCode(ctx, 'await write(); throw new SyntaxError("failure after write")')
+      const text = JSON.stringify(result.content)
+      expect(result.isError).toBe(true)
+      expect(await readFile(file, 'utf8')).toBe('completed effect')
+      expect(text).toContain('earlier effects may already have completed')
+      expect(text).not.toContain('before execution')
+      expect(text).not.toContain('never executed')
+    } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }) }
+  })
+
   it('CodeRunFailedError is a HarnessError with the CODE_RUN_FAILED code', () => {
     const error = new CodeRunFailedError('boom')
     expect(error.code).toBe('CODE_RUN_FAILED')
@@ -2061,6 +2099,37 @@ describe('the run_code dispatch bridge', () => {
  * shadow, not a process-wide fact.
  */
 describe('per-agent presentation', () => {
+  it('binds SDK, wire schema and dispatch to isolated providers without replacing the deployment runtime', async () => {
+    const { ctx, systemPrompt, runtime: deployment } = await setup({ mode: 'ptc', runtime: { language: 'python' } })
+    const owner = await mintAgentScope(ctx, 'private-runtime')
+    const sibling = await mintAgentScope(ctx, 'deployment-runtime')
+    const world = ctx.isolate('ptcRuntime')
+    const fiber = await world.plugin(FakeRuntime, { language: 'typescript' })
+    const provider = world.ptcRuntime as FakeRuntime
+    const privateCalls: PtcRunRequest[] = [], ordinaryCalls: PtcRunRequest[] = []
+    provider.behavior = async (request) => { privateCalls.push(request); return { logs: ['private runtime'] } }
+    deployment.behavior = async (request) => { ordinaryCalls.push(request); return { logs: ['deployment runtime'] } }
+    const remove = owner.scope.ctx.tools.presentAs('ptc', provider)
+    try {
+      const privateAssembly = await systemPrompt.assemble({ scope: owner.agent })
+      const ordinaryAssembly = await systemPrompt.assemble({ scope: sibling.agent })
+      expect(privateAssembly.sections.find(section => section.name === 'tools:sdk')?.text).toContain('TypeScript')
+      expect(ordinaryAssembly.sections.find(section => section.name === 'tools:sdk')?.text).toContain('Python')
+      const privateParameters = privateAssembly.tools[0]?.parameters as JsonSchemaNode
+      const ordinaryParameters = ordinaryAssembly.tools[0]?.parameters as JsonSchemaNode
+      expect(privateParameters.properties?.code).not.toEqual(ordinaryParameters.properties?.code)
+      const results = await Promise.all([runCode(ctx, 'private program', { agent: owner.agent }), runCode(ctx, 'ordinary program', { agent: sibling.agent })])
+      expect(results.map(result => result.isError)).toEqual([false, false])
+      expect(results.map(result => result.value)).toEqual([{ logs: ['private runtime'] }, { logs: ['deployment runtime'] }])
+      expect(privateCalls.at(-1)?.program).toBe('private program')
+      expect(ordinaryCalls.at(-1)?.program).toBe('ordinary program')
+      expect(ctx.ptcRuntime.language).toBe('python')
+      remove()
+      await runCode(ctx, 'after removal', { agent: owner.agent })
+      expect(ordinaryCalls.at(-1)?.program).toBe('after removal')
+      expect(privateCalls.at(-1)?.program).toBe('private program')
+    } finally { remove(); await fiber.dispose(); await ctx.fiber.dispose() }
+  })
   it('gives one agent PTC mode while the deployment stays native', async () => {
     const { ctx, systemPrompt } = await setup({ mode: 'native' })
     const calls = registerEcho(ctx)
@@ -2276,14 +2345,17 @@ describe('PTC standing file policy and sandbox outcomes', () => {
 })
 
 describe('per-program execution controls', () => {
-  async function controlledSetup(approval = true) {
+  async function controlledSetup(
+    approval = true,
+    sandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access' = 'read-only',
+  ) {
     const state = await setup()
     await state.ctx.plugin(SessionStore)
     await state.ctx.plugin(SessionProjections)
-    await state.ctx.plugin(SandboxPolicy, { mode: 'read-only', workspaceRoot: process.cwd() })
+    await state.ctx.plugin(SandboxPolicy, { mode: sandboxMode, workspaceRoot: process.cwd() })
     if (approval) await state.ctx.plugin(ApprovalService, { policy: 'ask' })
     Object.defineProperties(state.runtime, {
-      sandboxMode: { get: () => 'read-only' },
+      sandboxMode: { get: () => sandboxMode },
       executionInstructions: { get: () => 'Programs start with an empty environment.' },
       timeout: { get: () => ({ defaultMs: 120_000, maxMs: 600_000 }) },
     })
@@ -2323,7 +2395,10 @@ describe('per-program execution controls', () => {
       const schema = tools.schemas().find(tool => tool.name === RUN_CODE_NAME)!
       expect(JSON.stringify(schema.parameters)).toContain('Default 120000; capped at 600000')
       expect(JSON.stringify(schema.parameters)).toContain('sandbox_permissions')
+      expect(JSON.stringify(schema.parameters)).toContain('minLength')
       expect(schema.description).toContain('Nested tools retain their own policies')
+      expect(schema.description).toContain('Ordinary programs and read-only operations must omit both `sandbox_permissions` and `justification`')
+      expect(JSON.stringify(schema.parameters)).toContain('only after an explicit sandbox denial')
       expect(schema.description).toContain('Programs start with an empty environment.')
       expect(schema.description).toContain("Each program starts in the Session's current directory. Running programs keep their initial directory.")
     } finally { await ctx.fiber.dispose() }
@@ -2389,6 +2464,42 @@ describe('per-program execution controls', () => {
     } finally { await ctx.fiber.dispose() }
   })
 
+  it('renders actionable guidance when justification is empty', async () => {
+    const { ctx, runtime, execute } = await controlledSetup()
+    try {
+      const result = await execute({ sandbox_permissions: 'workspace-write', justification: '' })
+      expect(result.isError).toBe(true)
+      const text = (result.content[0] as { text: string }).text
+      expect(text).toContain('Invalid run_code sandbox arguments')
+      expect(text).toContain('Omit both sandbox_permissions and justification')
+      expect(text).toContain('non-empty justification sentence')
+      expect(runtime.lastRequest).toBeUndefined()
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it.each([
+    { sandbox_permissions: 'workspace-write', justification: 'Need workspace writes' },
+    { sandbox_permissions: 'workspace-write' },
+    { sandbox_permissions: 'workspace-write', justification: ' ' },
+    { sandbox_permissions: 'danger-full-access', justification: 'Keep current access' },
+  ])('keeps full standing authority without approval for a non-widening request: %j', async (args) => {
+    const { ctx, runtime, agent, execute } = await controlledSetup(false, 'danger-full-access')
+    try {
+      const result = await execute(args)
+      expect(result.isError).toBe(false)
+      expect(runtime.lastRequest?.sandboxPolicy?.mode).toBe('danger-full-access')
+      expect(runtime.lastRequest?.stateOwner).toBe(agent)
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('keeps schema validation of an empty reason even for non-widening requests', async () => {
+    const { ctx, runtime, execute } = await controlledSetup(false, 'danger-full-access')
+    try {
+      expect((await execute({ sandbox_permissions: 'workspace-write', justification: '' })).isError).toBe(true)
+      expect(runtime.lastRequest).toBeUndefined()
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it.each(['rejected', 'cancelled', 'unavailable'] as const)('does not start a program after approval returns %s', async (outcome) => {
     const { ctx, runtime, session, execute } = await controlledSetup()
     ctx.on('approval/request', () => Promise.resolve<ApprovalOutcome>(outcome))
@@ -2434,6 +2545,52 @@ describe('per-program execution controls', () => {
       expect((await result).isError).toBe(true)
       expect(runtime.lastRequest).toBeUndefined()
     } finally { answer.resolve('cancelled'); await result; await ctx.fiber.dispose() }
+  })
+
+  it('waits for policy-canceled calls across a scoped provider switch before starting the next program', async () => {
+    const { PtcCalls } = await import('../src/ptc-calls.ts')
+    const tracking = vi.spyOn(PtcCalls.prototype, 'run')
+    const { ctx, runtime, session, agent, execute } = await controlledSetup()
+    const started = Promise.withResolvers<undefined>()
+    const aborted = Promise.withResolvers<undefined>()
+    const cleanup = Promise.withResolvers<undefined>()
+    runtime.behavior = async (request) => {
+      request.signal!.addEventListener('abort', () => { aborted.resolve(undefined) }, { once: true })
+      started.resolve(undefined)
+      await cleanup.promise
+      return { logs: [], error: { kind: 'abort', message: 'policy changed' } }
+    }
+    const isolated = ctx.isolate('ptcRuntime')
+    const fiber = await isolated.plugin(FakeRuntime)
+    const replacement = isolated.ptcRuntime as FakeRuntime
+    const confined = vi.spyOn(replacement, 'sandboxMode', 'get').mockReturnValue('read-only')
+    let scope!: Scope
+    await ctx.plugin(Object.assign((inner: Context) => { scope = createScope(inner, agent) },
+      { inject: ['tools', 'systemPrompt'] }))
+    const first = execute({})
+    let second: Promise<ToolExecutionResult> | undefined
+    try {
+      await started.promise
+      setSandboxMode(session, 'workspace-write')
+      await aborted.promise
+      scope.ctx.tools.presentAs('ptc', replacement)
+      second = execute({})
+      await vi.waitFor(() => { expect(tracking).toHaveBeenCalledTimes(2) })
+      expect(tracking.mock.instances[1]).toBe(tracking.mock.instances[0])
+      expect(replacement.lastRequest).toBeUndefined()
+      cleanup.resolve(undefined)
+      expect((await first).isError).toBe(true)
+      expect((await second).isError).toBe(false)
+      expect(replacement.lastRequest?.sandboxPolicy?.mode).toBe('workspace-write')
+    } finally {
+      cleanup.resolve(undefined)
+      await first
+      await second
+      confined.mockRestore()
+      tracking.mockRestore()
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
   })
 
   it('reports prior effects after a denial and never requests approval or replays implicitly', async () => {

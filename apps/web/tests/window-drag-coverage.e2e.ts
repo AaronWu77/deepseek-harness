@@ -169,12 +169,13 @@ function firstRecallPulse(page: Page): Promise<boolean> {
 }
 
 /**
- * Wait until nothing under the page is animating, so a probe measures the settled
- * layout instead of a frame of a column slide.
+ * Wait for finite layout transitions before probing drag geometry. The Aurora
+ * canvas drifts indefinitely and never participates in hit testing.
  * @param page - the page under test.
  */
 async function settled(page: Page): Promise<void> {
   await expect.poll(() => page.evaluate(() => document.getAnimations()
+    .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
     .every(animation => animation.playState === 'finished' || animation.playState === 'idle')),
   { timeout: 20_000 }).toBe(true)
 }
@@ -235,7 +236,8 @@ describe('web e2e: macOS window drag coverage', () => {
       // settles measures the hidden position, where the band does not reach.
       await expect.poll(async () => page.locator('[data-sidebar-right-panel]').evaluate((element) => {
         const rect = element.getBoundingClientRect()
-        return Math.round(innerWidth - rect.right) === 0
+        const glass = element.closest('[class*="window"]')
+        return glass !== null && Math.round(glass.getBoundingClientRect().right - rect.right) === 0
           && element.getAnimations({ subtree: true })
             .every(animation => animation.playState === 'finished' || animation.playState === 'idle')
       }), { timeout: 15_000 }).toBe(true)
@@ -381,11 +383,13 @@ describe('web e2e: macOS window drag coverage', () => {
       })
 
       const regions = await collectedRegions(page, INTERACTIVE_SELECTOR)
-      // The row starts at the window's top edge: a page inset above it would be a strip
-      // no drag region covers, which is the dead band at the very top of this page.
-      expect(rect.y, 'the page head starts at the window’s top edge').toBeLessThanOrEqual(0.5)
-      // The page head owns its run, clearance included: that is the entry page's
-      // window strip, with no frame band behind it.
+      const glassTop = await page.locator('[data-shell-window]').evaluate(node => node.getBoundingClientRect().top)
+      expect(Math.abs(rect.y - glassTop), 'the page head meets the inset window’s top edge').toBeLessThanOrEqual(0.5)
+      // The exposed ambient strip above the glass needs its own drag region.
+      const gapRegion = await page.locator('[class*="frame"]').first()
+        .evaluate(node => getComputedStyle(node, '::before').getPropertyValue('-webkit-app-region'))
+      expect(gapRegion, 'the ambient top gap remains draggable').toBe('drag')
+      // The page head owns its run and clearance inside the inset window.
       expect(
         isDraggableAt(regions, rect.x + 40, rect.y + 8),
         'the plugin manager page head',
@@ -434,10 +438,9 @@ describe('web e2e: macOS window drag coverage', () => {
       const { detail: detailRect, head: headRect, viewport } = geometry
       const regions = await collectedRegions(page, INTERACTIVE_SELECTOR)
 
-      // The head's top inset is the window clearance above the crumb: blank, so
-      // it drags like the entry page's head. The row also starts at the window's top
-      // edge, or the strip above it belongs to no drag region.
-      expect(headRect.y, 'the detail head row starts at the window’s top edge').toBeLessThanOrEqual(0.5)
+      // The head owns its drag clearance above the crumb inside the inset window.
+      const glassTop = await page.locator('[data-shell-window]').evaluate(node => node.getBoundingClientRect().top)
+      expect(Math.abs(headRect.y - glassTop), 'the detail head meets the inset window’s top edge').toBeLessThanOrEqual(0.5)
       expect(
         isDraggableAt(regions, headRect.x + headRect.width / 2, headRect.y + 4),
         'the detail head row’s top inset',

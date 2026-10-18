@@ -51,6 +51,19 @@ describe('WebRuntime registration', () => {
     await expect(web.search({ query: 'q' })).rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_UNAVAILABLE' }))
   })
 
+  it('exposes an explicit search route override for plugin-owned temporary selection', async () => {
+    const { web } = await mountWeb({ searchProvider: 'deepseek-official' })
+    web.registerSearchProvider(makeSearchProvider('deepseek-official', available, () => Promise.resolve(searchResult('deepseek'))))
+    web.registerSearchProvider(makeSearchProvider('openai-codex', available, () => Promise.resolve(searchResult('codex'))))
+
+    expect(web.getSearchProvider()).toBe('deepseek-official')
+    web.setSearchProvider('openai-codex')
+    await expect(web.search({ query: 'q' })).resolves.toMatchObject({ content: 'codex' })
+    web.setSearchProvider(undefined)
+    expect(web.getSearchProvider()).toBeUndefined()
+    await expect(web.search({ query: 'q' })).rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_AMBIGUOUS' }))
+  })
+
   it('throws WEB_DUPLICATE_PROVIDER on a duplicate search id', async () => {
     const { web } = await mountWeb()
     web.registerSearchProvider(makeSearchProvider('exa', available, () => Promise.resolve(searchResult('exa'))))

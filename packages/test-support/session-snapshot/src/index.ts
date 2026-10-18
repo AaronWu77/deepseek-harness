@@ -81,6 +81,7 @@ export {
   sessionFixtureFiles,
   sessionFixtureName,
   sessionFixtureNames,
+  sessionFixtureNamesForRecording,
   sessionHeaderVersion,
   writerSnapshotName,
   type PersistedSessionFile,

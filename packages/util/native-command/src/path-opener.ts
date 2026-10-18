@@ -304,7 +304,7 @@ export async function revealNativePath(
       windowsPath = translated.stdout.replace(/[\r\n]+$/, '')
       if (windowsPath === '') throw new Error('wslpath returned no Windows path')
     }
-    await runExplorer(['/select,', explorerTarget(windowsPath)], signal, run)
+    await runExplorer([`/select,${explorerTarget(windowsPath)}`], signal, run)
     return
   }
   if (manager === 'directory') {

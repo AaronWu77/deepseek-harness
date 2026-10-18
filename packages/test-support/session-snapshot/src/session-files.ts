@@ -120,6 +120,20 @@ export function sessionFixtureNames(names: readonly string[]): string[] {
 }
 
 /**
+ * Select existing roles, permitting a new empty scenario only during recording.
+ * Malformed filenames and orphan children remain errors in every mode.
+ * @param names - File basenames in one scenario directory.
+ * @param mode - Requested snapshot operation.
+ * @returns Selected parent/child names, or an empty initial recording inventory.
+ */
+export function sessionFixtureNamesForRecording(
+  names: readonly string[], mode: 'record' | 'replay' | 'refresh',
+): string[] {
+  if (mode === 'record' && names.every(name => parseSessionFixtureName(name) === undefined)) return []
+  return sessionFixtureNames(names)
+}
+
+/**
  * Read the declared physical generation from one Session JSONL header.
  *
  * @param content - Complete UTF-8 JSONL content.

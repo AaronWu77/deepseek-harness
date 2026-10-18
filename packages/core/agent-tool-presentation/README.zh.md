@@ -45,6 +45,8 @@ kind: "package-reference"
 
 选择 `ptc` 需要已组合的 PTC 运行时（`ctx.ptcRuntime`），且其语言有已注册的 SDK 渲染器——TypeScript 运行时经 [`dsh-ptc-runtime-node`](../../ptc-runtime/ptc-runtime-node/README.zh.md) 交付，TypeScript 与 Python 的 SDK 渲染器都内置在 `dsh-tools` 中。针对未组装此类运行时的部署选择 PTC 模式的 preset 会拒绝挂载并点名这一行，使失败落在操作者可以行动的地方，而不是落在会话的第一次请求上。
 
+这一行捕获挂载隔离作用域中的运行时，并将其传给 `tools.presentAs(mode, runtime)`。preset 本地提供方控制该 preset 的 SDK 语言与执行，不会替换普通 agent 使用的部署提供方。
+
 ### 每个 agent 只声明一次呈现方式
 
 一个 agent 只声明一次呈现方式。同一份组装里的第二次声明会被拒绝而不是合并：对「模型看到哪种形态」给出两个答案是矛盾，不是覆盖。
@@ -106,7 +108,7 @@ kind: "package-reference"
 
 这些限制说明这一行何时需要特别留意。它们是当前包约束，不是任务积压。
 
-- **运行时仍在宿主平面**——preset 可以选择 PTC mode，却无法自带它所需的 TypeScript 运行时；未组装运行时的部署也就无法组装任何 PTC 模式的 preset。
+- **PTC 需要 provider**——preset 可继承部署运行时，或提供 preset-local 隔离 provider；二者都缺失时，其 PTC 呈现仍处于 pending。Native 呈现不需要 PTC provider。
 
 <a id="dev-note"></a>
 ### 开发备注

@@ -57,7 +57,7 @@ describe('elevation tokens', () => {
   })
 
   it('defines the translucent menu material for both palettes', () => {
-    expect(bodyOnly.get('--dsw-mask-blur')).toBe('none')
+    expect(bodyOnly.get('--dsw-mask-blur')).toBe('blur(2px)')
     expect(bodyOnly.get('--dsw-menu-backdrop-filter')).toBe('blur(40px) saturate(150%)')
     const platformRules = parseRules(platformCss)
     const value = (selector: string, token = '--dsw-menu-surface-fill'): string | undefined => platformRules

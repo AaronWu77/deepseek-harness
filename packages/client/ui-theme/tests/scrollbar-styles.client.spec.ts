@@ -148,6 +148,7 @@ const SURFACE_PROPERTIES = ['background', 'background-color']
 const SURFACE_TOKEN_PATTERN = /^--dsw-(?:alias-bg-|specific-)/
 /** Translucent elevated surfaces whose colors do not resolve to a palette rung. */
 const TRANSLUCENT_ELEVATED_SURFACES = new Set(['--dsw-specific-menu'])
+const ELEVATED_GLASS_TOKENS = ['--dsw-glass-fill', '--dsw-glass-fill-raised', '--dsw-glass-fill-thick'] as const
 
 /**
  * The palette's own dark elevation ladder, resolved from `design-platform.css`:
@@ -181,6 +182,7 @@ function elevatedRungs(): Set<string> {
   for (const name of definitions.keys()) {
     if (SURFACE_TOKEN_PATTERN.test(name) && rungs.has(resolve(name))) tokens.add(name)
   }
+  for (const name of ELEVATED_GLASS_TOKENS) tokens.add(name)
   return tokens
 }
 
@@ -492,6 +494,12 @@ describe('elevated surface rebinds', () => {
     expect(elevatedSurfaces).toContain('--dsw-specific-menu')
     expect(elevatedSurfaces).toContain('--dsw-specific-input-major')
     expect(elevatedSurfaces).toContain('--dsw-specific-tip')
+    // A scroll container on glass takes the same l2 thumb as one on a rung.
+    expect(elevatedSurfaces).toContain('--dsw-glass-fill')
+    expect(elevatedSurfaces).toContain('--dsw-glass-fill-raised')
+    expect(elevatedSurfaces).toContain('--dsw-glass-fill-thick')
+    // The recessed tier stays out: a well is not an elevated surface.
+    expect(elevatedSurfaces).not.toContain('--dsw-glass-fill-sunken')
     // Base surfaces stay out, or every scroll container would be in scope and
     // the check would say nothing.
     expect(elevatedSurfaces).not.toContain('--dsw-alias-bg-base')

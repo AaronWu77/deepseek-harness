@@ -489,6 +489,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   SubprocessTerminalHandle: 'subprocess.md',
   SubprocessTerminalEnvironment: 'subprocess.md',
   SubprocessTerminalSpawnSpec: 'subprocess.md',
+  PtcRuntime: 'ptc-runtime.md',
   PtcRunRequest: 'ptc-runtime.md',
   PtcRunSpec: 'ptc-runtime.md',
   PtcRunSandbox: 'ptc-runtime.md',

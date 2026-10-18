@@ -4,7 +4,10 @@
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  background: var(--dsw-alias-bg-base);
+  /* 对话面薄纱而非实底：身后的极光透出约四分之一，正文对比度由薄纱保证。
+     这一层不做 backdrop-filter——它下面就是极光，模糊它只是白花一笔开销。
+     宽度轴归 .body 所有（上游把它从 .root 移了过去），这里不再重复声明。 */
+  background: var(--dsw-glass-scrim);
 }
 
 /* 76px with its rule: the height of the Sidebar's tab strip and header row
@@ -447,8 +450,8 @@ button.crumb:hover {
      fade from their own base. */
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--dsw-alias-bg-base) 0%, transparent) 0px,
-    var(--dsw-alias-bg-base) 36px
+    color-mix(in srgb, var(--dsw-glass-scrim) 0%, transparent) 0px,
+    var(--dsw-glass-scrim) 36px
   );
 }
 

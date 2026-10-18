@@ -3,24 +3,24 @@
     "fill": "rgba(248, 249, 250, 0.58)",
     "blur": "blur(40px) saturate(1.5)",
     "radius": "16px",
-    "shadow": "rgba(0, 0, 0, 0.04) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.04) 0px 3px 8px 0px, rgba(0, 0, 0, 0.05) 0px 0px 20px 0px"
+    "shadow": "rgba(0, 0, 0, 0.04) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.06) 0px 2px 4px 0px, rgba(0, 0, 0, 0.14) 0px 10px 28px -8px, rgba(0, 0, 0, 0.16) 0px 30px 64px -24px"
   },
   "web-dark": {
     "fill": "rgba(67, 69, 74, 0.45)",
     "blur": "blur(40px) saturate(1.5)",
     "radius": "16px",
-    "shadow": "rgba(255, 255, 255, 0.16) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.04) 0px 3px 8px 0px, rgba(0, 0, 0, 0.05) 0px 0px 20px 0px"
+    "shadow": "rgba(255, 255, 255, 0.16) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.06) 0px 2px 4px 0px, rgba(0, 0, 0, 0.14) 0px 10px 28px -8px, rgba(0, 0, 0, 0.16) 0px 30px 64px -24px"
   },
   "darwin-light": {
     "fill": "rgba(248, 249, 250, 0.58)",
     "blur": "blur(40px) saturate(1.5)",
     "radius": "16px",
-    "shadow": "rgba(0, 0, 0, 0.04) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.04) 0px 3px 8px 0px, rgba(0, 0, 0, 0.05) 0px 0px 20px 0px"
+    "shadow": "rgba(0, 0, 0, 0.04) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.06) 0px 2px 4px 0px, rgba(0, 0, 0, 0.14) 0px 10px 28px -8px, rgba(0, 0, 0, 0.16) 0px 30px 64px -24px"
   },
   "darwin-dark": {
     "fill": "rgba(67, 69, 74, 0.45)",
     "blur": "blur(40px) saturate(1.5)",
     "radius": "16px",
-    "shadow": "rgba(255, 255, 255, 0.16) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.04) 0px 3px 8px 0px, rgba(0, 0, 0, 0.05) 0px 0px 20px 0px"
+    "shadow": "rgba(255, 255, 255, 0.16) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.06) 0px 2px 4px 0px, rgba(0, 0, 0, 0.14) 0px 10px 28px -8px, rgba(0, 0, 0, 0.16) 0px 30px 64px -24px"
   }
 }

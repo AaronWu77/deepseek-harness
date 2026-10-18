@@ -6,7 +6,7 @@
  * @module @deepseek-ai/dsh-tools/src/ptc
  */
 
-import { symbols, type Context } from '@deepseek-ai/cordis'
+import { symbols } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
 declare module '@deepseek-ai/dsh-llm' {
@@ -18,12 +18,12 @@ declare module '@deepseek-ai/dsh-llm' {
 
 import type { ContentBlock, ToolCallId, ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { PtcBindingFunction, PtcRunResult, PtcRunSandbox, PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
-import { approveEscalation, ESCALATION_TARGETS, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { approveEscalation, ESCALATION_TARGETS, validateEscalationArgs, WIDER_MODES } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { ApprovalService } from '@deepseek-ai/dsh-user-approval'
 import { deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import { defineTool, parameterSchemaSpecToJsonSchema } from './schema.ts'
-import { PtcCalls } from './ptc-calls.ts'
+import type { PtcCalls } from './ptc-calls.ts'
 import { TOOL_RUNTIME_SCHEDULER } from './index.ts'
 import type { PtcDispatchLog, ToolDefinition, ToolExecutionResult, ToolRuntime, ToolRunContext } from './index.ts'
 import type {} from './types.ts'
@@ -100,9 +100,41 @@ const RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION
 
 const RUN_CODE_CONTROLS = {
   timeoutMs: { type: 'number', description: 'Positive elapsed-time budget in milliseconds, capped by the deployment maximum.' },
-  sandbox_permissions: { type: 'string', enum: [...ESCALATION_TARGETS], description: 'Wider sandbox mode for this complete program execution; requires justification and approval.' },
-  justification: { type: 'string', description: 'Reason this complete program needs wider access, shown to the user for approval. Use the language of the user’s current request.' },
+  sandbox_permissions: { type: 'string', enum: [...ESCALATION_TARGETS], description: 'Wider sandbox mode for this complete program execution; provide it only after an explicit sandbox denial, together with a non-empty justification, request the narrowest mode strictly wider than the current mode, and omit both fields when the current mode is danger-full-access.' },
+  justification: { type: 'string', minLength: 1, description: 'One non-empty sentence explaining why this complete program needs wider access, shown to the user for approval. Use the language of the user’s current request.' },
 } as const
+
+/** Build actionable guidance when the model sends malformed run_code sandbox fields. */
+function runCodeSandboxArgumentMessage(message: string): string {
+  return [
+    'Invalid run_code sandbox arguments:',
+    '- Omit both sandbox_permissions and justification for ordinary or read-only work.',
+    '- After an actual sandbox denial, retry with a wider sandbox_permissions value and a non-empty justification sentence.',
+    'Original validation: ' + message,
+  ].join('\n')
+}
+
+/** Render the actionable run_code sandbox guidance as tool content. */
+function runCodeSandboxArgumentGuidance(message: string): ContentBlock[] {
+  return [{ type: 'text', text: runCodeSandboxArgumentMessage(message) }]
+}
+
+/**
+ * Detect parser diagnostics that need source-serialization guidance rather than
+ * another tool or sandbox retry.
+ */
+const PROGRAM_SYNTAX_FAILURE = new RegExp(
+  '(?:syntaxerror|unexpected (?:end|identifier|string|token)'
+  + '|unterminated|invalid or unexpected token|\\bexpected\\b[\\s\\S]*\\bgot\\b)',
+  'iu',
+)
+
+/** Explain how to repair the common failure where file text is pasted as code. */
+function programSyntaxGuidance(message: string): string {
+  return PROGRAM_SYNTAX_FAILURE.test(message)
+    ? ' The program reported a syntax error; earlier effects may already have completed. Inspect them before retrying. Treat file contents as data: quote or JSON-serialize Markdown, JSON, YAML, HTML, and other text before placing it in an object or tool argument; never paste raw file text after `:`. Prefer a declared file-reading tool when available, then retry with valid TypeScript or Python source.'
+    : ''
+}
 
 function controlParameters(runtime: PtcRuntime | undefined) {
   // Catalog readers have no mounted runtime; real model assembly requires one.
@@ -121,7 +153,7 @@ function controlParameters(runtime: PtcRuntime | undefined) {
 
 function escalationGuidance(runtime: PtcRuntime | undefined): string {
   return runtime?.sandboxMode === undefined ? ''
-    : ' A sandbox escalation approves this complete program for one execution only. Nested tools retain their own policies and approvals. Request wider access only after evidence of a denial. Earlier effects may already have completed: inspect them before explicitly retrying. Programs are never replayed automatically.'
+    : ' A sandbox escalation approves this complete program for one execution only. Ordinary programs and read-only operations must omit both `sandbox_permissions` and `justification`. Set both only after an explicit sandbox denial, using the narrowest mode strictly wider than the current policy. If the current policy is `danger-full-access`, omit both fields: `workspace-write` is narrower, not an escalation. Nested tools retain their own policies and approvals. Earlier effects may already have completed: inspect them before explicitly retrying. Programs are never replayed automatically.'
 }
 
 /**
@@ -315,6 +347,14 @@ export interface RunCodeBridgeOptions {
   shapeDispatchLog: (dispatch: PtcDispatchLog) => Promise<ContentBlock[]>
 }
 
+/** Registry-owned lifetime shared by all provider-bound transports. */
+export interface RunCodeBridgeState {
+  /** Tracks policy cancellation and cleanup across provider changes. */
+  readonly calls: PtcCalls
+  /** Releases each Agent/provider environment once, even across service wrappers. */
+  readonly stateOwners: WeakMap<object, WeakSet<PtcRuntime>>
+}
+
 /**
  * Build the `run_code` {@link ToolDefinition}: required `code` and
  * `description` parameters, executed through the dispatch bridge described
@@ -324,13 +364,12 @@ export interface RunCodeBridgeOptions {
  * @param registry - the owning registry (sub-calls go through its `execute`,
  *   bindings cover its registered tools).
  * @param options - the registry-private capabilities described above.
- * @param ctx - Owning registry context, independent of the calling Agent.
+ * @param state - Owning registry call tracking and retained environments.
  * @returns the registry-ready definition.
  */
-export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeOptions, ctx: Context): ToolDefinition {
+export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeOptions, state: RunCodeBridgeState): ToolDefinition {
   const { requireRuntime, peekRuntime, maxParallel, shapeDispatchLog } = options
-  const stateOwners = new WeakMap<object, WeakSet<PtcRuntime>>()
-  const calls = new PtcCalls(ctx)
+  const { stateOwners, calls } = state
   const definition = defineTool({
     name: RUN_CODE_NAME,
     // The description and `code` parameter description are placeholders here:
@@ -375,26 +414,45 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
         return [{ type: 'text', text: parts.length > 0 ? parts.join('\n') : '(run_code completed with no output)' }]
       },
     },
+    finalizeContent: (_exec, result) => {
+      if (!result.isError) return undefined
+      const text = result.content
+        .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+        .map(block => block.text)
+        .join('\n')
+      return /invalid arguments:.*(?:sandbox_permissions|justification)/iu.test(text)
+        ? runCodeSandboxArgumentGuidance(text)
+        : undefined
+    },
     async execute(args, exec): Promise<RunCodeOutput> {
       if (args.description.trim().length === 0) {
         throw new Error('invalid description: expected a non-empty string')
       }
       const runtime = requireRuntime()
       const run = async (callSignal: AbortSignal): Promise<RunCodeOutput> => {
-        validateEscalationArgs(args.sandbox_permissions, args.justification)
+        const standingPolicy = runtime.sandboxMode === undefined ? undefined : options.resolveSandboxPolicy(exec)
+        const nonEscalating = standingPolicy !== undefined && args.sandbox_permissions !== undefined
+          && ESCALATION_TARGETS.some(mode => mode === args.sandbox_permissions)
+          && !(WIDER_MODES[standingPolicy.mode] ?? []).some(mode => mode === args.sandbox_permissions)
+        const sandboxPermissions = nonEscalating ? undefined : args.sandbox_permissions
+        const justification = nonEscalating ? undefined : args.justification
+        try {
+          validateEscalationArgs(sandboxPermissions, justification)
+        } catch (error: unknown) {
+          throw new Error(runCodeSandboxArgumentMessage(error instanceof Error ? error.message : String(error)))
+        }
         if (args.timeoutMs !== undefined && runtime.timeout === undefined) {
           throw new Error('timeoutMs is not available for this PTC runtime')
         }
         if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) {
           throw new Error('invalid timeoutMs: expected a positive finite number')
         }
-        const standingPolicy = runtime.sandboxMode === undefined ? undefined : options.resolveSandboxPolicy(exec)
         let policy = standingPolicy
-        if (args.sandbox_permissions !== undefined && args.justification !== undefined) {
+        if (sandboxPermissions !== undefined && justification !== undefined) {
           if (standingPolicy === undefined) throw new Error('sandbox_permissions is not available for this PTC runtime')
           const approvedMode = await approveEscalation({
-            requestedMode: args.sandbox_permissions,
-            justification: args.justification,
+            requestedMode: sandboxPermissions,
+            justification,
             effectiveMode: standingPolicy.mode,
             subject: 'program',
           }, {
@@ -734,10 +792,11 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
           }
 
           if (result.error) {
+            const syntaxGuidance = programSyntaxGuidance(result.error.message)
             const logsText = result.logs.length > 0 ? `\nCaptured output:\n${result.logs.join('\n')}` : ''
             const sandboxText = result.sandbox === undefined ? ''
               : `\nFile sandbox: ${result.sandbox.mode}${result.sandbox.enforcement === undefined ? '' : `; enforcement: ${result.sandbox.enforcement}`}${result.sandbox.denied ? '; operation denied' : ''}.`
-            throw new CodeRunFailedError(`code run failed (${result.error.kind}): ${result.error.message}${logsText}${sandboxText}${result.sandbox?.denied ? escalationGuidance(runtime) : ''}`)
+            throw new CodeRunFailedError(`code run failed (${result.error.kind}): ${result.error.message}${syntaxGuidance}${logsText}${sandboxText}${result.sandbox?.denied ? escalationGuidance(runtime) : ''}`)
           }
           return {
             logs: result.logs,

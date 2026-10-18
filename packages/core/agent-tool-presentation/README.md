@@ -45,6 +45,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 Selecting `ptc` needs a composed PTC runtime (`ctx.ptcRuntime`) whose language has a registered SDK renderer — the TypeScript runtime ships via [`dsh-ptc-runtime-node`](../../ptc-runtime/ptc-runtime-node/README.md), and both the TypeScript and Python SDK renderers are built into `dsh-tools`. A preset that selects a PTC mode against a deployment composing no such runtime refuses to mount, naming this row, so the failure lands where the operator can act instead of at the session's first request.
 
+The row captures the runtime from its mounting isolation scope and passes it to `tools.presentAs(mode, runtime)`. A preset-local provider controls that preset’s SDK language and execution without replacing the deployment provider for ordinary agents.
+
 ### One presentation per agent
 
 One agent declares one presentation. A second declaration in the same composition is refused rather than merged: two answers to "which form does the model see" is a contradiction, not an override.
@@ -106,7 +108,7 @@ No direct invalidation; the presentation is fixed when the agent is composed, so
 
 These limits define when this row needs special care. They are current package constraints, not a task backlog.
 
-- **The runtime stays host-plane** — a preset can select PTC mode but cannot supply the TypeScript runtime it needs; a deployment that composes none can compose no PTC preset.
+- **PTC requires a provider** — a preset may inherit the deployment runtime or supply a preset-local isolated provider; without either, its PTC presentation remains pending. Native presentation does not require a PTC provider.
 
 <a id="dev-note"></a>
 ### Dev Note

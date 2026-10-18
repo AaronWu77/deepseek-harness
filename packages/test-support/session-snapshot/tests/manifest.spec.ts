@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { parseSnapshotManifest, writesCurrentSessionFixtures } from '../src/manifest.ts'
 
 describe('snapshot manifest', () => {
+  it('accepts keyless scripted-provider recording without treating it as authored data', () => {
+    expect(parseSnapshotManifest('version: 1\nprofile: headless\nrecording: scripted\n').recording)
+      .toBe('scripted')
+  })
+
+  it('rejects an unrecognized recording source', () => {
+    expect(() => parseSnapshotManifest('version: 1\nprofile: headless\nrecording: fabricated\n'))
+      .toThrow('manifest.recording must be live, scripted, or authored')
+  })
+
   it('parses an owning scenario', () => {
     expect(parseSnapshotManifest('version: 1\nprofile: headless\n')).toEqual({
       version: 1,
@@ -171,7 +181,7 @@ describe('snapshot manifest', () => {
     ['version: 1\nprofile: private\n', 'manifest.profile must be headless, sdk, sdk-minimal, acp, or web'],
     ['version: 1\nprofile: acp\nextra: true\n', 'manifest has unknown field(s): extra'],
     ['version: 1\nprofile: acp\ncomposition: Not_Safe\n', 'manifest.composition must be a lower-kebab-case name'],
-    ['version: 1\nprofile: acp\nrecording: maybe\n', 'manifest.recording must be live or authored'],
+    ['version: 1\nprofile: acp\nrecording: maybe\n', 'manifest.recording must be live, scripted, or authored'],
     ['version: 1\nprofile: acp\nheader: {}\n', 'manifest.header.class must be a lower-kebab-case name'],
     ['version: 1\nprofile: acp\nheader:\n  class: base\n  pin: false\n', 'manifest.header.pin must equal true when present'],
     ['version: 1\nprofile: acp\nheader:\n  class: base\n  childToolSchemas: [1, 1]\n', 'manifest.header.childToolSchemas must be an array of unique positive integers'],

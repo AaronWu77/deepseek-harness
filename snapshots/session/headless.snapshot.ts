@@ -1,6 +1,7 @@
 /** Recorded-session replay through the shipped headless `dsh` profile. */
 
 import { startHttpMcpFixture } from '../../packages/mcp/mcp-client/tests/http-fixture.ts'
+import { firstHeadlessRecordingInput } from '../../scripts/headless-snapshot-recording.ts'
 import { cp, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, utimes, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -38,6 +39,7 @@ import {
   sessionFixtureName,
   systemPromptPrecedesRequests,
   sessionFixtureNames,
+  sessionFixtureNamesForRecording,
   sessionHeaderVersion,
   writerSnapshotName,
   snapshotSpillRoot,
@@ -88,7 +90,7 @@ interface HeadlessScenario {
   readonly dir: string
   readonly manifest: SnapshotManifest & {
     composition: string
-    recording: 'live' | 'authored'
+    recording: 'live' | 'scripted' | 'authored'
     header: NonNullable<SnapshotManifest['header']>
   }
 }
@@ -1234,21 +1236,29 @@ describe('headless recorded-session snapshots', () => {
     const inputLabel = retainedToolInput === undefined ? '' : ' from retained V3 input'
     scenarioTest(`${mode}s ${scenario.name}${inputLabel} through dsh --profile headless`, async () => {
       let fixtureFiles = retainedToolInput === undefined
-        ? sessionFixtureNames(await readdir(scenario.dir)) : [retainedToolInput]
+        ? sessionFixtureNamesForRecording(await readdir(scenario.dir), mode) : [retainedToolInput]
       let fixtures = await fixtureSessions(scenario, fixtureFiles)
       const primaryFixture = fixtures[0]
-      if (primaryFixture === undefined) throw new Error(`${scenario.name}: missing primary session fixture`)
-      const task = taskFromSession(primaryFixture) ?? scenario.manifest.input?.task
+      const firstRecording = primaryFixture === undefined && mode === 'record'
+      if (primaryFixture === undefined && !firstRecording) throw new Error(`${scenario.name}: missing primary session fixture`)
+      const bootstrap = firstRecording ? firstHeadlessRecordingInput(scenario.manifest) : undefined
+      const task = (primaryFixture === undefined ? undefined : taskFromSession(primaryFixture)) ?? bootstrap?.task ?? scenario.manifest.input?.task
       if (task === undefined) throw new Error(`${scenario.name}: no accepted or exceptional task input`)
       const pin = pinOf(scenario)
       const ignoredWorkspaceEntries = scenario.manifest.workspace?.setup === 'git-worktree'
         ? [...RUNTIME_WORKSPACE_ENTRIES.filter(entry => entry !== '.agents'), '.git'] : RUNTIME_WORKSPACE_ENTRIES
       let model: { provider: string; model: string }
-      try {
-        model = modelFromSession(primaryFixture)
-      } catch {
-        model = modelFromSession(await readFile(join(pin.dir, await primaryFixtureFile(pin.dir)), 'utf8'))
+      if (bootstrap) {
+        model = bootstrap.model
+      } else {
+        try {
+          model = modelFromSession(primaryFixture!)
+        } catch {
+          model = modelFromSession(await readFile(join(pin.dir, await primaryFixtureFile(pin.dir)), 'utf8'))
+        }
       }
+      const selectedPrimaryName = fixtureFiles[0] ?? sessionFixtureName(0, SESSION_FORMAT_VERSION)
+      const primaryReason = primaryFixture === undefined ? undefined : turnReasonFromSession(primaryFixture)
       const composition = ownerOf(scenario)
       const baseComposition = compositionOwners.get('default')
       if (baseComposition === undefined) throw new Error('headless corpus has no default composition')
@@ -1267,7 +1277,7 @@ describe('headless recorded-session snapshots', () => {
       let initialWorkspace: WorkspaceSnapshotEntry[] | undefined
       let finalWorkspace: WorkspaceSnapshotEntry[] | undefined
       const spillRoot = await mkdtemp(join(tmpdir(), 'acp-snap-spill-'))
-      const locatorRoot = snapshotSpillRoot(join(scenario.dir, fixtureFiles[0] as string))
+      const locatorRoot = snapshotSpillRoot(join(scenario.dir, selectedPrimaryName))
       const mcpDemo = scenario.name === 'plugin-manager-mcp' ? await startHttpMcpFixture() : undefined
       let result: Awaited<ReturnType<typeof runLoaderSmoke>>
       try {
@@ -1285,8 +1295,8 @@ describe('headless recorded-session snapshots', () => {
             task,
           ],
           tsconfigPath,
-          expectedExitCode: turnReasonFromSession(primaryFixture)?.kind === 'completed'
-            || turnReasonFromSession(primaryFixture) === undefined && scenario.manifest.input?.task !== undefined
+          expectedExitCode: primaryReason?.kind === 'completed'
+            || primaryReason === undefined && scenario.manifest.input?.task !== undefined
             ? 0
             : 1,
           env: {
@@ -1295,7 +1305,7 @@ describe('headless recorded-session snapshots', () => {
             DSH_SNAPSHOT_MODEL: model.model,
             DSH_SNAPSHOT_SPILL_ROOT: spillRoot,
             DSH_SNAPSHOT_SPILL_LOCATOR_ROOT: locatorRoot,
-            DSH_SNAPSHOT_FILE: join(scenario.dir, fixtureFiles[0] as string),
+            DSH_SNAPSHOT_FILE: join(scenario.dir, selectedPrimaryName),
             ...(replaying && fixtureFiles.length > 1
               ? { DSH_SNAPSHOT_CHILD_FILES: fixtureFiles.slice(1).map(file => join(scenario.dir, file)).join(delimiter) }
               : {}),
@@ -1332,7 +1342,7 @@ describe('headless recorded-session snapshots', () => {
           inspect: async (cwd) => {
             actualLogs = await persistedSessions(cwd)
             if (retainedToolInput !== undefined) {
-              verifyToolResultWriterParity(primaryFixture, actualLogs[0]!.content)
+              verifyToolResultWriterParity(primaryFixture!, actualLogs[0]!.content)
             }
             if (mcpDemo !== undefined) {
               const log = actualLogs[0]!.content

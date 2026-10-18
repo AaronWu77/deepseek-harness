@@ -6,8 +6,8 @@ import * as yaml from 'js-yaml'
 /** Public `dsh` profile used to control a recorded-session scenario. */
 export type SnapshotProfile = 'headless' | 'sdk' | 'sdk-minimal' | 'acp' | 'web'
 
-/** How a canonical session may be regenerated. */
-export type SnapshotRecording = 'live' | 'authored'
+/** Regeneration source: live API, keyless scripted provider, or non-recordable authored data. */
+export type SnapshotRecording = 'live' | 'scripted' | 'authored'
 
 /** Request-header ownership metadata for one composition. */
 export interface SnapshotHeaderManifest {
@@ -63,7 +63,7 @@ export interface SnapshotInputAttachment {
 
 /** Controller input bytes or rejected text that the persisted session cannot retain. */
 export interface SnapshotInputManifest {
-  /** One-shot task absent from the canonical log only when no user event was accepted. */
+  /** Task for initial recording; remove after harvest, unless admission left no accepted user event. */
   task?: string
   /** Binary inputs keyed by the content-addressed ids retained in session JSONL. */
   attachments?: SnapshotInputAttachment[]
@@ -102,7 +102,7 @@ export interface SnapshotManifest {
   profile: SnapshotProfile
   /** Composition id whose sole pin owns its profile patches. */
   composition?: string
-  /** Whether the session is live-recordable or deliberately authored. */
+  /** Whether recording uses a live API, a scripted provider, or skips authored data. */
   recording?: SnapshotRecording
   /** Request-header class and sidecar ownership. */
   header?: SnapshotHeaderManifest
@@ -144,7 +144,7 @@ export function writesCurrentSessionFixtures(
 }
 
 const PROFILES = new Set<SnapshotProfile>(['headless', 'sdk', 'sdk-minimal', 'acp', 'web'])
-const RECORDINGS = new Set<SnapshotRecording>(['live', 'authored'])
+const RECORDINGS = new Set<SnapshotRecording>(['live', 'scripted', 'authored'])
 const PLATFORMS = new Set<SnapshotPlatform>(['posix', 'pwsh'])
 const PERMISSIONS = new Set<SnapshotPermission>(['read-only', 'workspace-write', 'danger-full-access'])
 const SESSION_FORMAT_COVERAGE = new Set<SnapshotSessionFormatCoverage>([
@@ -236,7 +236,7 @@ export function parseSnapshotManifest(source: string, path = 'snapshot.yml'): Sn
     let recording: SnapshotRecording | undefined
     if (root.recording !== undefined) {
       if (typeof root.recording !== 'string' || !RECORDINGS.has(root.recording as SnapshotRecording)) {
-        throw new Error('manifest.recording must be live or authored')
+        throw new Error('manifest.recording must be live, scripted, or authored')
       }
       recording = root.recording as SnapshotRecording
     }

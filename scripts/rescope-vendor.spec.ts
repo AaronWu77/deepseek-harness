@@ -1,7 +1,7 @@
 /** Recorded npm evidence stays intact while authored files and exact edits remain checked. */
 
 import { describe, expect, it } from 'vitest'
-import { exactEditState, isRescopeExcluded } from './rescope-vendor.ts'
+import { exactEditState, isRescopeExcluded, rescopeText } from './rescope-vendor.ts'
 
 const ANCHOR = '\n## Sync procedure'
 const INSERTED = `\n15. **rescope**: one log entry.\n${ANCHOR}`
@@ -19,6 +19,23 @@ describe('rescope file selection', () => {
     'packages/example/package.json',
   ])('keeps %s subject to upstream package-name checks', (file) => {
     expect(isRescopeExcluded(file)).toBe(false)
+  })
+})
+
+describe('Cordis locale key rescope', () => {
+  const file = 'packages/extensions/ui-cordis/src/client/CordisPreparingRow.tsx'
+
+  it('keeps the UI dictionary id while rescoping a package import in the same file', () => {
+    const source = "type Row = PropsLocale<'cordis'>\nimport type { Context } from 'cordis'\n"
+    expect(rescopeText(source, file)).toBe(
+      "type Row = PropsLocale<'cordis'>\nimport type { Context } from '@deepseek-ai/cordis'\n",
+    )
+  })
+
+  it('still rescopes bare package names outside the owning UI file', () => {
+    expect(rescopeText("import 'cordis'\n", 'packages/example/src/index.ts')).toBe(
+      "import '@deepseek-ai/cordis'\n",
+    )
   })
 })
 

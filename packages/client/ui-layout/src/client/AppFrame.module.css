@@ -1,90 +1,144 @@
 .frame {
-  position: relative; /* anchors the drag handles, which straddle column borders */
+  /* The stage: full-bleed ambient canvas with the floating window inset by
+     --dsw-glass-frame-gap, so the flowing colour frames the glass. */
+  position: relative;
+  height: 100%;
+  box-sizing: border-box;
+  padding: var(--dsw-glass-frame-gap);
+  overflow: hidden;
+  background: var(--dsw-glass-canvas);
+}
+
+/* The floating window: the real three-column grid. Its translucent gradient
+   needs no backdrop-filter — it sits directly on the soft ambient canvas, where
+   a blur has nothing to sharpen and would only make the window a containing
+   block for position: fixed descendants. The blur belongs to the surfaces that
+   have content behind them (the sidebar layer, the floating layers). */
+.window {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   overflow: hidden;
-  background: var(--dsw-alias-bg-base);
+  border-radius: var(--dsw-glass-frame-radius);
+  background: var(--dsw-glass-window);
+  box-shadow: var(--dsw-elevation-prominent);
 }
 
-/* Only a discrete collapse/expand toggle eases the tracks (the TSX holds
-   data-animating across the toggle on the deepsuite sider curve). Steady-state
-   tracks move only with the viewport, and those updates must land instantly:
-   an eased track chases the live window edge and the centre column visibly
-   rubber-bands while the user resizes the window. */
-.frame[data-animating] {
+/* Only explicit panel toggles animate; viewport resizing updates tracks immediately. */
+.frame[data-animating] .window {
   transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out);
 }
 
 /* Dragging writes widths at pointer cadence; easing them would detach the
    column from the handle. */
-.frame[data-dragging] {
+.frame[data-dragging] .window {
   transition: none;
 }
 
-/* The Windows caption row remains outside every conversation and file panel. */
+/* The exposed Aurora strip above the inset window also drags the macOS window;
+   the column headers start below it and keep their own drag/no-drag regions. */
+:global([data-platform='darwin']) .frame::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--dsw-glass-frame-gap);
+  -webkit-app-region: drag;
+}
+
+/* The Windows caption row sits above every column. The stage reserves its
+   height on top of the frame gap and the drag strip spans that band. The band
+   paints no fill — the ambient canvas shows through it — and the window
+   already owns the content radius, so the inset and the drag region are the
+   only things this sheet owes the platform. */
 :global([data-windows-titlebar]) .frame {
   --dsh-windows-content-radius: 16px;
   box-sizing: border-box;
-  padding-top: var(--dsh-windows-titlebar-height);
-  background: var(--dsw-specific-sidebar-fill);
-}
-
-:global([data-windows-titlebar]) .centerCol {
-  background: var(--dsw-alias-bg-base);
-  border-radius: var(--dsh-windows-content-radius) 0 0 0;
-  corner-shape: round;
+  padding-top: calc(var(--dsw-glass-frame-gap) + var(--dsh-windows-titlebar-height));
 }
 
 :global([data-windows-titlebar]) .frame::before {
   content: '';
   position: absolute;
   inset: 0 0 auto;
-  height: var(--dsh-windows-titlebar-height);
-  background: var(--dsw-specific-sidebar-fill);
+  height: calc(var(--dsw-glass-frame-gap) + var(--dsh-windows-titlebar-height));
   -webkit-app-region: drag;
 }
 
-:global([data-windows-titlebar]) .sidebarCol {
+:global([data-windows-titlebar]) .sidebarGlass {
   border-right: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .frame[data-animating] {
+  .frame[data-animating] .window {
     transition: none;
   }
+
+  .ambient {
+    animation: none;
+  }
+}
+
+/* 极光层：铺在列之下，为玻璃面提供可模糊的内容。五个色团是同一个元素上的五张
+   背景图，而不是五个各自铺满视口的图层——每个整屏图层在合成时都会重新栅格化
+   自己那张大径向渐变，层与层之间会在渐变边缘留下可见的色阶接缝；合并成一层
+   之后扫描线是平滑的（实测：合并前 4/5/6/5/6/2 带跳变，合并后 3/2/1/1/1/0）。
+   动画只写 transform（合成器路径），不做 background-position 动画，那会每帧
+   重绘整块画布。画布藏在 inset -18% 的越界盒里，漂移时不会露边。 */
+.ambient {
+  position: absolute;
+  inset: -18%;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    var(--dsw-aurora-1), var(--dsw-aurora-2), var(--dsw-aurora-3),
+    var(--dsw-aurora-4), var(--dsw-aurora-5);
+  animation: aurora-drift var(--dsw-aurora-drift) var(--ds-ease-in-out) infinite;
+}
+
+@keyframes aurora-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.04); }
+  50% { transform: translate3d(3%, -2%, 0) scale(0.98); }
 }
 
 .sidebarCol {
   min-width: 0;
   overflow: hidden;
-  background: var(--dsw-specific-sidebar-fill);
-  border-right: 0.5px solid var(--dsw-alias-border-l3);
+  position: relative;
+  /* Deliberately no z-index: it would create a stacking context, and the
+     settings dialog is a position: fixed overlay mounted inside this column.
+     Confined there, its z-index: 1000 loses to the conversation column's, so
+     the dialog paints under the transcript and takes no pointer events. The
+     column is ordered against the ambient canvas by .window instead. */
+}
+
+/* Keep blur on a leaf layer: backdrop-filter would make the column the containing
+   block for fixed settings overlays. Tree order places this layer below SidebarRoot
+   without a column stacking context. Prefix-first keeps the standard declaration
+   when the bundle minifier collapses the pair. */
+.sidebarGlass {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--dsw-glass-fill);
+  -webkit-backdrop-filter: var(--dsw-glass-blur);
+  backdrop-filter: var(--dsw-glass-blur);
+  border-right: 0.5px solid var(--dsw-glass-stroke);
 }
 
 .centerCol {
+  /* No z-index, for the reason .sidebarCol states: a column that opens a
+     stacking context confines every position: fixed overlay mounted inside it. */
+  position: relative;
   min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-/* macOS desktop: the frame goes transparent so window vibrancy reaches the
-   sidebar column, which keeps only a translucent tint; the centre paints the
-   base background itself to stay opaque. The sidebar/centre separator moves
-   to the opaque centre: on the translucent sidebar the alpha border mixes
-   with the wallpaper and reads as a dark seam. */
-:global([data-platform='darwin']) .frame {
-  background: transparent;
-}
-
-/* The constant step below the window's top strip (traffic lights, sidebar
-   toggle, shell.leading controls), the same in both sidebar states. Entry
-   pages in the main panel (plugin manager, settings-like pages — not the
-   conversation, which owns its header) pad their top by it so their leading
-   content clears the strip, and overlay primitives add their own safe inset.
-   Declared on the root element rather than the frame so
-   overlays portalled to document.body inherit it too. */
+/* Portalled dialogs keep macOS clearance even though Aurora supplies the window material. */
 :global(html[data-platform='darwin']) {
   --dsh-frame-top-clearance: 48px;
 }
@@ -107,67 +161,6 @@
   --dsh-frame-chrome-top: 0px;
 }
 
-:global([data-platform='darwin']) .sidebarCol {
-  /* A blue wash over the top of the translucent tint, gone by a third of the
-     column; a faint blue-grey-violet rises through the bottom third; and a
-     faint blue cast is mixed into the tint itself. Every layer stays
-     transparent so vibrancy shows. */
-  background:
-    linear-gradient(
-      to bottom,
-      rgb(122 155 240 / 0.1),
-      rgb(122 155 240 / 0) 35%,
-      rgb(143 137 184 / 0) 68%,
-      rgb(143 137 184 / 0.09)
-    ),
-    color-mix(in srgb, color-mix(in srgb, var(--dsw-specific-sidebar-fill) 97%, rgb(122 155 240)) 40%, transparent);
-  border-right: none;
-}
-
-/* Dark drops the blue cast (the light-mode wash reads purple over dark fills)
-   and thins the fill so more wallpaper shows; the washes stay. */
-:global([data-platform='darwin']) :global([data-ds-dark-theme]) .sidebarCol {
-  background:
-    linear-gradient(
-      to bottom,
-      rgb(122 155 240 / 0.08),
-      rgb(122 155 240 / 0) 35%,
-      rgb(143 137 184 / 0) 68%,
-      rgb(143 137 184 / 0.07)
-    ),
-    color-mix(in srgb, var(--dsw-specific-sidebar-fill) 50%, transparent);
-}
-
-/* macOS Reduce Transparency: the OS flattens the window's vibrancy layer to a
-   solid grey, so the thin tint and washes read washed-out over it. Replace
-   them with a 90%-opaque fill of the same token in both themes (the dark
-   selector repeats so this outranks its thinner fill). */
-@media (prefers-reduced-transparency: reduce) {
-  :global([data-platform='darwin']) .sidebarCol,
-  :global([data-platform='darwin']) :global([data-ds-dark-theme]) .sidebarCol {
-    background: color-mix(in srgb, var(--dsw-specific-sidebar-fill) 90%, transparent);
-  }
-}
-
-:global([data-platform='darwin']) .centerCol {
-  background: var(--dsw-alias-bg-base);
-  border-left: 0.5px solid var(--dsw-alias-border-l3);
-}
-
-/* The right track paints the base ground on the transparent frame: while the
-   track and the occupant's translateX slide ride the same curve, the grid
-   eases in layout and the transform on the compositor, so frames where they
-   diverge would otherwise show vibrancy glass between the centre's right edge
-   and the incoming panel. The occupant's opaque panel covers this at rest. */
-:global([data-platform='darwin']) .rightbarCol {
-  background: var(--dsw-alias-bg-base);
-}
-
-/* The darwin closed sidebar has no rail: the centre reaches the window edge,
-   where a separator would draw a seam against nothing. */
-:global([data-platform='darwin']) [data-sidebar-collapsed] .centerCol {
-  border-left: none;
-}
 
 /* Published while the shell.leading seat is mounted (same condition as the
    TSX mount: darwin with the sidebar collapsed — the collapse that hides the
@@ -192,12 +185,7 @@
   left: 12px;
 }
 
-/* The frame declares no window drag of its own: every chrome row owns the drag
-   over its own box (ui-web base.css holds the one rule; the ui-theme app-region
-   gate lists the rows). The ordering rule that replaces the old "band first"
-   invariant: a surface that covers the window and must stay clickable portals
-   beside #root, which puts it after every drag row in document order. The Windows
-   caption row above is the other platform's chrome and stays. */
+/* Chrome rows own the macOS drag region; the inset window adds no drag band. */
 
 /* The seat itself: the two 28px controls centered on the conversation title
    row (10px header inset + 30px row → centre y 25) and level with the traffic
@@ -214,7 +202,7 @@
   -webkit-app-region: no-drag;
 }
 
-/* Drag handles are frame children (columns clip overflow): an 8px hit strip
+/* Drag handles are window children (columns clip overflow): an 8px hit strip
    centered on the column border via inline left, above column content. No
    handle draws a visible pill: the details column was the only one that did,
    and the right column never had one. The right handle sits above the right
@@ -244,9 +232,9 @@
 }
 
 /* Fullscreen covers the frame while its underlying columns enter or exit. */
-.frame[data-rightbar-fullscreen],
+.frame[data-rightbar-fullscreen] .window,
 .frame[data-rightbar-fullscreen] .handle,
-.frame[data-rightbar-instant],
+.frame[data-rightbar-instant] .window,
 .frame[data-rightbar-instant] .handle {
   transition: none;
 }
@@ -271,6 +259,8 @@
 }
 
 .bottomRow {
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
   grid-column: 1 / -1;
   min-width: 0;
   min-height: 0;

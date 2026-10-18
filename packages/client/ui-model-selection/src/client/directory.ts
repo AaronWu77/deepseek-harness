@@ -9,6 +9,7 @@ import type {
   ModelCatalogFailure, ModelProviderGroup, ModelSelection, ModelSelectionProjection,
 } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { RemoteResult, TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -16,7 +17,7 @@ import type { ModelCatalogDirectory } from './catalog.ts'
 
 /** Directory snapshot both entries render from. */
 export interface ModelDirectoryState {
-  /** Saved selection, retained even when its provider or model leaves the catalog. */
+  /** Acknowledged pending choice, then saved selection; unavailable saved models remain visible. */
   current: ModelSelection | null
   /** Saved effort caption retained when the selected model is unavailable. */
   retainedEffort?: string
@@ -34,6 +35,19 @@ export interface ModelDirectoryState {
   error: string | null
 }
 
+interface PendingSelection {
+  generation: number
+  selection: ModelSelection
+  base: ModelSelection | undefined
+  acknowledged: boolean
+}
+
+function sameSelection(left: ModelSelection | undefined, right: ModelSelection | undefined): boolean {
+  return left?.provider === right?.provider
+    && left?.model === right?.model
+    && left?.reasoningEffort === right?.reasoningEffort
+}
+
 /** One session's shared directory controller; disposed with the session scope. */
 export class ModelDirectory {
   /** The shared snapshot both entries render from (uSES-safe store). */
@@ -41,8 +55,9 @@ export class ModelDirectory {
     current: null, routable: null, groups: [], failures: [], status: 'idle', pending: null, error: null,
   })
 
-  /** Latest selection operation wins; an older response never overwrites a newer one. */
+  /** Latest selection operation owns state and presentation; older settlements are ignored. */
   private generation = 0
+  private pendingSelection: PendingSelection | undefined
   private disposed = false
   private readonly unsubscribeCatalog: () => void
   private readonly unsubscribeSelection: () => void
@@ -60,7 +75,7 @@ export class ModelDirectory {
     private readonly sessions: Pick<TypertClientRemote['session'], 'selectModel'>,
     private readonly sessionId: SessionId,
     private readonly available: () => boolean,
-    private readonly catalog: ModelCatalogDirectory,
+    private readonly catalog: Pick<ModelCatalogDirectory, 'store' | 'load' | 'reasoningFor'>,
     private readonly projected: ObservableSnapshot<unknown>,
     private readonly isBlank: () => boolean,
     private readonly track?: TrackProductEvent,
@@ -82,11 +97,11 @@ export class ModelDirectory {
   }
 
   /**
-   * Select the complete provider/model/reasoning selection. The durable
-   * projection frame updates the shared current; failures surface on the store
-   * and return with the operation so each entry can present its own failure.
+   * Select the complete provider/model/reasoning selection. A successful RPC
+   * remains visible while the durable projection catches up; a conflicting
+   * projection wins. Only the latest operation may publish a failure.
    * @param selection - provider, provider-owned model id, and optional adapter-owned effort.
-   * @returns the selection outcome, including the original Remote failure.
+   * @returns the active operation's outcome; a superseded settlement is a no-op success.
    */
   async select(selection: ModelSelection): Promise<RemoteResult<void>> {
     this.assertAvailable()
@@ -94,37 +109,66 @@ export class ModelDirectory {
     const previousEffort = previous?.reasoningEffort ?? (previous === null ? undefined : this.catalog.reasoningFor(previous)?.defaultEffort)
     const nextEffort = selection.reasoningEffort ?? this.catalog.reasoningFor(selection)?.defaultEffort
     const generation = ++this.generation
-    this.store.update((s) => { s.status = 'selecting'; s.pending = selection; s.error = null })
-    const result = await this.sessions.selectModel({
-      sessionId: this.sessionId,
-      provider: selection.provider,
-      model: selection.model,
-      ...selection.reasoningEffort === undefined
-        ? {}
-        : { reasoningEffort: selection.reasoningEffort },
-    })
-    if (this.disposed || generation !== this.generation) {
-      return result.ok ? { ok: true, value: undefined } : result
+    const projected = modelSelectionProjection(this.projected.getSnapshot())
+    const catalog = this.catalog.store.getSnapshot()
+    const pending: PendingSelection = {
+      generation,
+      selection,
+      base: projected?.next ?? catalog.value?.default,
+      acknowledged: false,
     }
-    if (!result.ok) {
+    this.pendingSelection = pending
+    this.store.update((s) => { s.status = 'selecting'; s.pending = selection; s.error = null })
+    try {
+      const result = await this.sessions.selectModel({
+        sessionId: this.sessionId,
+        provider: selection.provider,
+        model: selection.model,
+        ...selection.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: selection.reasoningEffort },
+      })
+      if (this.disposed || generation !== this.generation) return { ok: true, value: undefined }
+      if (!result.ok) {
+        this.pendingSelection = undefined
+        this.syncInputs()
+        this.store.update((s) => {
+          s.status = 'error'
+          s.pending = null
+          s.error = result.error.code + ': ' + result.error.message
+        })
+        return result
+      }
+      this.pendingSelection = {
+        ...pending,
+        selection: result.value.selected,
+        acknowledged: true,
+      }
+      this.store.update((s) => { s.status = 'ready'; s.pending = null; s.error = null })
+      this.syncInputs()
+      if (previous !== null) {
+        const from = `${previous.provider}/${previous.model}`
+        const to = `${selection.provider}/${selection.model}`
+        if (from !== to) this.track?.('model_switch', { ...this.isBlank() ? {} : { session_id: this.sessionId }, switch_from: from, switch_to: to })
+        if (from === to && previousEffort !== nextEffort) this.track?.('thinking_level_switch', {
+          ...this.isBlank() ? {} : { session_id: this.sessionId }, model_name: to, switch_from: previousEffort ?? 'default', switch_to: nextEffort ?? 'default',
+        })
+      }
+      return { ok: true, value: undefined }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const failure = new RemoteError('gateway/internal', message, {})
+      if (this.disposed || generation !== this.generation) return { ok: true, value: undefined }
+      this.pendingSelection = undefined
+      this.syncInputs()
       this.store.update((s) => {
         s.status = 'error'
         s.pending = null
-        s.error = `${result.error.code}: ${result.error.message}`
+        s.error = failure.code + ': ' + failure.message
       })
-      return result
+      return { ok: false, error: failure }
     }
-    if (previous !== null) {
-      const from = `${previous.provider}/${previous.model}`
-      const to = `${selection.provider}/${selection.model}`
-      if (from !== to) this.track?.('model_switch', { ...this.isBlank() ? {} : { session_id: this.sessionId }, switch_from: from, switch_to: to })
-      if (from === to && previousEffort !== nextEffort) this.track?.('thinking_level_switch', {
-        ...this.isBlank() ? {} : { session_id: this.sessionId }, model_name: to, switch_from: previousEffort ?? 'default', switch_to: nextEffort ?? 'default',
-      })
-    }
-    this.store.update((s) => { s.status = 'ready'; s.pending = null; s.error = null })
-    this.syncInputs()
-    return { ok: true, value: undefined }
+
   }
 
   /**
@@ -133,8 +177,11 @@ export class ModelDirectory {
   resetConnected(): void {
     if (this.disposed) return
     ++this.generation
+    this.pendingSelection = undefined
     this.store.update((state) => {
       if (state.status === 'selecting') state.status = 'idle'
+      state.current = null
+      state.routable = null
       state.pending = null
       state.error = null
     })
@@ -144,6 +191,7 @@ export class ModelDirectory {
   /** Scope teardown: late settlements lose write access to the store. */
   dispose(): void {
     this.disposed = true
+    this.pendingSelection = undefined
     this.unsubscribeSelection()
     this.unsubscribeCatalog()
   }
@@ -158,14 +206,15 @@ export class ModelDirectory {
     if (this.disposed) return
     const catalog = this.catalog.store.getSnapshot()
     const projected = modelSelectionProjection(this.projected.getSnapshot())
+    const pending = this.pendingSelection?.generation === this.generation ? this.pendingSelection : undefined
     const intended = projected?.next ?? catalog.value?.default
     const reasoning = intended === undefined ? undefined : this.catalog.reasoningFor(intended)
     const effort = intended?.reasoningEffort ?? reasoning?.defaultEffort
     const retainedEffort = effort === undefined ? undefined
       : reasoning?.efforts.find(level => level.id === effort)?.name ?? effort
-    if (catalog.status !== 'ready' || catalog.value === null || projected === undefined) {
+    if (catalog.status !== 'ready' || catalog.value === null || (projected === undefined && pending === undefined)) {
       this.store.set({
-        current: catalog.value === null ? null : this.store.getSnapshot().current,
+        current: this.store.getSnapshot().current,
         ...retainedEffort === undefined ? {} : { retainedEffort },
         routable: null,
         groups: catalog.value?.groups ?? [],
@@ -176,12 +225,26 @@ export class ModelDirectory {
       })
       return
     }
-    const selection = projected.next ?? catalog.value.default
+    const projectedCurrent = projected?.next ?? catalog.value.default
+    let selection = projectedCurrent
+    if (pending !== undefined) {
+      if (sameSelection(projectedCurrent, pending.selection)) {
+        this.pendingSelection = undefined
+      } else if (pending.base !== undefined && !sameSelection(projectedCurrent, pending.base)) {
+        this.pendingSelection = undefined
+      } else if (pending.acknowledged) {
+        selection = pending.selection
+      }
+    }
+    const selectedReasoning = this.catalog.reasoningFor(selection)
+    const selectedEffort = selection.reasoningEffort ?? selectedReasoning?.defaultEffort
+    const selectedRetainedEffort = selectedEffort === undefined ? undefined
+      : selectedReasoning?.efforts.find(level => level.id === selectedEffort)?.name ?? selectedEffort
     const routable = catalog.value.groups.some(group => group.id === selection.provider
       && group.models.some(model => model.id === selection.model))
     this.store.set({
       current: selection,
-      ...retainedEffort === undefined ? {} : { retainedEffort },
+      ...selectedRetainedEffort === undefined ? {} : { retainedEffort: selectedRetainedEffort },
       routable,
       groups: catalog.value.groups,
       failures: catalog.value.failures,
