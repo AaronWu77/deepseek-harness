@@ -12,6 +12,6 @@ description: "个人品牌与极光配色通过可选皮肤 bundle 提供，不�
 
 ## 迁移
 
-部署配套 Host 前，构建插件并通过 `dsh plugin --profile web add link:<plugin-path>` 安装到 Web profile。按照插件的停服迁移说明备份 profile、构建 Host 和插件，再从主工作区重启。不要只向旧定制 Host 加载皮肤：部分配色会重复，品牌尺寸也会不同。
+旧定制 Host 应按[皮肤部署说明](https://github.com/AaronWu77/dsh-skin/blob/main/DEPLOY.md)停服、备份 profile、构建配套 Host 和插件，通过 `dsh plugin --profile web add link:<plugin-path>` 安装 bundle，再从该 Host checkout 重启。不要只向旧定制 Host 加载皮肤：部分配色会重复，品牌尺寸也会不同。已经迁移且已安装 bundle 的 Host 使用同一文档的日常更新章节，不重复首次迁移，也不重装其他插件。
 
-启用运行图案插槽前，同时更新 Host 与皮肤并重启。禁用皮肤会移除其个人品牌、运行图案注册与样式表，恢复鲸尾而不重置时钟；Host 的功能几何、浮动面板修复和原生窗口集成保持不变。后续只开发皮肤时，可使用插件构建 watcher 配合既有 Web HMR 接收器。
+启用运行图案插槽前，同时更新 Host 与皮肤并重启。禁用皮肤会移除其个人品牌、运行图案注册与样式表，恢复鲸尾而不重置时钟；Host 的功能几何、浮动面板修复和原生窗口集成保持不变。只开发皮肤时遵循插件 README 的[热更新条件](https://github.com/AaronWu77/dsh-skin/blob/main/README.md#development-and-hot-reload)，单独启动 watcher 不保证当前 GUI 更新。

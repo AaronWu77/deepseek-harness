@@ -3,8 +3,8 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/fork-deviations.md
 /:
-  en: bbcb74e44d3bb1dc
-  zh: 17bd143e0c0151f3
+  en: d2062e0d9bd0f92e
+  zh: 690d9d7794278af8
 /fork-deviations:
   en: 8cf1e4cff34b16c0
   zh: 88b17c6067ca081e
@@ -15,8 +15,11 @@
   en: a2327ddee3f5c828
   zh: 6076ba901f4eb420
 /fork-deviations/ownership-map:
-  en: e14db708ae717c54
-  zh: a251cafc20614c01
+  en: 920bf60a4d812076
+  zh: 6ecb1dc91a4e7def
+/fork-deviations/ownership-map/related-documentation:
+  en: 05e5966568661450
+  zh: 36cdaf070ea6f805
 /fork-deviations/review-gated-presets:
   en: a875e9dbb810c57c
   zh: b618e7d211823924
@@ -24,8 +27,14 @@
   en: 9c7a0d93f880c1c2
   zh: 1af529d56ffa2023
 /fork-deviations/preservation-registry:
-  en: 19332c3bfd05f9f8
-  zh: 78e3b1896b206672
+  en: df641361e740f387
+  zh: b9922b015675ebc5
+/fork-deviations/preservation-registry/runtime-patches:
+  en: 080b4254d3310413
+  zh: e48c0546e09a9019
+/fork-deviations/preservation-registry/repository-build-and-recording-support:
+  en: f95a003b7570167a
+  zh: 2074e1271f605f55
 /fork-deviations/upstream-behavior-not-counted-as-customization:
   en: 2d3d3a298f6ea582
   zh: 339d9233b055d603
