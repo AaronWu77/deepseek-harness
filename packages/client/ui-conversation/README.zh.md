@@ -166,6 +166,11 @@ selector 必须是 owner currency 的纯函数。非 null 返回值作为 `match
 
 `conversation.input.activity` 在模型选择器与发送按钮之间承载一个控件。其 `onActiveChange` 回调将控件展开至整条工具栏并隐藏普通辅助控件和上下文用量按钮，同时保留编辑器与提交按钮。关闭活动后恢复这些控件，上下文详情保持关闭。首页输入框下方没有内容时，该区域保持收起。占用者在卸载时释放展开状态，并拥有活动专属反馈。
 
+<a id="skin-integration"></a>
+## 皮肤集成
+
+可选皮肤使用 `data-dsh-surface="conversation"`、已有 composer 属性，以及 `data-dsh-part="composer-command"`/`"composer-primary"`/`"composer-workspace-trigger"`。工作区选择器的描边例外与提交行为仍由组件持有。
+
 <a id="model-experience"></a>
 ## 模型体验
 

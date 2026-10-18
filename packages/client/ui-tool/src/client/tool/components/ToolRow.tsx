@@ -256,7 +256,7 @@ export const ToolRow = memo(function ToolRow({
     </>
   ), [summaryLinkKeyDown, linkHref, openFile, state, suffix, totals, summaryText, exitLabel])
   const expandedContent = useMemo(() => open ? (
-    <div className={clsx(css.bodyWrap, detailsBody !== null && css.detailsBodyWrap)}>
+    <div className={clsx(css.bodyWrap, detailsBody !== null && css.detailsBodyWrap)} data-dsh-part="tool-body">
       {askQuestionBody !== null
         ? <AskQuestionCard card={askQuestionBody} />
         : terminalBody !== null
@@ -278,7 +278,7 @@ export const ToolRow = memo(function ToolRow({
                      These come from the image card model, never from the row's
                      flattened output, which JSON.stringifies the image block. They
                      stay visible when the attachment slot renders nothing. */
-                  <div className={css.imageBody}>
+                  <div className={css.imageBody} data-dsh-part="tool-image">
                     {renderSlot !== undefined && loadImage !== undefined && renderSlot('tool.call.images', {
                       images: imageBody.images,
                       loadImage,
@@ -326,13 +326,13 @@ export const ToolRow = memo(function ToolRow({
                       : (
                         <>
                           {variant === 'code' && bodyText !== null && (
-                            <div className={css.bodyScroll}>
+                            <div className={css.bodyScroll} data-dsh-part="tool-code-scroll">
                               <CodeBlock code={bodyText} lang="typescript" copyLabel={t('copy')} copiedLabel={t('copied')}
                                 toolbarLabels={codeToolbarLabels(t)} className={css.codeBody} />
                             </div>
                           )}
                           {(cardBody !== null || outputText !== null) && (
-                            <div className={css.ioCard}>
+                            <div className={css.ioCard} data-dsh-surface="tool-io">
                               {cardBody !== null && (
                                 <div className={css.ioSection}>
                                   <span className={css.ioLabel}>{t('row.input')}</span>
@@ -373,6 +373,7 @@ export const ToolRow = memo(function ToolRow({
   return (
     <div
       className={css.root}
+      data-dsh-surface="tool-call"
       data-variant={variant}
       data-tool={toolName}
       data-state={state}

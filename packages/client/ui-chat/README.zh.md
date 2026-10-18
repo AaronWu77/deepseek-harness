@@ -172,6 +172,11 @@ Chat 会在历史前插与 renderer 重新挂载时恢复语义锚点，并且�
 
 -----
 
+<a id="skin-integration"></a>
+## 皮肤集成
+
+可选皮肤通过 `data-dsh-surface="user-bubble"` 设置用户气泡外观。StateDot 运行指示与计时仍是定制 Host 的内部组件，不是皮肤注册。
+
 <a id="model-experience"></a>
 ## 模型体验
 

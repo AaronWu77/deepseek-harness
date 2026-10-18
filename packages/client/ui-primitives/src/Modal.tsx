@@ -62,6 +62,7 @@ export function Modal({
         tabIndex={-1}
         data-shortcut-modal={shortcutModal}
         className={clsx(css.dialog, className)}
+        data-dsh-surface="modal"
         role="dialog"
         aria-modal="true"
         aria-label={title}

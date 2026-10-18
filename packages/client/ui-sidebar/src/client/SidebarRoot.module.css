@@ -8,19 +8,12 @@
 
 .root {
   --dsh-sidebar-inline-padding: 12px;
-  /* Positioned so the column's glass layer paints under this content, and with
-     z-index left at auto so no stacking context forms: the settings dialog
-     mounted in the footer is position: fixed and must reach the shell's
-     stacking context, or the conversation column paints over it. */
-  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   padding: 6px var(--dsh-sidebar-inline-padding);
   box-sizing: border-box;
-  /* 侧栏的玻璃面由 AppFrame 的列拥有（那里也画发丝分隔线）；这里再刷一层不透明
-     填充会把它整个盖住，backdrop-filter 就取不到身后的极光。 */
-  background: transparent;
+  background: var(--dsw-specific-sidebar-fill);
   color: var(--dsw-alias-label-primary);
   font-size: 14px;
   /* The sidebar is elevated above the conversation surface, so a revealed

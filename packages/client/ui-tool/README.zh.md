@@ -116,6 +116,11 @@ terminal model 使用浏览器安全入口 `@deepseek-ai/dsh-spill-policy/notice
 
 -----
 
+<a id="skin-integration"></a>
+## 皮肤集成
+
+可选皮肤使用 `data-dsh-surface="tool-call"`/`"tool-io"` 及 `data-dsh-part="tool-body"`/`"tool-image"`/`"tool-code-scroll"`。`data-expanded` 继续投影真实展开状态；工具执行与展开交互不变。
+
 <a id="model-experience"></a>
 ## 模型体验
 

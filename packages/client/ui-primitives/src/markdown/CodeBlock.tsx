@@ -192,7 +192,7 @@ export function CodeBlock({
         '--dsl-code-block-line-number-width': `${Math.max(2, String(sourceLines.length).length)}ch`,
       } as CSSProperties}>
       {/* These paired attributes are stable semantic hooks for owner styling and DOM tests. */}
-      {showHeader && <div className={css.bannerWrap}>
+      {showHeader && <div className={css.bannerWrap} data-dsh-part="code-banner-wrap">
         {toolbarLabels !== undefined ? <CodeToolbar
           lang={lang} labels={toolbarLabels} copyLabel={copyLabel} copiedLabel={copiedLabel}
           copied={copied} wrapped={wrapped} onCopy={onCopy}

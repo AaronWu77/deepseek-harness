@@ -754,15 +754,12 @@
   /* The body inside is unpadded and reaches the edges, so the frame clips it
      to its own corners. */
   overflow: hidden;
-  background: var(--dsw-glass-fill-raised);
-  -webkit-backdrop-filter: var(--dsw-glass-blur-strong);
-  backdrop-filter: var(--dsw-glass-blur-strong);
-  border-radius: var(--dsw-radius-xl);
-  /* The menu's shadow with the glass hairline: the panel reads as the same kind
-     of raised surface as the other floating layers, and the shadow's hairline
-     outlines it, so the frame draws no border of its own. */
-  --dsw-elevation-stroke-color: var(--dsw-glass-stroke);
-
+  background: var(--dsw-alias-bg-layer-2);
+  border-radius: var(--dsw-radius-panel);
+  /* The menu's shadow with the stroke rebound one step lighter than the
+     default (l2): the panel reads as the same kind of raised surface, and the
+     shadow's hairline outlines it, so the frame draws no border of its own. */
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l2);
   box-shadow: var(--dsw-elevation-prominent);
   pointer-events: auto;
 }

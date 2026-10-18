@@ -37,3 +37,7 @@ The [DSH unified corner-radius standard](ui-radius.md) defines the radius scale,
 ## Changing the system
 
 Add or change a shared token in the owning `ui-theme` sheet, then consume its semantic alias from feature packages. Update the owning package reference when a public styling contract changes. Visual behavior follows the [testing policy](testing.md); the [archived styling-system Agent Note](../.agents/notes/archived/process/2026-07-19-web-styling-system.md) records framework rationale.
+
+## Optional skins
+
+An optional skin may override tokens and semantic `data-dsh-surface`/`data-dsh-part` attributes only while its document marker is present. The skin owns and removes its stylesheet through a Cordis effect; it must not mutate feature DOM, depend on CSS-module hashes, or override native drag, overlay safety, and scrollbar contracts. Component READMEs name the supported hooks.

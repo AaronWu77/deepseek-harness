@@ -86,6 +86,11 @@ dsh Web 客户端的侧边栏让用户识别当前构建、启动新会话、将
 
 -----
 
+<a id="skin-integration"></a>
+## 皮肤集成
+
+个人品牌占据 `sidebar.brand.mark` 与 `sidebar.brand.name`；默认仍显示上游鱼标与本地构建信息。`data-dsh-surface="sidebar"` 和 `data-dsh-part="sidebar-footer"` 提供外观钩子；底部贡献的纵向排列仍属于功能布局。
+
 <a id="model-experience"></a>
 ## 模型体验
 

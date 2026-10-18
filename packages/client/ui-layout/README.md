@@ -38,7 +38,7 @@ The single root-scoped `shell.bottom` slot spans the full width below the three 
 
 On macOS desktop (`html[data-platform='darwin']`, set only by the desktop preload) a collapsed sidebar hides its column entirely instead of keeping the rail, and the frame mounts the single root-scoped `shell.leading` seat at its top-left — beside the hiddenInset traffic lights, over every main panel; ui-sidebar occupies it with the reopen and New Session controls. While the seat is mounted the frame publishes `--dsh-frame-leading-clearance`, the inline band the window chrome occupies measured from the frame's left edge; a main panel whose content reaches the top-left corner pads by it so nothing lands under the lights or the controls. The frame also always publishes `--dsh-frame-top-clearance` (48px) on the root element, the constant step below the window's top strip; entry pages in the main panel (plugin manager and similar, not the conversation) pad their top by it. The frame makes the exposed strip above the inset window draggable. Chrome rows below it mark themselves `data-window-drag`; ui-web base.css makes each row's blank runs draggable while its controls stay clickable.
 
-Windows Electron's `data-windows-titlebar` marker reserves the caption height above all columns and removes the collapsed sidebar rail. The inset window uses `--dsw-glass-frame-radius` on all corners. The frame publishes `--dsh-windows-content-radius` (16px) and `--dsh-windows-sidebar-width` for ui-sidebar-right's fullscreen top-left corner and sidebar clearance. Ordinary Web documents do not receive the marker; macOS retains its separate layout.
+Windows Electron's `data-windows-titlebar` marker reserves the caption height above all columns and removes the collapsed sidebar rail. The structural window is square by default; an optional skin owns its decorative corner radius. The frame publishes `--dsh-windows-content-radius` (16px) and `--dsh-windows-sidebar-width` for ui-sidebar-right's fullscreen top-left corner and sidebar clearance. Ordinary Web documents do not receive the marker; macOS retains its separate layout.
 
 The root publishes `--dsh-frame-top-clearance` for the reserved strip (48px on macOS, the caption height on Windows), and `--dsh-frame-overlay-top` adds 20px for dialogs and menus. Native fullscreen reduces the overlay inset to 20px; dialogs retain their own 24px minimum. `--dsh-frame-chrome-top` excludes the Windows caption from modal mask painting and becomes zero in fullscreen. The full-viewport modal layer still blocks background clicks. Plain browser documents publish none of these values.
 
@@ -74,6 +74,10 @@ Read these pages when the layout surface is not enough. They move from the frame
 - [Web client architecture](../../../docs/subsystems/web-client.md) — how browser plugin rows load and register slots.
 
 -----
+
+## Skin integration
+
+The frame retains neutral structural wrappers and overlay-safe stacking. Optional skins can style `data-dsh-surface="frame"`, `data-shell-window`, and `data-dsh-part="ambient"`/`"sidebar-glass"`/`"sidebar-column"`; native drag geometry and grid measurement stay Host-owned. Without a skin, the ambient and glass decorations are hidden and frame gaps resolve to zero.
 
 <a id="model-experience"></a>
 ## Model Experience

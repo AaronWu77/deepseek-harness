@@ -87,7 +87,6 @@ The `--dsw-alias-turn-trigger-*` tokens provide separate resting and hover backg
 
 `onboarding.css` owns the onboarding accent, named violet/blue/cyan gradients, and light/dark card, checkbox, and secondary-action colors. The feature owns card shadow offsets and blur sizes.
 
-`design-platform.css` owns the glass surface suite and the ambient canvas. `--dsw-glass-fill`/`--dsw-glass-fill-raised`/`--dsw-glass-fill-thick`/`--dsw-glass-fill-sunken` are the translucent fills a surface picks by elevation — the thick tier backs large content panels, where the fill has to carry readability the shell tiers delegate to the canvas, `--dsw-glass-stroke` and `--dsw-glass-highlight` are its hairline and specular edge, `--dsw-glass-blur`/`--dsw-glass-blur-strong`/`--dsw-glass-blur-thin` are the three `backdrop-filter` tiers, and `--dsw-glass-scrim` is the translucent sheet the conversation column paints so body text keeps its contrast over the ambient colour. `--dsw-aurora-1` through `--dsw-aurora-5` are five drifting colour fields and `--dsw-aurora-drift` is their period; the shell paints them and the glass surfaces blur them, which is what makes `backdrop-filter` visible at all. `--dsw-glass-canvas` is the static fallback for a host that renders no aurora layer. `base.css` declares `--dsw-motion-spring`, the easing curve used by composer controls.
 
 ### Scrollbar rebinding
 
@@ -113,6 +112,10 @@ These pages cover the layout presenter, the token consumers, and the styling rul
 - [Authenticated-browser Host preferences](../../../.agents/notes/implemented/bug-fix/2026-09-15-authenticated-browser-host-preferences.md) — the persistence policy decision.
 
 -----
+
+## Skin integration
+
+The default token sheets do not contain the personal Aurora/glass/ink palette. An optional skin owns its gated token overrides and removes them on disposal; shared scrollbar rendering, native menu backing, and theme preferences remain here.
 
 <a id="model-experience"></a>
 ## Model Experience
