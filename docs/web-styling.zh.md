@@ -42,3 +42,5 @@
 ## 可选皮肤
 
 可选皮肤仅在自身文档标记存在时覆盖 token 和语义 `data-dsh-surface`/`data-dsh-part` 属性。皮肤通过 Cordis effect 持有并清理样式表，不得修改功能 DOM、依赖 CSS Modules hash 或覆盖原生拖拽、浮层安全与滚动条规则。组件 README 列出支持的钩子。
+
+皮肤通过所属组件声明的 slot 替换装饰图案，不替换 DOM，也不另建活动状态控制器。[Chat 皮肤集成](../packages/client/ui-chat/README.zh.md#skin-integration)定义运行图案 slot 与回退；[fork 归属地图](fork-deviations.zh.md#ownership-map)区分个人外观和 Host 正确性修复。

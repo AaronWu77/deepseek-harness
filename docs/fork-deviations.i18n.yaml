@@ -3,14 +3,29 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/fork-deviations.md
 /:
-  en: 6f2e1cb34f163ca7
-  zh: 001650be7b7302ac
+  en: bbcb74e44d3bb1dc
+  zh: 17bd143e0c0151f3
 /fork-deviations:
-  en: cf8abe8fcba16999
-  zh: e89e579552d5408d
+  en: 8cf1e4cff34b16c0
+  zh: 88b17c6067ca081e
+/fork-deviations/summary:
+  en: 3e016433e93c4f13
+  zh: f2a9446cb0eb45a8
+/fork-deviations/table-of-contents:
+  en: a2327ddee3f5c828
+  zh: 6076ba901f4eb420
+/fork-deviations/ownership-map:
+  en: c32662175a7d45b8
+  zh: 4c4214f98b724565
+/fork-deviations/review-gated-presets:
+  en: a875e9dbb810c57c
+  zh: b618e7d211823924
 /fork-deviations/local-one-shot-activation:
   en: 9c7a0d93f880c1c2
-  zh: 34232b17014dd389
+  zh: 1af529d56ffa2023
 /fork-deviations/preservation-registry:
-  en: c6c98b593f4f5271
-  zh: c3c97b1fc5a2e79d
+  en: a7386f0c6cf92663
+  zh: bba1810945daa3a1
+/fork-deviations/upstream-behavior-not-counted-as-customization:
+  en: ab6a26fa9b34d9f9
+  zh: da5e4bd6068fb682
