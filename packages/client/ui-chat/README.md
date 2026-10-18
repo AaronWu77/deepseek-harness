@@ -111,7 +111,7 @@ The process group uses a stable `div` layout box, a scroll body, and an uncapped
 
 Running group titles, reasoning previews, tool and command rows, the active retry line, and the bottom running status use the shared [TextShimmer](../ui-primitives/README.md#component-catalog). Each row’s text shares one left-to-right highlight, including collapsed group titles; icons and hover chevrons retain their base appearance. Tool and process rows sit 6px apart. An expanded group title has 8px before its content, Assistant responses have 12px from adjacent process rows, and completed-Turn duration/status controls have 16px around them. Hidden and empty rows, including retained empty slot anchors, add no gap. The running “Deep diving” text retains its blue base while its theme-specific highlight sweeps across it.
 
-The running status uses the shared vector StateDot loader with the running text color. Its CSS respects reduced motion and theme colors; the indicator adds no image asset or JavaScript animation clock.
+The running status retains the upstream whale glyph by default, with a static SVG fallback for reduced motion, forced colors, and browsers without mask support. Its image animation adds no JavaScript clock. The glyph is independently replaceable through the [running-icon Slot](#skin-integration).
 
 Scroll-edge fades initialize when `ResizeObserver` reports the open group's layout; opening the group performs no immediate scroll-dimension read in a layout effect.
 
@@ -174,7 +174,7 @@ Active-Turn highlighting is approximate: `readVisibleTurn` binary-searches the f
 
 ## Skin integration
 
-Optional skins target `data-dsh-surface="user-bubble"` for user-message appearance. The StateDot running indicator and elapsed clock remain this customized Host’s internal components, not skin registrations.
+Optional skins target `data-dsh-surface="user-bubble"` for user-message appearance. The Session-scoped single Slot `conversation.chat.flow.running.icon` receives only the layout `className`. Chat registers the official whale at priority 100; a lower-priority contribution replaces only that decorative glyph. Optional `dsh-skin` supplies the shared StateDot loader. Removing the contribution restores the whale without resetting the elapsed clock or remounting the status row. The clock, localized text, running state, and accessible announcement remain Chat-owned.
 
 <a id="model-experience"></a>
 ## Model Experience

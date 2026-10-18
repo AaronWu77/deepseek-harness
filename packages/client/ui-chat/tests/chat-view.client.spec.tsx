@@ -38,6 +38,7 @@ import { derivePresentationPolicy, type CollapseTiming } from '../src/client/pre
 import { CHAT_FLOW_INJECT, CHAT_NODE_INJECT } from '../src/client/apply.ts'
 import { ChatView } from '../src/client/chat/ChatView.tsx'
 import { ChatFlow } from '../src/client/chat/ChatFlow.tsx'
+import { RunningWhaleTail } from '../src/client/chat/RunningWhaleTail.tsx'
 import { en, zh } from '../src/client/locale.ts'
 import { AssistantNodeView } from '../src/client/chat/AssistantNodeView.tsx'
 import { CommandNodeView, ManualCompactionNodeView } from '../src/client/chat/CommandNodeView.tsx'
@@ -444,6 +445,7 @@ function makeHarness(
     if (key === 'conversation.chat.node') {
       return renderNodeSlot(key, owner as RoutedChatNodeOwner, opts as Parameters<NodeRenderer>[2])
     }
+    if (key === 'conversation.chat.flow.running.icon') return <RunningWhaleTail />
     throw new Error(`Undeclared flow child: ${key}`)
   }
   const renderFactorySlot: PropsRenderFactories['renderFactorySlot'] = (name, owner) => {
@@ -4395,9 +4397,9 @@ describe('ChatView', () => {
     expect(column.lastElementChild).toBe(status)
     expect(within(status as HTMLElement).getByRole('status').textContent).toBe('深度求索中')
     expect(status?.lastElementChild?.textContent).toBe('深度求索中')
-    const icon = status?.querySelector('svg[data-state="ongoing"]')
+    const icon = status?.lastElementChild?.querySelector('span[aria-hidden="true"]')
     expect(icon?.getAttribute('aria-hidden')).toBe('true')
-    expect(icon?.querySelectorAll('circle')).toHaveLength(2)
+    expect(icon?.querySelectorAll('svg path')).toHaveLength(1)
     expect(status?.querySelector('img')).toBeNull()
     expect(icon?.getAttribute('style')).toBeNull()
     expect(status?.querySelector('animate')).toBeNull()

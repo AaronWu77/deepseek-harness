@@ -35,7 +35,7 @@ description: "记录本地 Host 源码偏离及退役条件。"
 | F-015 | [右侧全屏面板固定于视口](../packages/client/ui-sidebar-right/src/client/shell/SidebarRight.module.css) | [检查](../apps/web/tests/sidebar-right.e2e.ts) | 保留浏览器检查；原生桌面待验证 |
 | F-016 | [macOS Aurora 顶部露出条可拖动](../packages/client/ui-layout/src/client/AppFrame.module.css) | [检查](../apps/web/tests/window-drag-coverage.e2e.ts) | 结构检查通过；原生桌面待验证 |
 | F-017 | 可选 `dsh-skin` 占据[侧栏品牌插槽](../packages/client/ui-sidebar/README.zh.md#skin-integration) | 品牌与清理测试由插件持有 | 个人图案不再是 Host 默认回退 |
-| F-018 | [StateDot 运行指示器与经过时间](../packages/client/ui-chat/src/client/chat/RunningStatus.tsx) | [检查](../packages/client/ui-chat/tests/running-status.client.spec.tsx) | 组件检查通过 |
+| F-018 | 可选 `dsh-skin` 将[运行图案](../packages/client/ui-chat/README.zh.md#skin-integration)替换为 StateDot | [计时检查](../packages/client/ui-chat/tests/running-status.client.spec.tsx)；图案生命周期由插件检查 | Host 保留上游鲸尾回退和耗时时钟 |
 | F-019 | [SDK、schema 与执行使用同一个局部 PTC 提供方](../packages/core/tools/src/index.ts) | [检查](../packages/core/agent-tool-presentation/tests/loader-composition.spec.ts) | 真实 YAML Loader 检查通过；profile 回放需要构建 Typert 产物 |
 | F-020 | [非 roster 中的提供方子 agent 不属于 Team](../packages/experimental/agent-team/src/roster.ts) | [检查](../packages/experimental/agent-team/tests/non-team-subagent-membership.spec.ts) | 真实 YAML Loader 与本地一次性调用检查通过；旧同版本格式录制尚未解决 |
 | F-021 | [明确首次录制输入与 scripted 模型类别](../packages/test-support/session-snapshot/src/session-files.ts) | [检查](../packages/test-support/session-snapshot/tests/record-inventory.spec.ts) | 辅助函数与 manifest 检查通过；完整 profile 回放待验证 |

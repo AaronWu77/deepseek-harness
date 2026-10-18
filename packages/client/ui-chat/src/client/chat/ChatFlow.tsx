@@ -57,5 +57,5 @@ export const ChatFlow = memo(function ChatFlow({
     const index = pendingInputs.findIndex(item => 'requestId' in item && item.placement === 'transcript')
     if (index !== -1) rows.splice(rows.length - 1, 0, ...pendingRows.splice(index, 1))
   }
-  return [...rows, ...pendingRows, ...running ? [<RunningStatus key="running" startTime={runningStartTime} t={t} />] : []]
+  return [...rows, ...pendingRows, ...running ? [<RunningStatus key="running" startTime={runningStartTime} t={t} renderSlot={renderSlot} />] : []]
 })

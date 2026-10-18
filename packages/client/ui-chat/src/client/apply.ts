@@ -30,6 +30,7 @@ import { EMPTY_CHAT_SNAPSHOT } from './contract/snapshot.ts'
 import { ApprovalCommand } from './chat/ApprovalCommand.tsx'
 import { ChatView } from './chat/ChatView.tsx'
 import { ChatFlow } from './chat/ChatFlow.tsx'
+import { RunningWhaleTail } from './chat/RunningWhaleTail.tsx'
 import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
 import { UserContent } from './chat/UserContent.tsx'
 import { ActivityPill, UsagePill } from './chat/StatsPills.tsx'
@@ -216,6 +217,7 @@ export function apply(ctx: Context): void {
     name: 'conversation.chat.flow', locale: NS, store: chatStore,
     children: {
       'conversation.chat.node': { kind: 'keyed', scope: 'session', inject: CHAT_NODE_INJECT },
+      'conversation.chat.flow.running.icon': { kind: 'single', scope: 'session' },
     },
     inject: (sessionId: SessionId): ChatFlowDataInjected => {
       const binding = ctx.sessions.binding(sessionId)
@@ -223,6 +225,10 @@ export function apply(ctx: Context): void {
       return nodeSources(binding)
     },
   }, ChatFlow))
+
+  ctx.slots.inject('conversation.chat.flow.running.icon', () => ctx.slots.register({
+    name: 'conversation.chat.flow.running.icon', priority: 100,
+  }, RunningWhaleTail))
 
   ctx.slots.inject('conversation.view', () => {
     const disposeView = ctx.slots.register({

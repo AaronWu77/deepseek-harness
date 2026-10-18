@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { RunningStatus } from '../src/client/chat/RunningStatus.tsx'
+import { RunningWhaleTail } from '../src/client/chat/RunningWhaleTail.tsx'
+import type { ChatFlowSlotProps } from '../src/client/contract/slots.ts'
 import { zh } from '../src/client/locale.ts'
 
 const t = makeTranslate(zh, commonZh)
@@ -12,24 +14,59 @@ const t = makeTranslate(zh, commonZh)
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(5_000) })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+const defaultIcon: ChatFlowSlotProps['renderSlot'] = (name: string) => {
+  if (name !== 'conversation.chat.flow.running.icon') throw new Error(`Unexpected status slot: ${name}`)
+  return <RunningWhaleTail />
+}
+
 function statusHarness(startTime?: number) {
-  const view = render(<RunningStatus startTime={startTime} t={t} />)
+  let renderSlot = defaultIcon
+  const view = render(<RunningStatus startTime={startTime} t={t} renderSlot={renderSlot} />)
   return {
     ...view,
     content: () => view.container.querySelector('[data-chat-running] > :last-child'),
-    set: (nextStartTime?: number) => { view.rerender(<RunningStatus startTime={nextStartTime} t={t} />) },
+    set: (nextStartTime?: number) => {
+      startTime = nextStartTime
+      view.rerender(<RunningStatus startTime={startTime} t={t} renderSlot={renderSlot} />)
+    },
+    setIcon: (next: ChatFlowSlotProps['renderSlot']) => {
+      renderSlot = next
+      view.rerender(<RunningStatus startTime={startTime} t={t} renderSlot={renderSlot} />)
+    },
   }
 }
 
 describe('RunningStatus', () => {
-  it('uses the shared decorative loader without image masks or an extra animation clock', () => {
+  it('renders the decorative default whale through its icon slot without an extra clock', () => {
     const view = statusHarness()
-    const icon = view.content()?.querySelector('[data-state="ongoing"]')
-    expect(icon?.tagName).toBe('svg')
+    const icon = view.content()?.querySelector('span[aria-hidden="true"]')
+    expect(icon?.tagName).toBe('SPAN')
     expect(icon?.getAttribute('aria-hidden')).toBe('true')
-    expect(icon?.querySelectorAll('circle')).toHaveLength(2)
+    expect(icon?.querySelectorAll('svg path')).toHaveLength(1)
     expect(view.container.querySelector('img, animate, [style]')).toBeNull()
     expect(view.getByRole('status').textContent).toBe('深度求索中')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps the clock and accessible status when the icon contribution changes', () => {
+    const view = statusHarness(1_000)
+    const status = view.getByRole('status')
+    const content = view.content()
+    act(() => { vi.advanceTimersByTime(2_000) })
+    const elapsed = content?.textContent
+    view.setIcon(() => <svg data-custom-running-icon aria-hidden="true" />)
+    expect(view.content()).toBe(content)
+    expect(view.getByRole('status')).toBe(status)
+    expect(content?.textContent).toBe(elapsed)
+    expect(content?.querySelectorAll('[data-custom-running-icon]')).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(1)
+    act(() => { vi.advanceTimersByTime(2_000) })
+    expect(content?.textContent).not.toBe(elapsed)
+    view.setIcon(defaultIcon)
+    expect(content?.querySelector('[data-custom-running-icon]')).toBeNull()
+    expect(content?.querySelectorAll('svg path')).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(1)
+    view.unmount()
     expect(vi.getTimerCount()).toBe(0)
   })
 

@@ -111,7 +111,7 @@ Chat Builder 按节点发布 `bottomSource`：节点可见且属于已加载的�
 
 运行中的分组标题、思考预览、工具与命令行、当前重试行以及底部运行状态使用共享的 [TextShimmer](../ui-primitives/README.zh.md#component-catalog)。每行的文字共用一道从左到右的高光，包括折叠的分组标题；图标和悬停箭头保留底色。工具和过程行之间相隔 6px；展开的分组标题与内容之间相隔 8px；Assistant 回复与相邻过程行之间相隔 12px；每轮完成／耗时控件周围保留 16px。隐藏行与空行（包括保留的空 slot 锚点）不产生间距。“深度求索”运行文字保留蓝色底色，并使用主题专用高光扫过文字。
 
-运行状态使用共享的 StateDot 矢量加载图标，并继承运行文字颜色。其 CSS 遵循减少动态效果偏好和主题颜色；该图标不增加图片资源或 JavaScript 动画计时器。
+运行状态默认保留上游鲸尾图案，在减少动态效果、强制颜色或浏览器不支持 mask 时使用静态 SVG 回退。图片动画不增加 JavaScript 时钟。图案可通过[运行图案插槽](#skin-integration)独立替换。
 
 滚动边缘渐隐在 `ResizeObserver` 报告已展开组的布局后初始化；展开组时不会在 layout effect 中立即读取滚动尺寸。
 
@@ -175,7 +175,7 @@ Chat 会在历史前插与 renderer 重新挂载时恢复语义锚点，并且�
 <a id="skin-integration"></a>
 ## 皮肤集成
 
-可选皮肤通过 `data-dsh-surface="user-bubble"` 设置用户气泡外观。StateDot 运行指示与计时仍是定制 Host 的内部组件，不是皮肤注册。
+可选皮肤通过 `data-dsh-surface="user-bubble"` 设置用户气泡外观。Session 作用域的 single Slot `conversation.chat.flow.running.icon` 只接收布局 `className`。Chat 以优先级 100 注册官方鲸尾，优先级数值更低的贡献只替换这个装饰图案。可选 `dsh-skin` 提供共享 StateDot 加载图标。移除贡献会恢复鲸尾，不重置耗时时钟或重新挂载状态行。计时、本地化文字、运行状态及无障碍播报仍由 Chat 拥有。
 
 <a id="model-experience"></a>
 ## 模型体验
