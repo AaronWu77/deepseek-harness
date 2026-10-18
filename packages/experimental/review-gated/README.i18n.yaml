@@ -1,0 +1,52 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/experimental/review-gated/README.md
+/:
+  en: 1d8920f264d8a9aa
+  zh: 0c2c61a86c682c60
+/deepseek-ai-dsh-experimental-review-gated:
+  en: 2aa647fc733eb899
+  zh: ec9bf6c9ef26e298
+/deepseek-ai-dsh-experimental-review-gated/summary:
+  en: 0f5b7c03938b9571
+  zh: 98f4f52a1660f4e5
+/deepseek-ai-dsh-experimental-review-gated/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 09388d293f9be9cb
+/deepseek-ai-dsh-experimental-review-gated/use-this-package:
+  en: bbff250eba0f1b89
+  zh: 0a618f05cc88ee2b
+/deepseek-ai-dsh-experimental-review-gated/use-this-package/select-the-presets:
+  en: e6ec9dca7d7ad5bc
+  zh: f5cf2b7f5eae6e01
+/deepseek-ai-dsh-experimental-review-gated/use-this-package/what-you-get:
+  en: 50cac3d0d162eb50
+  zh: fd39591701a1bcee
+/deepseek-ai-dsh-experimental-review-gated/understand-the-implementation:
+  en: 6faeaf66da4e54b7
+  zh: 520692c9aa887f3e
+/deepseek-ai-dsh-experimental-review-gated/further-exploration:
+  en: e1ae590c8bd71c45
+  zh: c9f6feede476892e
+/deepseek-ai-dsh-experimental-review-gated/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-experimental-review-gated/model-experience/coordinator-guidance:
+  en: 5ae8d6e563c40b14
+  zh: 86c738820722754d
+/deepseek-ai-dsh-experimental-review-gated/model-experience/coordinator-guidance/what-the-model-sees:
+  en: f31fa624bec4f790
+  zh: 1e5f55c0bec9efd0
+/deepseek-ai-dsh-experimental-review-gated/model-experience/coordinator-guidance/token-effect:
+  en: ebef9a8f51e68565
+  zh: 815b025515990ed2
+/deepseek-ai-dsh-experimental-review-gated/model-experience/coordinator-guidance/kv-cache-effect:
+  en: df39f157349888dd
+  zh: 7a5bc112d2cd9c79
+/deepseek-ai-dsh-experimental-review-gated/known-limitations-and-deferred-work:
+  en: ad441548a465e7e5
+  zh: 3ad45b1ace2f2da4
+/deepseek-ai-dsh-experimental-review-gated/known-limitations-and-deferred-work/dev-note:
+  en: a6adf5c89e1ee098
+  zh: d850907015c53900

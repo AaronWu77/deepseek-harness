@@ -1183,6 +1183,23 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-ptc-runtime-python -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-experimental-review-gated -->
+<a id="deepseek-aidsh-experimental-review-gated"></a>
+
+## `@deepseek-ai/dsh-experimental-review-gated`
+
+- `inject`: `systemPrompt`
+- `source`: [`packages/experimental/review-gated/src/index.ts:13`](../packages/experimental/review-gated/src/index.ts)
+
+```ts config-catalog
+/** Advisory review budget; this plugin does not intercept tools or completion. */
+export interface Config {
+  /** Maximum review attempts per user task before reporting unresolved issues and asking how to proceed. */
+  maxReviewRounds: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-review-gated -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-experimental-speech-to-text -->
 <a id="deepseek-aidsh-experimental-speech-to-text"></a>
 

@@ -81,6 +81,9 @@ export class AgentPresetRegistry extends TypertRemoteService {
   async register(definition: PresetDefinition): Promise<() => Promise<void>> {
     const context = this.ctx
     if (!definition.id.trim()) throw new Error('Preset id must not be empty')
+    if (definition.selectable === false && definition.id === this.defaultId) {
+      throw new Error(`Agent preset is not selectable and cannot be the default: ${definition.id}`)
+    }
     if (this.definitions.has(definition.id)) throw new Error(`Duplicate agent preset: ${definition.id}`)
     const record: Definition = { config: definition, context, ready: Promise.resolve() }
     this.definitions.set(definition.id, record)
@@ -171,20 +174,22 @@ export class AgentPresetRegistry extends TypertRemoteService {
     }))
   }
 
-  /** Read every declared preset, including activation failures.
-   * @returns Display metadata and loading diagnostics.
+  /** Read every user-selectable declared preset, including activation failures.
+   * @returns Display metadata and loading diagnostics; non-selectable role presets are omitted.
    */
   async list(): Promise<AgentPreset[]> {
-    const rows = await Promise.all([...this.definitions.values()].map(async (record) => {
-      const broken = await this.diagnostic(record)
-      return {
-        id: record.config.id,
-        ...(record.config.name === undefined ? {} : { name: record.config.name }),
-        ...(record.config.description === undefined ? {} : { description: record.config.description }),
-        ...(record.config.order === undefined ? {} : { order: record.config.order }),
-        ...(broken === undefined ? {} : { broken }),
-      }
-    }))
+    const rows = await Promise.all([...this.definitions.values()]
+      .filter(record => record.config.selectable !== false)
+      .map(async (record) => {
+        const broken = await this.diagnostic(record)
+        return {
+          id: record.config.id,
+          ...(record.config.name === undefined ? {} : { name: record.config.name }),
+          ...(record.config.description === undefined ? {} : { description: record.config.description }),
+          ...(record.config.order === undefined ? {} : { order: record.config.order }),
+          ...(broken === undefined ? {} : { broken }),
+        }
+      }))
     return rows.sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || a.id.localeCompare(b.id))
   }
 
@@ -332,6 +337,9 @@ export class AgentPresetRegistry extends TypertRemoteService {
    * @returns The bound identity.
    */
   async recompose(ctx: Context, id: string): Promise<AgentPreset> {
+    if (this.definitions.get(id)?.config.selectable === false) {
+      throw new RemoteError('agent-preset/invalid', `Agent preset is not selectable: ${id}`, { agentPreset: id, reason: 'selectable: false' })
+    }
     const preset = await this.mount(ctx, id)
     try { this.owner.emit('tools/change') }
     catch (error) { this.owner.logger.warn(`Preset tools observer: ${String(error)}`) }

@@ -44,6 +44,7 @@ kind: "package-reference"
 | `name` | 未设置 | 展示名称 |
 | `description` | 未设置 | 展示说明 |
 | `order` | 未设置 | 列表排序 |
+| `selectable` | `true` | 是否出现在用户可见的预设列表；`false` 保留子级绑定，但拒绝会话选择 |
 
 声明行的 `id` 是 Loader 编辑地址；`config.id` 是会话保存的 preset 标识符。子插件可省略行 ID，由 Loader 分配。
 

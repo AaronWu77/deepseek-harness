@@ -80,6 +80,24 @@ describe('declarative preset revisions', () => {
     expect(roster.presets.find(row => row.id === 'standard')?.isDefault).toBe(true)
   })
 
+  it('keeps non-selectable role presets out of the roster while child binding resolves them', async () => {
+    const ctx = await setup()
+    await declare(ctx, contribution('standard'))
+    await declare(ctx, { ...contribution('worker'), selectable: false })
+
+    expect((await ctx.agentPresets.list()).map(row => row.id)).toEqual(['standard'])
+    expect((await ctx.agentPresets.remoteExportList()).presets.map(row => row.id)).toEqual(['standard'])
+    expect(await ctx.agentPresets.resolve('worker')).toEqual({ id: 'worker' })
+
+    const child = createScope(ctx, {})
+    expect(await ctx.agentPresets.mount(child.ctx, 'worker')).toEqual({ id: 'worker' })
+    await child.dispose()
+
+    await expect(ctx.agentPresets.recompose(ctx, 'worker')).rejects.toThrow('not selectable')
+    await expect(ctx.agentPresets.register({ id: 'standard', selectable: false, plugins: [] }))
+      .rejects.toThrow('cannot be the default')
+  })
+
   it('rejects duplicate IDs without disposing the first definition', async () => {
     const ctx = await setup()
     await declare(ctx, contribution('standard'))

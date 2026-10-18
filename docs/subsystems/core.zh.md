@@ -513,8 +513,8 @@ async register(definition: PresetDefinition): Promise<() => Promise<void>>
  */
 inspectCompositions(ctx?: Context): AgentPresetInspection[]
 
-/** Read every declared preset, including activation failures.
- * @returns Display metadata and loading diagnostics.
+/** Read every user-selectable declared preset, including activation failures.
+ * @returns Display metadata and loading diagnostics; non-selectable role presets are omitted.
  */
 async list(): Promise<AgentPreset[]>
 
