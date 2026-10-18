@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it, vi, onTestFinished } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, symbols } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AttachmentStore from '@deepseek-ai/dsh-attachment'
@@ -644,9 +644,8 @@ describe('Web session model selection', () => {
       await expect.poll(() => returned).toBe(true)
       expect(currentSelection(ctx, sessionId)).toMatchObject({ provider: 'deepseek-official', model })
     }
-    await expect.poll(() => saves.length).toBe(1)
+    expect(currentSelection(ctx, sessionId)).toMatchObject({ model: 'deepseek-chat' })
     release.resolve(undefined)
-    await expect.poll(() => saves.length).toBe(2)
   })
 
   it('saves an accepted selection as the default and survives a storage failure', async () => {
@@ -690,48 +689,105 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
-  it('acknowledges a Session model selection before a slow default-profile write', async () => {
-    const { ctx, sessionId } = await harness()
-    let releaseSave: (() => void) | undefined
-    let notifySaveStarted: (() => void) | undefined
-    const saveStarted = new Promise<void>((resolve) => { notifySaveStarted = resolve })
-    const pendingSave = new Promise<void>((resolve) => { releaseSave = resolve })
-    const saved: string[] = []
+  it.each([false, true])('keeps the last selection across real profile reconciliation (first save fails: %s)', async (failFirst) => {
+    const { configurationFixture } = await import('../../../settings/settings/tests/configuration-fixture.ts')
+    const { readProfilePatches, reconcileProfilePatches } = await import('@deepseek-ai/dsh-app-boot')
+    const { ctx, profile, start } = await configurationFixture()
+    const { sessionId } = await harness(undefined, ctx)
     const remote = createSessionTestRemote(ctx, {
-      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
-      saveDefaultModelSelection: async (selection) => {
-        saved.push(selection.model)
-        notifySaveStarted?.()
-        if (selection.model === 'deepseek-reasoner') await pendingSave
-      },
-      cwd: '/tmp',
+      defaultModelSelection: () => ctx.agentDefaultModel.currentSelection(), cwd: profile.cwd,
     })
-    const selecting = remote.selectModel(request({
-      sessionId, provider: 'deepseek-official', model: 'deepseek-reasoner',
-    }))
-    try {
-      await saveStarted
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const timedOut = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { reject(new Error('selection waited for default-profile persistence')) }, 3000)
-      })
-      try {
-        const selected = expectValue(await Promise.race([selecting, timedOut]))
-        expect(selected.selected.model).toBe('deepseek-reasoner')
-      } finally { if (timer !== undefined) clearTimeout(timer) }
-      expect(currentSelection(ctx, sessionId).model).toBe('deepseek-reasoner')
-      const second = expectValue(await remote.selectModel(request({
-        sessionId, provider: 'deepseek-official', model: 'deepseek-chat',
-      })))
-      expect(second.selected.model).toBe('deepseek-chat')
-      expect(saved).toEqual(['deepseek-reasoner'])
-    } finally {
-      releaseSave?.()
-      await selecting
-      await vi.waitFor(() => { expect(saved).toEqual(['deepseek-reasoner', 'deepseek-chat']) })
-      await ctx.fiber.dispose()
+    const provider = ctx.agentDefaultModel
+    const original: unknown = Reflect.get(provider, symbols.original)
+    expect(original !== undefined).toBe(true)
+    const editor = ctx.configEditor
+    const entry = editor.entries().find(row => row.options.id === 'default-model')
+    const other = editor.entries().find(row => row.options.id === 'first')
+    if (entry === undefined || other === undefined) throw new Error('expected profile entries')
+    const fiber = entry.fiber
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const operations: Promise<unknown>[] = []
+    const saves: Promise<void>[] = []
+    const save = provider.saveSelection.bind(provider)
+    const saving = vi.spyOn(provider, 'saveSelection').mockImplementation((next) => {
+      const pending = save(next)
+      saves.push(pending)
+      return pending
+    })
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const edit = editor.edit.bind(editor)
+    let failed = false
+    const editing = vi.spyOn(editor, 'edit').mockImplementation(async (...args) => {
+      if (!failFirst || failed || args[0] !== entry) return edit(...args)
+      failed = true
+      entered.resolve(undefined)
+      await release.promise
+      await edit(entry, () => ({ provider: 'deepseek-official', model: 0 }))
+    })
+    const update = entry.update.bind(entry)
+    let held = false
+    const updating = vi.spyOn(entry, 'update').mockImplementation(async (...args) => {
+      await update(...args)
+      const config: unknown = args[0].config
+      if (failFirst || held || typeof config !== 'object' || config === null
+        || !('model' in config) || config.model !== 'deepseek-reasoner') return
+      held = true
+      entered.resolve(undefined)
+      await release.promise
+    })
+    onTestFinished(async () => {
+      release.resolve(undefined)
+      await Promise.allSettled(operations)
+      await Promise.allSettled(saves)
+      updating.mockRestore()
+      editing.mockRestore()
+      saving.mockRestore()
+      warn.mockRestore()
+    })
+
+    const first = remote.selectModel({ sessionId, provider: 'deepseek-official', model: 'deepseek-reasoner' })
+    operations.push(first)
+    expect(expectValue(await first).selected.model).toBe('deepseek-reasoner')
+    await entered.promise
+    expect(currentSelection(ctx, sessionId).model).toBe('deepseek-reasoner')
+    expect(provider.currentSelection().model).toBe(failFirst ? 'original' : 'deepseek-reasoner')
+    expect(Reflect.get(ctx.agentDefaultModel, symbols.original) === original).toBe(true)
+    expect(entry.fiber === fiber).toBe(true)
+
+    const second = remote.selectModel({ sessionId, provider: 'deepseek-official', model: 'deepseek-chat' })
+    operations.push(second)
+    const selected = expectValue(await second).selected
+    expect(selected.model).toBe('deepseek-chat')
+    expect(currentSelection(ctx, sessionId)).toEqual(selected)
+
+    const reload = ctx.hmr.runExclusive(async () => {
+      await reconcileProfilePatches(ctx, readProfilePatches('test', profile), 'test')
+    })
+    const unrelated = editor.edit(other, current => ({ ...current, ordinary: 'reloaded' }))
+    operations.push(reload, unrelated)
+    release.resolve(undefined)
+    await expect.poll(() => provider.currentSelection()).toEqual(selected)
+    await Promise.all(operations)
+    await Promise.allSettled(saves)
+    await ctx.hmr.runExclusive(async () => {})
+    expect(currentSelection(ctx, sessionId)).toEqual(selected)
+    expect(Reflect.get(ctx.agentDefaultModel, symbols.original) === original).toBe(true)
+    expect(editor.entries().find(row => row.options.id === 'default-model')?.fiber === fiber).toBe(true)
+    if (failFirst) {
+      expect((await Promise.allSettled(saves))[0]?.status).toBe('rejected')
+      expect(warn.mock.calls).toContainEqual([expect.stringContaining(
+        'session-controller: model selection changed for the Session but the default was not saved:',
+      )])
+    } else {
+      expect(warn).not.toHaveBeenCalled()
     }
-  }, 10_000)
+    await ctx.fiber.dispose()
+    const restarted = await start()
+    expect(restarted.agentDefaultModel.currentSelection()).toEqual(selected)
+    expect(restarted.configEditor.entries().find(row => row.options.id === 'first')?.options.config)
+      .toMatchObject({ ordinary: 'reloaded' })
+  })
 
   it('admits saved selections without querying the advisory model catalog', async () => {
     const { ctx, sessionId, agent } = await harness()

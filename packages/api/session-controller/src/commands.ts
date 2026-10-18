@@ -91,10 +91,6 @@ function latestCompletedPrefixBoundary(events: readonly SessionEvent[]): Session
 
 /** Implements Session business commands delegated by the Session Controller Remote service. */
 export class SessionCommandController {
-  // Profile edits can await Loader reconciliation; they must not hold a
-  // Session selection RPC or overtake a later default selection.
-  private defaultSave: Promise<void> = Promise.resolve()
-
   /**
    * @param ctx - Host context carrying Agent, model, attachment, title, and Workspace services.
    * @param agents - sole owner of create, resume, and Session-local model selection.
@@ -178,14 +174,10 @@ export class SessionCommandController {
             : { reasoningEffort: resolved.reasoningEffort }),
         }
         this.agents.selectForNextRequest(agent, selected)
-        this.defaultSave = this.defaultSave.then(async () => {
-          try {
-            await this.ctx.agentDefaultModel.saveSelection(selected)
-          } catch (error) {
-            this.ctx.logger.warn(
-              `session-controller: model selection changed for the Session but the default was not saved: ${String(error)}`,
-            )
-          }
+        void this.ctx.agentDefaultModel.saveSelection(selected).catch((error: unknown) => {
+          this.ctx.logger.warn(
+            `session-controller: model selection changed for the Session but the default was not saved: ${String(error)}`,
+          )
         })
         return { selected: { ...selected } }
       } catch (error) {
