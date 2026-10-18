@@ -1,7 +1,7 @@
 /** Regression tests for bilingual snapshots, corpus scope, and structure. */
 
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { globSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -19,6 +19,7 @@ import {
 import {
   isTranslationPairingManifestExcluded,
   isTranslationScopeFile,
+  TRANSLATION_SCOPE_GLOB_EXCLUDES,
   languageSwitcherTargets,
   pairAnchorOfArgument,
   parseTranslationMarkdown,
@@ -369,6 +370,28 @@ describe('translation pairing records', () => {
 })
 
 describe('translation scope discovery', () => {
+  it('skips external plugin checkouts during glob traversal without hiding Host sources', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-translation-scope-'))
+    try {
+      const files = [
+        'local-plugins/plugins/example/README.md',
+        'packages/example/README.md',
+        'packages/example/local-plugins/README.md',
+        'local-plugins-guide/README.md',
+      ]
+      for (const file of files) {
+        const parts = file.split('/')
+        mkdirSync(join(root, ...parts.slice(0, -1)), { recursive: true })
+        writeFileSync(join(root, ...parts), '# Example\n')
+      }
+      const discovered = globSync('**/*.md', { cwd: root, exclude: TRANSLATION_SCOPE_GLOB_EXCLUDES })
+        .map(file => file.replaceAll('\\', '/')).sort()
+      expect(discovered).toEqual(files.slice(1).sort())
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it.each([
     'README.md',
     'CONTRIBUTING.md',
@@ -382,6 +405,8 @@ describe('translation scope discovery', () => {
     'SAFETY.i18n.yaml',
     'apps/cli/README.md',
     'future/subtree/readme.md',
+    'packages/example/local-plugins/README.md',
+    'local-plugins-guide/README.md',
     'packages/example/README.zh.md',
     'native/example/README.i18n.yaml',
     '.agents/notes/proposed/feature.md',
@@ -401,6 +426,9 @@ describe('translation scope discovery', () => {
     'website/reference.md',
     'packages/example/README.txt',
     'vendor/example/README.md',
+    'local-plugins/plugins/example/README.md',
+    'local-plugins/plugins/example/README.zh.md',
+    'local-plugins/plugins/example/README.i18n.yaml',
     'packages/example/node_modules/dependency/README.md',
     'packages/example/lib/README.md',
     'coverage/report/README.md',
