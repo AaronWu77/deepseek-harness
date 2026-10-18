@@ -1,19 +1,11 @@
 .frame {
-  /* The stage: full-bleed ambient canvas with the floating window inset by
-     --dsw-glass-frame-gap, so the flowing colour frames the glass. */
   position: relative;
   height: 100%;
   box-sizing: border-box;
-  padding: var(--dsw-glass-frame-gap);
+  padding: 0;
   overflow: hidden;
-  background: var(--dsw-glass-canvas);
+  background: var(--dsw-alias-bg-base);
 }
-
-/* The floating window: the real three-column grid. Its translucent gradient
-   needs no backdrop-filter — it sits directly on the soft ambient canvas, where
-   a blur has nothing to sharpen and would only make the window a containing
-   block for position: fixed descendants. The blur belongs to the surfaces that
-   have content behind them (the sidebar layer, the floating layers). */
 .window {
   position: relative;
   z-index: 1;
@@ -21,9 +13,9 @@
   grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   overflow: hidden;
-  border-radius: var(--dsw-glass-frame-radius);
-  background: var(--dsw-glass-window);
-  box-shadow: var(--dsw-elevation-prominent);
+  border-radius: 0;
+  background: var(--dsw-alias-bg-base);
+  box-shadow: none;
 }
 
 /* Only explicit panel toggles animate; viewport resizing updates tracks immediately. */
@@ -36,33 +28,24 @@
 .frame[data-dragging] .window {
   transition: none;
 }
-
-/* The exposed Aurora strip above the inset window also drags the macOS window;
-   the column headers start below it and keep their own drag/no-drag regions. */
 :global([data-platform='darwin']) .frame::before {
   content: '';
   position: absolute;
   inset: 0 0 auto;
-  height: var(--dsw-glass-frame-gap);
+  height: var(--dsw-glass-frame-gap, 0px);
   -webkit-app-region: drag;
 }
-
-/* The Windows caption row sits above every column. The stage reserves its
-   height on top of the frame gap and the drag strip spans that band. The band
-   paints no fill — the ambient canvas shows through it — and the window
-   already owns the content radius, so the inset and the drag region are the
-   only things this sheet owes the platform. */
 :global([data-windows-titlebar]) .frame {
   --dsh-windows-content-radius: 16px;
   box-sizing: border-box;
-  padding-top: calc(var(--dsw-glass-frame-gap) + var(--dsh-windows-titlebar-height));
+  padding-top: calc(var(--dsw-glass-frame-gap, 0px) + var(--dsh-windows-titlebar-height));
 }
 
 :global([data-windows-titlebar]) .frame::before {
   content: '';
   position: absolute;
   inset: 0 0 auto;
-  height: calc(var(--dsw-glass-frame-gap) + var(--dsh-windows-titlebar-height));
+  height: calc(var(--dsw-glass-frame-gap, 0px) + var(--dsh-windows-titlebar-height));
   -webkit-app-region: drag;
 }
 
@@ -76,56 +59,20 @@
   }
 
   .ambient {
-    animation: none;
+    display: none;
   }
 }
-
-/* 极光层：铺在列之下，为玻璃面提供可模糊的内容。五个色团是同一个元素上的五张
-   背景图，而不是五个各自铺满视口的图层——每个整屏图层在合成时都会重新栅格化
-   自己那张大径向渐变，层与层之间会在渐变边缘留下可见的色阶接缝；合并成一层
-   之后扫描线是平滑的（实测：合并前 4/5/6/5/6/2 带跳变，合并后 3/2/1/1/1/0）。
-   动画只写 transform（合成器路径），不做 background-position 动画，那会每帧
-   重绘整块画布。画布藏在 inset -18% 的越界盒里，漂移时不会露边。 */
 .ambient {
-  position: absolute;
-  inset: -18%;
-  z-index: 0;
-  pointer-events: none;
-  background-image:
-    var(--dsw-aurora-1), var(--dsw-aurora-2), var(--dsw-aurora-3),
-    var(--dsw-aurora-4), var(--dsw-aurora-5);
-  animation: aurora-drift var(--dsw-aurora-drift) var(--ds-ease-in-out) infinite;
-}
-
-@keyframes aurora-drift {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1.04); }
-  50% { transform: translate3d(3%, -2%, 0) scale(0.98); }
+  display: none;
 }
 
 .sidebarCol {
   min-width: 0;
   overflow: hidden;
   position: relative;
-  /* Deliberately no z-index: it would create a stacking context, and the
-     settings dialog is a position: fixed overlay mounted inside this column.
-     Confined there, its z-index: 1000 loses to the conversation column's, so
-     the dialog paints under the transcript and takes no pointer events. The
-     column is ordered against the ambient canvas by .window instead. */
 }
-
-/* Keep blur on a leaf layer: backdrop-filter would make the column the containing
-   block for fixed settings overlays. Tree order places this layer below SidebarRoot
-   without a column stacking context. Prefix-first keeps the standard declaration
-   when the bundle minifier collapses the pair. */
 .sidebarGlass {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: var(--dsw-glass-fill);
-  -webkit-backdrop-filter: var(--dsw-glass-blur);
-  backdrop-filter: var(--dsw-glass-blur);
-  border-right: 0.5px solid var(--dsw-glass-stroke);
+  display: none;
 }
 
 .centerCol {
@@ -137,8 +84,6 @@
   flex-direction: column;
   overflow: hidden;
 }
-
-/* Portalled dialogs keep macOS clearance even though Aurora supplies the window material. */
 :global(html[data-platform='darwin']) {
   --dsh-frame-top-clearance: 48px;
 }

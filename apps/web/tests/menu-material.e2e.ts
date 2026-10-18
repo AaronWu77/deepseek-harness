@@ -86,7 +86,7 @@ it('shares menu transparency and blur across palettes and follows native menu bo
         const style = getComputedStyle(node)
         return { fill: style.backgroundColor, blur: style.backdropFilter }
       })
-      expect(mask).toEqual({ fill: dark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.24)', blur: 'blur(2px)' })
+      expect(mask).toEqual({ fill: dark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.24)', blur: 'none' })
       masks[`${platform}-${dark ? 'dark' : 'light'}`] = mask
       await page.keyboard.press('Escape')
       await settings.waitFor({ state: 'hidden' })

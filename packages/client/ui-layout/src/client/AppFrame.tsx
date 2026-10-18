@@ -40,7 +40,7 @@ export type AppFrameProps =
  * technology, and its drift stops under prefers-reduced-motion.
  */
 function AmbientCanvas() {
-  return <div className={css.ambient} aria-hidden="true" />
+  return <div className={css.ambient} data-dsh-part="ambient" aria-hidden="true" />
 }
 
 /** Center column grid item (session-body building block). */
@@ -270,6 +270,7 @@ export function AppFrame({
   return (
     <div
       className={css.frame}
+      data-dsh-surface="frame"
       style={{
         /* The frame publishes the Windows sidebar inset for ui-sidebar-right's
            fullscreen panel; the column tracks themselves live on .window. */
@@ -298,8 +299,8 @@ export function AppFrame({
           useSessions={useSessions}
           usePanelInfo={usePanelInfo}
         />
-        <div className={css.sidebarCol}>
-          <div className={css.sidebarGlass} aria-hidden="true" />
+        <div className={css.sidebarCol} data-dsh-part="sidebar-column">
+          <div className={css.sidebarGlass} data-dsh-part="sidebar-glass" aria-hidden="true" />
           {sidebar}
         </div>
         <>

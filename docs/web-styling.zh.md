@@ -37,3 +37,8 @@
 ## 变更系统
 
 在所属 `ui-theme` 样式表中添加或修改共享 token，然后在功能包中使用其语义别名。公共样式约定发生变化时，更新所属包的参考文档。视觉行为遵循[测试策略](testing.zh.md)；[已归档的样式系统 Agent Note](../.agents/notes/archived/process/2026-07-19-web-styling-system.md) 记录框架依据。
+
+<a id="optional-skins"></a>
+## 可选皮肤
+
+可选皮肤仅在自身文档标记存在时覆盖 token 和语义 `data-dsh-surface`/`data-dsh-part` 属性。皮肤通过 Cordis effect 持有并清理样式表，不得修改功能 DOM、依赖 CSS Modules hash 或覆盖原生拖拽、浮层安全与滚动条规则。组件 README 列出支持的钩子。

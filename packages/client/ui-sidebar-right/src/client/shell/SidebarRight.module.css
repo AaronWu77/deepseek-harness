@@ -52,7 +52,7 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: var(--dsw-glass-scrim);
+  background: var(--dsw-specific-sidebar-fill);
   border-left: 0.5px solid var(--dsw-alias-border-l4);
   pointer-events: none;
   opacity: 0;

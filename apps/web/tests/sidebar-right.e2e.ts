@@ -397,15 +397,17 @@ describe('web e2e: shipped right Sidebar', () => {
       await expandOf(page).waitFor({ timeout: 15_000 })
       const panel = page.locator('[data-rightbar-col] [data-sidebar-right-panel]')
       const paint = async () => panel.evaluate((node) => {
-        const style = getComputedStyle(node)
-        return { opacity: style.opacity, visibility: style.visibility }
+        const host = getComputedStyle(node)
+        const scrim = getComputedStyle(node, '::before')
+        return { opacity: host.opacity, visibility: host.visibility, scrimOpacity: scrim.opacity, scrimPointer: scrim.pointerEvents }
       })
-      await expect.poll(paint).toEqual({ opacity: '0', visibility: 'hidden' })
+      // The scrim disappears independently; hiding its ancestor would also hide floating panes.
+      await expect.poll(paint).toEqual({ opacity: '1', visibility: 'visible', scrimOpacity: '0', scrimPointer: 'none' })
       await expandOf(page).click()
-      await expect.poll(paint).toEqual({ opacity: '1', visibility: 'visible' })
+      await expect.poll(paint).toEqual({ opacity: '1', visibility: 'visible', scrimOpacity: '1', scrimPointer: 'none' })
       await panel.locator('[data-sidebar-right-toggle]').click()
       await expandOf(page).waitFor({ timeout: 10_000 })
-      await expect.poll(paint).toEqual({ opacity: '0', visibility: 'hidden' })
+      await expect.poll(paint).toEqual({ opacity: '1', visibility: 'visible', scrimOpacity: '0', scrimPointer: 'none' })
     })
 
     it('starts collapsed behind a header button and squeezes the conversation when opened', async () => {

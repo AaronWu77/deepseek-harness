@@ -19,9 +19,8 @@
 import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  IconNewChatOutlineMedium, IconNewChatOutlineRegular, IconPanelLeftOutlineRegular, isDarwinDesktop, ShortcutKeys, Tooltip,
+  FishLogo, IconNewChatOutlineMedium, IconNewChatOutlineRegular, IconPanelLeftOutlineRegular, isDarwinDesktop, ShortcutKeys, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { BrandMark } from './BrandMark.tsx'
 import type { InjectFace, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected, SidebarSectionOwnerProps,
@@ -38,6 +37,16 @@ const COLLAPSE_SETTLE_MS = 150
  * edge — on the way to the conversation, or around a portalled menu.
  */
 const SCROLLBAR_LINGER_MS = 2000
+
+/** Format complete-build metadata for the local brand badge. */
+function localBuildVersion(): string | undefined {
+  const version = process.env.DSH_CLIENT_VERSION
+  if (version === undefined) return undefined
+  const commit = process.env.DSH_CLIENT_COMMIT_HASH
+  return version
+    + (commit === undefined ? '' : `-${commit}`)
+    + (process.env.DSH_CLIENT_GIT_DIRTY === 'true' ? '-dirty' : '')
+}
 
 type PanelRowProps =
   Pick<SidebarPanelMetadata, 'id' | 'label'>
@@ -160,6 +169,8 @@ export function SidebarRoot({
     }
   }, [pointerInside])
 
+  const buildVersion = localBuildVersion()
+
   const darwinDesktop = isDarwinDesktop()
   // Rail resting state is the whale mark; hovering swaps in the panel icon
   // (the expand affordance, figma sidebar-hover flow). Expanded it is a plain
@@ -175,7 +186,7 @@ export function SidebarRoot({
       >
         {!wide && !windowsTitlebar && (
           <span className={css.railMark} aria-hidden="true">
-            {renderSlot('sidebar.brand.mark', { size: 28 }, { fallback: <BrandMark size={28} /> })}
+            {renderSlot('sidebar.brand.mark', { size: 24 }, { fallback: <FishLogo size={24} /> })}
           </span>
         )}
         {/* Rail icons render at 18 (figma rail spec); expanded keeps the glyph-native sizes. */}
@@ -188,6 +199,7 @@ export function SidebarRoot({
   return (
     <div
       ref={column}
+      data-dsh-surface="sidebar"
       className={clsx(
         css.root, !wide && css.collapsed, !wide && everWide.current && css.railIn,
         collapsed && wide && css.fading, !pointerInside && css.quietBars,
@@ -211,11 +223,18 @@ export function SidebarRoot({
           const identity = (
             <span className={css.brandIdentity} aria-hidden="true">
               <span className={css.brandMark}>
-                {renderSlot('sidebar.brand.mark', { size: 28 }, { fallback: <BrandMark size={28} /> })}
+                {renderSlot('sidebar.brand.mark', { size: 24 }, { fallback: <FishLogo size={24} /> })}
               </span>
               <span className={css.brandName}>
                 {renderSlot('sidebar.brand.name', {}, {
-                  fallback: <span className={css.fallbackBrandName}>{t('brand.wordmark')}</span>,
+                  fallback: buildVersion === undefined
+                    ? <span className={css.fallbackBrandName}>{t('brand.localBuild')}</span>
+                    : (
+                      <span className={css.localBuildBrand}>
+                        <span className={css.localBuildTitle}>{t('brand.localBuild')}</span>
+                        <span className={css.buildVersion}>{buildVersion}</span>
+                      </span>
+                    ),
                 })}
               </span>
             </span>
@@ -285,7 +304,7 @@ export function SidebarRoot({
 
       {/* Footer actions stack above Settings in both sidebar widths. */}
       <div className={css.footArea}>
-        <div className={css.footerActions}>
+        <div className={css.footerActions} data-dsh-part="sidebar-footer">
           {renderSlot('sidebar.footer.action', { wide })}
         </div>
         <div className={css.settingsArea}>

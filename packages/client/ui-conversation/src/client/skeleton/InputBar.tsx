@@ -396,6 +396,7 @@ export const InputBar = memo(function InputBar({
         ref={cardRef}
         className={clsx(css.card, workspaceTrigger && css.cardWorkspaceTrigger)}
         data-composer-card
+        data-dsh-part={workspaceTrigger ? 'composer-workspace-trigger' : undefined}
         onClick={workspaceTrigger ? onRequestWorkspace : undefined}
         onPointerDown={workspaceTrigger ? (e) => { e.stopPropagation() } : undefined}
         onMouseDown={onCardMouseDown}
@@ -442,6 +443,7 @@ export const InputBar = memo(function InputBar({
               <button
                 type="button"
                 className={css.add}
+                data-dsh-part="composer-command"
                 aria-label={t('input.commands')}
                 aria-haspopup="listbox"
                 aria-expanded={commandMenuOpen}
@@ -483,6 +485,7 @@ export const InputBar = memo(function InputBar({
                 <button
                   type="button"
                   className={css.primary}
+                  data-dsh-part="composer-primary"
                   aria-label={t('input.stop')}
                   disabled={stop === undefined}
                   onMouseDown={keepFocus}
@@ -498,6 +501,7 @@ export const InputBar = memo(function InputBar({
               <button
                 type="button"
                 className={css.primary}
+                data-dsh-part="composer-primary"
                 aria-label={primaryLabel}
                 disabled={primaryDisabled}
                 onMouseDown={keepFocus}

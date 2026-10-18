@@ -86,6 +86,10 @@ These pages cover the surfaces that fill the shell's seats and the composition m
 
 -----
 
+## Skin integration
+
+Personal brands occupy `sidebar.brand.mark` and `sidebar.brand.name`; the default remains the upstream fish and local-build metadata. `data-dsh-surface="sidebar"` and `data-dsh-part="sidebar-footer"` expose presentation hooks; footer contribution stacking remains functional layout.
+
 <a id="model-experience"></a>
 ## Model Experience
 

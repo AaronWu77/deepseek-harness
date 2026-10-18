@@ -172,6 +172,10 @@ Active-Turn highlighting is approximate: `readVisibleTurn` binary-searches the f
 
 -----
 
+## Skin integration
+
+Optional skins target `data-dsh-surface="user-bubble"` for user-message appearance. The StateDot running indicator and elapsed clock remain this customized Host’s internal components, not skin registrations.
+
 <a id="model-experience"></a>
 ## Model Experience
 
