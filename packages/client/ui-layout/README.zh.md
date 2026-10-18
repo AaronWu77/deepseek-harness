@@ -78,7 +78,7 @@ Windows Electron 的 `data-windows-titlebar` 标记在所有列上方预留顶�
 <a id="skin-integration"></a>
 ## 皮肤集成
 
-框架保留中性结构包裹与浮层安全层叠。可选皮肤可通过 `data-dsh-surface="frame"`、`data-shell-window` 及 `data-dsh-part="ambient"`/`"sidebar-glass"`/`"sidebar-column"` 设置外观；原生拖拽几何与网格测量仍由 Host 持有。无皮肤时隐藏环境与玻璃装饰，框架间距归零。
+框架保留中性结构包裹与浮层安全层叠。可选皮肤可通过 `data-dsh-surface="frame"`、`data-shell-window` 及 `data-dsh-part="ambient"`/`"sidebar-glass"`/`"sidebar-column"` 设置外观；原生拖拽几何与网格测量仍由 Host 持有。无皮肤时隐藏环境与玻璃装饰，框架间距归零。框架和结构窗口只裁剪溢出，不作为滚动容器；内容面板持有自身滚动，聚焦全屏控件不会让外壳偏移到装饰溢出区域。
 
 <a id="model-experience"></a>
 ## 模型体验

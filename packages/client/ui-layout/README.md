@@ -77,7 +77,7 @@ Read these pages when the layout surface is not enough. They move from the frame
 
 ## Skin integration
 
-The frame retains neutral structural wrappers and overlay-safe stacking. Optional skins can style `data-dsh-surface="frame"`, `data-shell-window`, and `data-dsh-part="ambient"`/`"sidebar-glass"`/`"sidebar-column"`; native drag geometry and grid measurement stay Host-owned. Without a skin, the ambient and glass decorations are hidden and frame gaps resolve to zero.
+The frame retains neutral structural wrappers and overlay-safe stacking. Optional skins can style `data-dsh-surface="frame"`, `data-shell-window`, and `data-dsh-part="ambient"`/`"sidebar-glass"`/`"sidebar-column"`; native drag geometry and grid measurement stay Host-owned. Without a skin, the ambient and glass decorations are hidden and frame gaps resolve to zero. The frame and structural window clip overflow without becoming scroll containers; content panes own their scrolling, and focusing fullscreen controls cannot shift the shell into decorative overflow.
 
 <a id="model-experience"></a>
 ## Model Experience

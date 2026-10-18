@@ -28,14 +28,20 @@ describe('SidebarRight.module.css floating pane visibility', () => {
     expect(declarations('.panel::before')).toBeDefined()
     expect(declarations('.panel::before')?.get('opacity')).toBe('0')
     expect(declarations('.panel[data-sidebar-right-open]::before')?.get('opacity')).toBe('1')
-    expect(css).toMatch(/\.panel\s*::before[\s\S]*?transition:\s*opacity 0s linear var\(--ds-transition-duration-slow\)/)
+    expect(declarations('.panel::before')?.get('transition')).toBe('none')
+  })
+
+  it('adds a solid ground only while fullscreen is open', () => {
+    expect(declarations(".panel[data-sidebar-right-panel='fullscreen'][data-sidebar-right-open]")?.get('background')).toBe('var(--dsw-alias-bg-base)')
+    expect(declarations(".panel[data-sidebar-right-panel='fullscreen']")?.has('background')).toBe(false)
+    expect(declarations(".panel[data-sidebar-right-panel='fullscreen']")?.get('z-index')).toBe('40')
   })
 
   it('continues to hide only docked hosts and dividers while collapsed', () => {
     expect(declarations(".panel :global([data-dockkit-host='dock'])")?.get('visibility')).toBe('hidden')
     expect(declarations('.panel :global([data-dockkit-empty])')?.get('visibility')).toBe('hidden')
     expect(declarations('.panel :global([data-dockkit-divider])')?.get('visibility')).toBe('hidden')
-    expect(declarations(`.panel[data-sidebar-right-open] :global([data-dockkit-host='dock'])`)?.get('visibility')).toBe('visible')
+    expect(declarations(".panel[data-sidebar-right-open] :global([data-dockkit-host='dock'])")?.get('visibility')).toBe('visible')
     expect(css).not.toMatch(/\.panel\s*\{[^}]*\b(?:opacity|visibility)\s*:/s)
   })
 })

@@ -29,13 +29,14 @@ const COLUMNS = ['.sidebarCol', '.centerCol', '.rightbarCol']
  * @throws When the sheet has no such rule, which would make the check vacuous.
  */
 function declarations(css: string, selector: string): Map<string, string> {
+  const source = css.replace(/\/\*[\s\S]*?\*\//g, '')
   const marker = '\n' + selector + ' {'
-  const start = css.indexOf(marker)
+  const start = source.indexOf(marker)
   if (start === -1) throw new Error('missing rule: ' + selector)
-  const open = css.indexOf('{', start)
-  const close = css.indexOf('}', open)
+  const open = source.indexOf('{', start)
+  const close = source.indexOf('}', open)
   const entries: [string, string][] = []
-  for (const part of css.slice(open + 1, close).split(';')) {
+  for (const part of source.slice(open + 1, close).split(';')) {
     const trimmed = part.trim()
     if (!trimmed.includes(':')) continue
     const colon = trimmed.indexOf(':')
@@ -47,6 +48,10 @@ function declarations(css: string, selector: string): Map<string, string> {
 describe('shell columns carry no stacking context', () => {
   it.each(COLUMNS)('%s declares no z-index', (selector) => {
     expect(declarations(sheet, selector).has('z-index')).toBe(false)
+  })
+
+  it.each(['.frame', '.window'])('%s clips without a scrollable overflow area', (selector) => {
+    expect(declarations('\n' + sheet, selector).get('overflow')).toBe('clip')
   })
 
   it('reads a z-index when one is present', () => {

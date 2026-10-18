@@ -3,7 +3,8 @@
   height: 100%;
   box-sizing: border-box;
   padding: 0;
-  overflow: hidden;
+  /* Clip ambient overflow without allowing fullscreen focus to scroll the frame. */
+  overflow: clip;
   background: var(--dsw-alias-bg-base);
 }
 .window {
@@ -12,7 +13,7 @@
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
-  overflow: hidden;
+  overflow: clip;
   border-radius: 0;
   background: var(--dsw-alias-bg-base);
   box-shadow: none;
@@ -76,8 +77,7 @@
 }
 
 .centerCol {
-  /* No z-index, for the reason .sidebarCol states: a column that opens a
-     stacking context confines every position: fixed overlay mounted inside it. */
+  /* Column-level stacking contexts would trap overlays below sibling columns. */
   position: relative;
   min-width: 0;
   display: flex;
