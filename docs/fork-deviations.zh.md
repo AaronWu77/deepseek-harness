@@ -75,7 +75,8 @@ profile 选择的仓外插件属于独立安装，不是官方 Host 源码改动
 | F-011 | [保持已确认模型选择并抑制过期失败](../packages/client/ui-model-selection/src/client/directory.ts) | 检查 | 目录与组件检查通过 |
 | F-015 | [视口全屏面板使用实体底色](../packages/client/ui-sidebar-right/src/client/shell/SidebarRight.module.css) | [视口与底色检查](../apps/web/tests/sidebar-skin-layout.e2e.ts) | 真实 profile 浏览器检查通过；原生桌面待验证 |
 | F-016 | [macOS Aurora 顶部露出条可拖动](../packages/client/ui-layout/src/client/AppFrame.module.css) | [检查](../apps/web/tests/window-drag-coverage.e2e.ts) | 结构检查通过；原生桌面待验证 |
-定制 Host 为 Review-Gated 角色保留了对 [Subagent](subsystems/subagent.zh.md) 的本地扩展。显式 `lifecycle: 'one-shot'` 先分离式准备提供方，再由 manager 负责本地子会话的创建、权限、工作目录、预设组合、执行与清理。上游组合现在要求显式声明工具执行器；一次性子会话与父会话选择同一执行器。
+| F-020 | [非 roster 中的提供方子 agent 不属于 Team](../packages/experimental/agent-team/src/roster.ts) | 检查 | 真实 YAML Loader 与本地一次性调用检查通过；旧同版本格式录制尚未解决 |
+定制 Host 为 Review-Gated 角色保留了对 Subagent 的本地扩展。显式 `lifecycle: 'one-shot'` 先分离式准备提供方，再由 manager 负责本地子会话的创建、权限、工作目录、预设组合、执行与清理。上游组合现在要求显式声明工具执行器；一次性子会话与父会话选择同一执行器。
 
 ### 仓库、构建与录制支持
 
