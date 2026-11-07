@@ -130,6 +130,23 @@ function runCodeSandboxArgumentMessage(message: string): string {
   ].join('\n')
 }
 
+/**
+ * Detect parser diagnostics that need source-serialization guidance rather than
+ * another tool or sandbox retry.
+ */
+const PROGRAM_SYNTAX_FAILURE = new RegExp(
+  '(?:syntaxerror|unexpected (?:end|identifier|string|token)'
+  + '|unterminated|invalid or unexpected token|\\bexpected\\b[\\s\\S]*\\bgot\\b)',
+  'iu',
+)
+
+/** Explain how to repair the common failure where file text is pasted as code. */
+function programSyntaxGuidance(message: string): string {
+  return PROGRAM_SYNTAX_FAILURE.test(message)
+    ? ' The program reported a syntax error; earlier effects may already have completed. Inspect them before retrying. Treat file contents as data: quote or JSON-serialize Markdown, JSON, YAML, HTML, and other text before placing it in an object or tool argument; never paste raw file text after `:`. Prefer a declared file-reading tool when available, then retry with valid TypeScript or Python source.'
+    : ''
+}
+
 function escalationGuidance(mode: PtcRuntime['sandboxMode']): string {
   return mode === undefined ? ''
     : ' A sandbox escalation approves this complete program for one execution only. Nested tools retain their own policies and approvals. Request wider access only after evidence of a denial. Earlier effects may already have completed: inspect them before explicitly retrying. Programs are never replayed automatically.'
@@ -721,7 +738,7 @@ export function createRunCodeTool(
             const logsText = result.logs.length > 0 ? `\nCaptured output:\n${result.logs.join('\n')}` : ''
             const sandboxText = result.sandbox === undefined ? ''
               : `\nFile sandbox: ${result.sandbox.mode}${result.sandbox.enforcement === undefined ? '' : `; enforcement: ${result.sandbox.enforcement}`}${result.sandbox.denied ? '; operation denied' : ''}.`
-            throw new CodeRunFailedError(`code run failed (${result.error.kind}): ${result.error.message}${logsText}${sandboxText}${result.sandbox?.denied ? escalationGuidance(runtime.sandboxMode) : ''}`)
+            throw new CodeRunFailedError(`code run failed (${result.error.kind}): ${result.error.message}${programSyntaxGuidance(result.error.message)}${logsText}${sandboxText}${result.sandbox?.denied ? escalationGuidance(runtime.sandboxMode) : ''}`)
           }
           return {
             logs: result.logs,

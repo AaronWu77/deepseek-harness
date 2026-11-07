@@ -21,6 +21,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import { mountLocalActivations, startPreparedActivation } from './local-activation.ts'
+import { TestSessionQuery } from './test-session-query.ts'
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'activation-presets')
 
@@ -69,6 +70,43 @@ function spawnRequest(parent: Agent) {
 }
 
 describe('a child agent composed in-process', () => {
+  it('mounts a trusted one-shot preset and finishes preflight before the first model request', async () => {
+    const { ctx, adapter, parent } = await setupPresetHost([textResponse('one-shot done')])
+    await ctx.plugin(TestSessionQuery)
+    const order: string[] = []
+    ctx.subagents.registerProvider({
+      name: 'trusted-once', inheritsParentContext: false,
+      capabilities: { agentOptions: true, agentPreset: false, outputSchema: false, depthLimit: true },
+      prepareLocalOneShot: async () => ({
+        agentPreset: 'reviewing',
+        setup: async (childCtx, child) => {
+          expect(child.session.header.agentPreset).toBe('reviewing')
+          expect(ctx.tools.schemas(child)).toEqual([])
+          await ctx.agentPresets.mount(childCtx, 'reviewing')
+          order.push('setup')
+        },
+        preflight: async (child, signal) => {
+          signal.throwIfAborted()
+          expect(adapter.requests).toEqual([])
+          expect(ctx.tools.schemas(child).map(tool => tool.name)).toEqual(['reviewing_only'])
+          expect(ctx.workingDirectory.get(child.session)).toBe(child.session.header.cwd)
+          order.push('preflight')
+        },
+      }),
+    })
+    const request = spawnRequest(parent)
+    const run = await ctx.subagents.startActivation({ provider: 'trusted-once', lifecycle: 'one-shot',
+      label: request.label, request, signal: request.signal, delivery: 'caller' })
+    expect((await run.result).stopReason).toBe('completed')
+    expect(order).toEqual(['setup', 'preflight'])
+    expect(adapter.requests[0]?.tools?.map(tool => tool.name)).toEqual(['reviewing_only'])
+    expect(ctx.tools.schemas(parent).map(tool => tool.name)).toEqual(['preset_only'])
+    expect(ctx.agents.get(run.childId)).toBeUndefined()
+    await expect(ctx.subagents.sendMessage(parent, run.childId, [], { signal: request.signal }))
+      .rejects.toMatchObject({ code: 'NOT_RESUMABLE' })
+    await run.dispose()
+  })
+
   it('reaches the model with its parent\'s preset tools', async () => {
     const { adapter, parent } = await setupPresetHost()
 

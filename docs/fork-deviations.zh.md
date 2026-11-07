@@ -25,9 +25,8 @@ description: "查阅活跃 RC2 Host 改动、仓库支持与可选预设扩展�
 
 | 类别 | 保留编号 | 所属实现与作用 |
 |---|---|---|
-| 执行、权限与验证 | F-001–F-003、F-005–F-007、F-019 | Host 提供方和工具执行维持有效权限、诊断、调度器标识、字符串验证以及局部 PTC SDK/schema/执行的一致性。 |
-| 模型选择 | F-011 | Client 保留已确认选择，避免过期响应或失败覆盖较新的选择。 |
-| 平台与布局 | F-008、F-010、F-015、F-016 | Host 保留 Windows 路径打开参数、收起时的遮罩抑制、视口全屏面板及原生拖拽区域。 |
+| 执行、权限与验证 | F-001、F-002、F-005–F-007 | Host 提供方和工具执行维持有效权限、诊断、PTC 升级处理与字符串验证的一致性。 |
+| 模型选择 | 平台与布局 | F-008、F-010、F-015、F-016 | Host 保留 Windows 路径打开参数、收起时的遮罩抑制、视口全屏面板及原生拖拽区域。 |
 | 构建与测试支持 | F-012–F-014、F-021 | 仓库脚本处理受跟踪的 Loader 链接、notices、rescope 排除项以及明确的录制输入。 |
 | Team 成员判定 | F-020 | 可选 Team 包验证 roster 成员身份，避免无关的提供方子级获得 Team lead 行为。 |
 
@@ -53,9 +52,9 @@ profile 选择的仓外插件属于独立安装，不是官方 Host 源码改动
 <a id="local-one-shot-activation"></a>
 ## 本地 one-shot activation
 
-定制 Host 包含服务 Review-Gated 角色的本地 [Subagent](subsystems/subagent.zh.md) 扩展。显式 `lifecycle: 'one-shot'` 分派分离的 provider preparation，真实本地子级创建、权限、工作目录、preset 组合、执行及清理由已有 manager 管理。子级沿用 one-shot descriptor 和 catalog 格式，不接受后续输入或冷恢复。扩展不改变默认分派、可续接 activation 或外部 provider 执行。
+定制 Host 为 Review-Gated 角色保留了对 Subagent 的本地扩展。显式 `lifecycle: 'one-shot'` 先分离式准备提供方，再由 manager 负责本地子级创建、权限、工作目录、preset 组合、执行与清理。上游组合现在要求显式声明工具执行器；一次性子级与父会话选择同一执行器。
 
-行为测试由 local-one-shot.spec.ts 负责，并有相邻外部 activation、权限、preset 和目录回归测试。当上游提供等价的公开本地 one-shot activation，且 Review-Gated 角色及包测试无需此扩展即可通过时，退役此偏离。上游包版本号不能标识此本地扩展。保留扩展不要求加载 Review-Gated 插件。
+行为 owner 是 `local-one-shot.spec.ts`，agent-team roster 回归覆盖启用提供方的非 roster 子级。
 
 <a id="preservation-registry"></a>
 ## 保留行为注册表
@@ -68,7 +67,6 @@ profile 选择的仓外插件属于独立安装，不是官方 Host 源码改动
 |---|---|---|---|
 | F-001 | [保持受支持的非升级请求的有效模式](../packages/sandbox/sandbox/src/escalation.ts) | [检查](../packages/sandbox/sandbox/tests/escalation.spec.ts) | 源码测试通过；原生隔离待验证 |
 | F-002 | [省略 PTC 非升级权限请求](../packages/core/tool-executor-ptc/src/ptc.ts) | [检查](../packages/core/tool-executor-ptc/tests/ptc.spec.ts) | 源码测试通过 |
-| F-003 | [跨包解析共享调度器标识](../packages/core/tools/src/index.ts) | [检查](../packages/core/tools/tests/tools.spec.ts) | 适用于同进程多模块实例解析；组合应用待验证 |
 | F-005 | [程序语法与序列化诊断](../packages/core/tool-executor-ptc/src/ptc.ts) | [检查](../packages/core/tool-executor-ptc/tests/ptc.spec.ts) | 源码测试通过；录制请求头待验证 |
 | F-006 | [明确拒绝后才请求严格更宽的升级](../packages/core/tool-executor-ptc/src/ptc.ts) | [检查](../packages/core/tool-executor-ptc/tests/ptc.spec.ts) | 源码测试通过；录制请求头待验证 |
 | F-007 | [按 Unicode 码点验证字符串 minLength](../packages/core/tools/src/json-schema.ts) | [检查](../packages/core/tools/tests/json-schema.spec.ts) | 源码测试通过 |
@@ -77,8 +75,7 @@ profile 选择的仓外插件属于独立安装，不是官方 Host 源码改动
 | F-011 | [保持已确认模型选择并抑制过期失败](../packages/client/ui-model-selection/src/client/directory.ts) | 检查 | 目录与组件检查通过 |
 | F-015 | [视口全屏面板使用实体底色](../packages/client/ui-sidebar-right/src/client/shell/SidebarRight.module.css) | [视口与底色检查](../apps/web/tests/sidebar-skin-layout.e2e.ts) | 真实 profile 浏览器检查通过；原生桌面待验证 |
 | F-016 | [macOS Aurora 顶部露出条可拖动](../packages/client/ui-layout/src/client/AppFrame.module.css) | [检查](../apps/web/tests/window-drag-coverage.e2e.ts) | 结构检查通过；原生桌面待验证 |
-| F-019 | [SDK、schema 与执行使用同一个局部 PTC 提供方](../packages/core/tools/src/index.ts) | 检查 | 真实 YAML Loader 检查通过；profile 回放需要构建 Typert 产物 |
-| F-020 | [非 roster 中的提供方子 agent 不属于 Team](../packages/experimental/agent-team/src/roster.ts) | 检查 | 真实 YAML Loader 与本地一次性调用检查通过；旧同版本格式录制尚未解决 |
+定制 Host 为 Review-Gated 角色保留了对 [Subagent](subsystems/subagent.zh.md) 的本地扩展。显式 `lifecycle: 'one-shot'` 先分离式准备提供方，再由 manager 负责本地子会话的创建、权限、工作目录、预设组合、执行与清理。上游组合现在要求显式声明工具执行器；一次性子会话与父会话选择同一执行器。
 
 ### 仓库、构建与录制支持
 

@@ -9,7 +9,7 @@
  * @module @deepseek-ai/dsh-subagent/types
  */
 
-import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
@@ -31,13 +31,18 @@ export function SubagentRunId(id: string): SubagentRunId {
 export interface SubagentActivationSpec {
   /** Registered backend to use. */
   readonly provider: string
+  /** Explicit local lifetime; omitted preserves existing provider dispatch. */
+  readonly lifecycle?: 'one-shot' | 'continuable'
   /** Short task label retained in cataloged child membership. */
   readonly label: string
   /** Optional reserved identity for a local child; external backends allocate their own ids. */
   readonly childId?: SessionId
   /** Task, parent, and backend-supported execution options. */
   readonly request: Omit<SubagentStartRequest, 'label' | 'signal'>
-  /** Cancellation before publication; callers own later cancellation through dispose. */
+  /**
+   * Startup cancellation; local one-shot and external executions also cancel after publication.
+   * Continuable callers use dispose after publication.
+   */
   readonly signal: AbortSignal
   /** Parent delivery notifies the model; caller delivery only returns the result. Local children always enter the parent catalog. */
   readonly delivery: 'parent' | 'caller'
@@ -148,7 +153,7 @@ export interface SubagentStartRequest {
   readonly prompt: ContentBlock[]
   /**
    * The spawning agent. Its effective directory supplies the default cwd;
-   * in-process children retain its origin, lineage, and delegation depth.
+   * continuable children retain its project origin; all local children retain lineage and delegation depth.
    */
   readonly parent: Agent
   /**
@@ -222,6 +227,25 @@ export interface ContinuableCreateSpec {
    * `CreateAgentOptions.seed`: contiguous from seq 0, lossless JSON, balanced.
    */
   readonly seed?: readonly SessionEvent[]
+}
+
+/** Reserved local identity and task admitted before one-shot preparation. */
+export interface LocalOneShotCreateRequest extends ResolvedSubagentStartRequest {
+  /** Manager-reserved durable child identity. */
+  readonly sessionId: SessionId
+}
+
+/** Detached one-shot creation hooks; the manager alone creates and owns the child. */
+export interface LocalOneShotCreateSpec {
+  /** Explicit child preset metadata; setup mounts its implementation. */
+  readonly agentPreset?: string
+  /** Scoped composition before publication; must not start child execution. */
+  readonly setup?: CreateAgentOptions['setup']
+  /**
+   * Startup probe after creation; its signal includes caller, manager and parent disposal cancellation.
+   * Rejection disposes the unpublished child.
+   */
+  readonly preflight?: (child: Agent, signal: AbortSignal) => Promise<void>
 }
 
 /**
@@ -342,8 +366,8 @@ export interface SubagentProvider {
    * OPTIONAL (continuable-creation capability): contribute the detached
    * creation inputs that distinguish this provider's continuable children —
    * only whether the child session is seeded with parent history. Method
-   * presence selects local activation execution. Providers without it execute
-   * through start and do not accept subsequent messages.
+   * presence selects local continuable activation by default. Explicit one-shot
+   * lifetime uses prepareLocalOneShot; external executions use start.
    *
    * This is the provider's ONLY participation in a continuable child. The
    * continuation manager owns identity reservation, composition, Agent
@@ -353,4 +377,14 @@ export interface SubagentProvider {
    * data belonging only to `request.sessionId`.
    */
   prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
+  /**
+   * Prepare a fresh local one-shot child without creating or returning an Agent or handle.
+   * Selected only by explicit lifecycle: 'one-shot'; the manager owns execution,
+   * cancellation, result capture and quiescent disposal. Hooks may compose and
+   * probe the child, never deliver prompts or retain its lifecycle ownership.
+   * Preparation observes request.signal and returns hooks without awaiting native
+   * probes or child execution. The second signal is manager-owned startup cancellation
+   * and must stop provider work when the parent or manager drains.
+   */
+  prepareLocalOneShot?(request: LocalOneShotCreateRequest, managedSignal: AbortSignal): Promise<LocalOneShotCreateSpec>
 }

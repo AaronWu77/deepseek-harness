@@ -36,6 +36,7 @@ import type { PluginPackageRef, PluginRowRef, PluginsSubject } from './slot-cont
 import type { ConfigPageForm } from './slot-contract.ts'
 import { UpdateDialog, VersionSection } from './versions.tsx'
 import { BundleDetailSection } from './BundleDetailSection.tsx'
+import { PackageInformation } from './PackageInformation.tsx'
 import css from './PluginManagerPage.module.css'
 
 /** Full component props assembled by the main slot renderer. */
@@ -810,6 +811,7 @@ function PackageDetail({
           pkg={pkg} check={versions} t={t} busy={busy} onEnsure={onEnsureVersions} onCheck={onCheckVersions} onUpdate={onUpdateVersion}
         />
         <SourceSection pkg={pkg} t={t} />
+        <PackageInformation meta={pkg.meta} t={t} />
         {renderSlot('plugins.detail.section', { subject })}
       </div>
     </div>

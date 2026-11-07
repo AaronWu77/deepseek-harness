@@ -15,8 +15,8 @@
   en: a2327ddee3f5c828
   zh: 6076ba901f4eb420
 /fork-deviations/ownership-map:
-  en: 920bf60a4d812076
-  zh: 6ecb1dc91a4e7def
+  en: cc5c0a727342d4f9
+  zh: fd2ce5a8b6f6aff1
 /fork-deviations/ownership-map/related-documentation:
   en: 05e5966568661450
   zh: 36cdaf070ea6f805
@@ -24,16 +24,16 @@
   en: a875e9dbb810c57c
   zh: b618e7d211823924
 /fork-deviations/local-one-shot-activation:
-  en: cf26db3162664bcd
-  zh: ff68aaf793c5659b
+  en: 2b4592d7c77fb304
+  zh: fd690ae9e243f57b
 /fork-deviations/preservation-registry:
   en: df641361e740f387
   zh: b9922b015675ebc5
 /fork-deviations/preservation-registry/runtime-patches:
-  en: 0cb70f887a41f9c8
-  zh: dec138f90aee8461
+  en: 0e6eb80cd5eeb954
+  zh: 9f6b196d99ff2b9e
 /fork-deviations/preservation-registry/repository-build-and-recording-support:
-  en: f95a003b7570167a
+  en: 6f9e79bd44228780
   zh: 2074e1271f605f55
 /fork-deviations/upstream-behavior-not-counted-as-customization:
   en: 25a9f3ffc12f488a

@@ -25,9 +25,8 @@ This reference lists active Host and repository-support deviations from official
 
 | Area | Preservation IDs | Owner and purpose |
 |---|---|---|
-| Execution, permissions, and validation | F-001–F-003, F-005–F-007, F-019 | Host providers and tool execution keep effective permissions, diagnostics, scheduler identity, string validation, and scoped PTC SDK/schema/execution consistent. |
-| Model selection | F-011 | The Client preserves acknowledged selections without stale responses or failures replacing newer choices. |
-| Platform and layout | F-008, F-010, F-015, F-016 | Host retains Windows path-opening arguments, collapsed scrim suppression, viewport fullscreen panels, and native drag regions. |
+| Execution, permissions, and validation | F-001, F-002, F-005–F-007 | Host providers and tool execution keep effective permissions, diagnostics, PTC escalation handling, and string validation consistent. |
+| Model selection | Platform and layout | F-008, F-010, F-015, F-016 | Host retains Windows path-opening arguments, collapsed scrim suppression, viewport fullscreen panels, and native drag regions. |
 | Build and test support | F-012–F-014, F-021 | Repository scripts handle tracked Loader links, notices, rescope exclusions, and explicit recording inputs. |
 | Team membership | F-020 | The optional Team package validates roster membership; unrelated provider children must not acquire Team-lead behavior. |
 
@@ -52,9 +51,9 @@ Review is prompt guidance, not a runtime completion or permission gate. The thre
 
 ## Local one-shot activation
 
-The customized Host includes a local extension to [Subagent](subsystems/subagent.md) for Review-Gated roles. Explicit `lifecycle: 'one-shot'` dispatches detached provider preparation while the existing manager owns real local child creation, permissions, working directory, preset composition, execution and cleanup. The child uses the existing one-shot descriptor and catalog formats and cannot accept follow-up input or cold resume. The extension does not change default dispatch, continuable activation or external provider execution.
+The customized Host includes a local extension to Subagent for Review-Gated roles. Explicit `lifecycle: 'one-shot'` dispatches detached provider preparation while the manager owns local child creation, permissions, working directory, preset composition, execution and cleanup. Upstream compositions now name a tool executor; one-shot children select the same executor as their parent.
 
-The behavioral owner is local-one-shot.spec.ts, with adjacent external activation, policy, preset and directory regressions. Retire this deviation when upstream provides equivalent public local-one-shot activation and the Review-Gated role and package suites pass against it without the extension. The upstream package version does not identify this local extension. Its presence does not require the Review-Gated plugin to be loaded.
+The behavioral owner is `local-one-shot.spec.ts`, with the agent-team roster regression covering non-roster children of enabling providers.
 
 ## Preservation registry
 
@@ -66,7 +65,6 @@ These identifiers name current local implementations, not a list of optional fea
 |---|---|---|---|
 | F-001 | [Effective mode for supported non-widening requests](../packages/sandbox/sandbox/src/escalation.ts) | [Guard](../packages/sandbox/sandbox/tests/escalation.spec.ts) | Source tests passed; native confinement pending |
 | F-002 | [Drop non-widening PTC permission requests](../packages/core/tool-executor-ptc/src/ptc.ts) | [Guard](../packages/core/tool-executor-ptc/tests/ptc.spec.ts) | Source tests passed |
-| F-003 | [Shared scheduler identity across package resolutions](../packages/core/tools/src/index.ts) | [Guard](../packages/core/tools/tests/tools.spec.ts) | Needed when one process resolves multiple module instances; assembled smoke pending |
 | F-005 | [Program syntax and serialization diagnostics](../packages/core/tool-executor-ptc/src/ptc.ts) | [Guard](../packages/core/tool-executor-ptc/tests/ptc.spec.ts) | Source tests passed; recorded headers pending |
 | F-006 | [Explicit-denial and strictly wider escalation guidance](../packages/core/tool-executor-ptc/src/ptc.ts) | [Guard](../packages/core/tool-executor-ptc/tests/ptc.spec.ts) | Source tests passed; recorded headers pending |
 | F-007 | [Unicode-code-point string minLength validation](../packages/core/tools/src/json-schema.ts) | [Guard](../packages/core/tools/tests/json-schema.spec.ts) | Source tests passed |
@@ -75,7 +73,6 @@ These identifiers name current local implementations, not a list of optional fea
 | F-011 | [Acknowledged model selections and stale-failure suppression](../packages/client/ui-model-selection/src/client/directory.ts) | Guard | Directory and component guards passed |
 | F-015 | [Viewport fullscreen with solid backing](../packages/client/ui-sidebar-right/src/client/shell/SidebarRight.module.css) | [Viewport and backing guards](../apps/web/tests/sidebar-skin-layout.e2e.ts) | Real-profile browser guards passed; native desktop pending |
 | F-016 | [Draggable exposed macOS Aurora strip](../packages/client/ui-layout/src/client/AppFrame.module.css) | [Guard](../apps/web/tests/window-drag-coverage.e2e.ts) | Structural guard passed; native desktop pending |
-| F-019 | [Scoped PTC provider for SDK, schema and execution](../packages/core/tools/src/index.ts) | Guard | Real YAML Loader guards passed; profile replay needs built Typert artifacts |
 | F-020 | [Exclude nonrostered provider children from Teams](../packages/experimental/agent-team/src/roster.ts) | Guard | Real YAML Loader and local-one-shot guards passed; old same-format recording unresolved |
 
 ### Repository, build, and recording support
@@ -89,7 +86,7 @@ These entries serve contributors and release workflows; they are not additional 
 | F-014 | [Token-scoped rescope exclusions](../scripts/rescope-vendor.ts) | [Guard](../scripts/rescope-vendor.spec.ts) | Script guards passed |
 | F-021 | [Explicit first recording and scripted model category](../packages/test-support/session-snapshot/src/session-files.ts) | [Guard](../packages/test-support/session-snapshot/tests/record-inventory.spec.ts) | Helper and manifest guards passed; complete profile replay pending |
 
-Retire an entry only after its focused guard and relevant shipped-profile, model-visible, browser, or native-platform case pass without the local implementation. No entry is retired by structural inspection alone. The production same-format Team coexistence recording uses removed delegation arguments; its immutable predecessor remains external rehearsal input until a current-API owner is qualified.
+Upstream split native and PTC tool execution into the Agent-scoped `@deepseek-ai/dsh-tool-executor-ptc` package, which removed the shared-transport and duplicate-scheduler conditions behind the retired scheduler-identity and scoped-PTC entries. Retire an entry only after its focused guard and relevant shipped-profile, model-visible, browser, or native-platform case pass without the local implementation. No entry is retired by structural inspection alone. The production same-format Team coexistence recording uses removed delegation arguments; its immutable predecessor remains external rehearsal input until a current-API owner is qualified.
 
 <a id="upstream-behavior-not-counted-as-customization"></a>
 ## Upstream behavior not counted as customization

@@ -40,7 +40,7 @@ export const RunningStatus = memo(function RunningStatus({ startTime, paused, ho
       )}
       <span className={css.runningDivider} aria-hidden="true" />
       <span className={css.runningContent}>
-        <RunningWhaleTail />
+        <span data-dsh-part="running-glyph"><RunningWhaleTail /></span>
         <TextShimmer active={!holding} className={css.runningText}>{label}</TextShimmer>
       </span>
     </div>
