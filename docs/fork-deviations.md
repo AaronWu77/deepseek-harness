@@ -25,8 +25,9 @@ This reference lists active Host and repository-support deviations from official
 
 | Area | Preservation IDs | Owner and purpose |
 |---|---|---|
-| Execution, permissions, and validation | F-001, F-002, F-005–F-007 | Host providers and tool execution keep effective permissions, diagnostics, PTC escalation handling, and string validation consistent. |
-| Model selection | Platform and layout | F-008, F-010, F-015, F-016 | Host retains Windows path-opening arguments, collapsed scrim suppression, viewport fullscreen panels, and native drag regions. |
+| Execution, permissions, and validation | F-001–F-003, F-005–F-007, F-019 | Host providers and tool execution keep effective permissions, diagnostics, scheduler identity, string validation, and scoped PTC SDK/schema/execution consistent. |
+| Model selection | F-011 | The Client preserves acknowledged selections without stale responses or failures replacing newer choices. |
+| Platform and layout | F-008, F-010, F-015, F-016 | Host retains Windows path-opening arguments, collapsed scrim suppression, viewport fullscreen panels, and native drag regions. |
 | Build and test support | F-012–F-014, F-021 | Repository scripts handle tracked Loader links, notices, rescope exclusions, and explicit recording inputs. |
 | Team membership | F-020 | The optional Team package validates roster membership; unrelated provider children must not acquire Team-lead behavior. |
 
@@ -51,9 +52,9 @@ Review is prompt guidance, not a runtime completion or permission gate. The thre
 
 ## Local one-shot activation
 
-The customized Host includes a local extension to Subagent for Review-Gated roles. Explicit `lifecycle: 'one-shot'` dispatches detached provider preparation while the manager owns local child creation, permissions, working directory, preset composition, execution and cleanup. Upstream compositions now name a tool executor; one-shot children select the same executor as their parent.
+The customized Host includes a local extension to [Subagent](subsystems/subagent.md) for Review-Gated roles. Explicit `lifecycle: 'one-shot'` dispatches detached provider preparation while the existing manager owns real local child creation, permissions, working directory, preset composition, execution and cleanup. The child uses the existing one-shot descriptor and catalog formats and cannot accept follow-up input or cold resume. The extension does not change default dispatch, continuable activation or external provider execution.
 
-The behavioral owner is `local-one-shot.spec.ts`, with the agent-team roster regression covering non-roster children of enabling providers.
+The behavioral owner is local-one-shot.spec.ts, with adjacent external activation, policy, preset and directory regressions. Retire this deviation when upstream provides equivalent public local-one-shot activation and the Review-Gated role and package suites pass against it without the extension. The upstream package version does not identify this local extension. Its presence does not require the Review-Gated plugin to be loaded.
 
 ## Preservation registry
 
@@ -86,7 +87,7 @@ These entries serve contributors and release workflows; they are not additional 
 | F-014 | [Token-scoped rescope exclusions](../scripts/rescope-vendor.ts) | [Guard](../scripts/rescope-vendor.spec.ts) | Script guards passed |
 | F-021 | [Explicit first recording and scripted model category](../packages/test-support/session-snapshot/src/session-files.ts) | [Guard](../packages/test-support/session-snapshot/tests/record-inventory.spec.ts) | Helper and manifest guards passed; complete profile replay pending |
 
-Upstream split native and PTC tool execution into the Agent-scoped `@deepseek-ai/dsh-tool-executor-ptc` package, which removed the shared-transport and duplicate-scheduler conditions behind the retired scheduler-identity and scoped-PTC entries. Retire an entry only after its focused guard and relevant shipped-profile, model-visible, browser, or native-platform case pass without the local implementation. No entry is retired by structural inspection alone. The production same-format Team coexistence recording uses removed delegation arguments; its immutable predecessor remains external rehearsal input until a current-API owner is qualified.
+Retire an entry only after its focused guard and relevant shipped-profile, model-visible, browser, or native-platform case pass without the local implementation. No entry is retired by structural inspection alone. The production same-format Team coexistence recording uses removed delegation arguments; its immutable predecessor remains external rehearsal input until a current-API owner is qualified.
 
 <a id="upstream-behavior-not-counted-as-customization"></a>
 ## Upstream behavior not counted as customization
