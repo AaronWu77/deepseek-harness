@@ -52,7 +52,26 @@ The following metadata fields are optional. Omitting them leaves the format vers
 | `dsh.manifestVersion` | Manifest format identifier; the declared format is `1`, independent of the npm package version and Session format version. |
 | `engines.dsh` | Author-declared compatible DSH versions as a SemVer range, including exact prerelease versions. This field sits beside `engines.node` and `engines.npm`; an engines object may omit `dsh`. |
 
-`LocalizedText` carries literal text or a language map with a required English fallback. `PluginLocalizedMeta` carries optional display title, description, an image data URL resolved from a package root's `package.json.icon` or an exported `<specifier>/icon`, and metadata diagnostics for installed plugins. [App boot](../../boot/app-boot/README.md) reads these values; this package only supplies their types.
+`LocalizedText` carries literal text or a language map with a required English fallback. `PluginLocalizedMeta` carries optional display title, description, an image data URL resolved from a package root's `package.json.icon` or an exported `<specifier>/icon`, optional `package` details, and metadata diagnostics for installed plugins. [App boot](../../boot/app-boot/README.md) reads these values; this package only supplies their types.
+
+<a id="package-details-and-upstream-declarations"></a>
+### Package details and upstream declarations
+
+`PluginPackageDetails` is the validated value of `PluginLocalizedMeta.package`. The declarations belong to the plugin's own exported package-root manifest; a subpath plugin does not inherit them from its parent package or bundle. Missing fields remain unknown, and missing upstreams never establish original authorship.
+
+| Manifest declaration | Validated package detail |
+|---|---|
+| `repository` | A URL string or npm repository object becomes `{ url, directory? }`; `directory` identifies a relative directory without traversal and remains separate from the link. |
+| `license`, `homepage` | The declared package license and project homepage; neither describes an upstream project. |
+| `author`, `maintainers` | Author text and a separate maintainer text list; npm person objects contribute their `name`. The reader does not infer maintainers from the author or turn people into links. |
+| `dsh.documentation` | An explicit public documentation URL, either a string or a language map with lowercase language ids and a nonblank `en` fallback. The reader does not infer a branch or README URL. |
+| `dsh.upstreams` | An array of `PluginUpstream` declarations, separate from the current package repository and installation source. |
+
+Each upstream declares `name`, `repository`, and `relation`: `copied`, `adapted`, `patched`, `integration`, or `reference`. Copied, adapted, and patched code require the upstream `license` and a nonblank `changes` summary. `changes` accepts literal text or the same localized form as documentation. Optional `ref` records the upstream revision or release; omission means the baseline is not recorded, not that the reader may infer one. Optional `record` links a public detailed source record. Preserve original attribution and license notices when documenting reused code; these declarations do not replace them or certify safety.
+
+Package links accept HTTP(S) without credentials. Repository links also accept `git+http`/`git+https` and normalize them to web URLs, but reject queries; SSH addresses, local paths, and executable URLs are not supported. [App boot](../../boot/app-boot/README.md#reading-plugin-display-metadata) owns validation limits and diagnostics.
+
+The Plugin Manager projects `packageSource: "package" | "catalog"` beside `package` to identify the selected declaration source. This Host field is not an author declaration. Readable installed declarations remain available even when compatibility checks reject activation; catalog declarations are identified independently of whether an installation target is available.
 
 Public composition declarations are defined in [`src/types.ts`](src/types.ts). Internal `configTrees`, `sessionFormatMigration`, and generated `moduleFallback` metadata remain owned by their image-packer, catalog, and launcher readers; the public types do not expose them.
 

@@ -12,4 +12,6 @@ export type {
   DshProfileManifest,
   LocalizedText,
   PluginLocalizedMeta,
+  PluginPackageDetails,
+  PluginUpstream,
 } from './types.ts'

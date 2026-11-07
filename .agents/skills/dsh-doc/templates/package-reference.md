@@ -25,6 +25,7 @@ Three to five sentences and at most 100 `wc -w`-style words on what a user or ag
 ## Table of Contents
 
 - [Use this package](#use-this-package)
+- [Source and attribution](#source-and-attribution)
 - [Understand the implementation](#understand-the-implementation)
 - [Further Exploration](#further-exploration)
 - [Model Experience](#model-experience)
@@ -51,6 +52,13 @@ The smallest mount that works, as a `cordis.yml` snippet, plus the config table:
 | `<field>` | `<default>` or `required` | One-line meaning |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-<name>) is the exhaustive source for every accepted field.
+
+-----
+
+<a id="source-and-attribution"></a>
+## Source and attribution
+
+Link the package manifest for structured repository, license, documentation, author, maintainer, and upstream declarations. Link the detailed source record when code is reused; preserve original attribution, license notices, and the explanation of local changes there. Do not repeat mutable versions or upstream baselines in README prose, infer an unknown baseline, or treat missing declarations as evidence of original authorship.
 
 -----
 
@@ -100,4 +108,5 @@ None.
 - **Fact-check before writing.** Mount the package in a test composition and run every command, config field, default, and behavior claim this README makes. Delete anything you did not reproduce; link the generated config catalog instead of restating fields.
 - **Installation guidance.** A plugin package mounts through `cordis.yml` rows. Only a package declaring `dsh.bundle.patch` installs as a profile layer via `dsh plugin --profile <name> add <package>` — if this package lacks that declaration, say how it mounts in a composition, never `dsh plugin add`.
 - **Model Experience and Known Limitations are gate-owned.** Match the exact headings and per-package forms the two gates enforce; update the gates' audited lists in the same change when behavior moves a package between forms.
+- **One fact, one owner.** Keep machine-readable declarations in `package.json` and detailed reuse accounting in the linked source record; the README introduces and links both. Follow [package display metadata](../../../../docs/cookbook/adding-a-package.md#plugin-display-metadata) without inventing attribution or a source record that does not exist.
 - Re-run `pnpm run verify-translation-pairing --write packages/<group>/<pkg>/README.md` after editing the pair.

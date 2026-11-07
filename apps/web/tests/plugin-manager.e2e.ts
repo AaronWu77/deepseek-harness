@@ -66,7 +66,10 @@ describe('web e2e: plugin manager', () => {
 
   /** Change the UI language through Settings and close the dialog. */
   async function setLanguage(language: 'en' | 'zh'): Promise<void> {
-    if (await page.locator('html').getAttribute('lang') === language) return
+    const currentLanguage = (await page.locator('html').getAttribute('lang'))?.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+    if (currentLanguage === language) return
+    const sidebar = page.getByRole('button', { name: language === 'en' ? '打开侧边栏' : 'Open sidebar', exact: true })
+    if (await sidebar.isVisible()) await sidebar.click()
     const settings = language === 'en' ? '设置' : 'Settings'
     const source = language === 'en' ? '中文' : 'English'
     const target = language === 'en' ? 'English' : '中文'
@@ -500,7 +503,7 @@ describe('web e2e: plugin manager', () => {
       .toMatchObject({ enabled: true, installed: false, removable: true, error: { code: 'operation-error' }, rows: [] })
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'missing-bundle.expected.md'),
       await captureStableAria(page, '[data-plugin-panel]', scaffold.workspaceCwd, {
-        replacements: [[scaffold.harnessHome, '{{home}}']],
+        replacements: [[JSON.stringify(join(scaffold.harnessHome, 'profiles', 'scaffold')).slice(1, -1), '{{profile}}']],
       }), MODE)
     await toggle.click()
     await expect.poll(async () => (JSON.parse(await homeFile('profiles', 'scaffold', 'package.json')) as {
@@ -733,6 +736,47 @@ describe('web e2e: plugin manager', () => {
     expect(tripwire.pageErrors).toEqual([])
   })
 
+  it('shows declared package metadata separately from installation at narrow and wide widths', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-package-details'))
+    const panel = await openPluginsPanel()
+    await panel.getByRole('button', { name: '查看 @fixture/bundle', exact: true }).click()
+    const facts: string[] = []
+    try {
+      for (const language of ['zh', 'en'] as const) {
+        await page.setViewportSize({ width: 1680, height: 1000 })
+        await setLanguage(language)
+        const details = panel.locator('[data-plugin-package-info]')
+        const upstreams = panel.locator('[data-plugin-upstreams]')
+        expect(await details.getByRole('link', { name: 'https://github.com/fixture/local-fork', exact: true }).getAttribute('href'))
+          .toBe('https://github.com/fixture/local-fork')
+        expect(await details.getByText('Original Author', { exact: true }).count()).toBe(1)
+        expect(await details.getByText('Local Maintainer', { exact: true }).count()).toBe(1)
+        const docName = language === 'zh' ? '使用文档' : 'Documentation'
+        expect(await details.getByRole('link', { name: docName }).getAttribute('href')).toBe('https://example.test/docs/' + language)
+        expect(await upstreams.getByText(language === 'zh' ? '未记录' : 'Not recorded', { exact: true }).count()).toBe(1)
+        expect(await upstreams.getByText(language === 'zh' ? '本地兼容与导航改造。' : 'Local compatibility and navigation changes.').count()).toBe(1)
+        const installation = panel.locator('[data-plugin-source]')
+        expect(await installation.getByRole('heading', { name: language === 'zh' ? '安装信息' : 'Installation information' }).count()).toBe(1)
+        expect(await installation.getByText('Apache-2.0', { exact: true }).count()).toBe(0)
+        for (const theme of ['light', 'dark'] as const) {
+          await page.evaluate(dark => document.body.toggleAttribute('data-ds-dark-theme', dark), theme === 'dark')
+          for (const width of [390, 1280]) {
+            await page.setViewportSize({ width, height: 1000 })
+            await expect.poll(() => details.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+            facts.push(`${language}/${theme}/${width}: declarations readable; installation separate; no overflow`)
+          }
+        }
+      }
+      await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'package-details.expected.md'), facts.join('\n'), MODE)
+    } finally {
+      await page.evaluate(() => { document.body.removeAttribute('data-ds-dark-theme') })
+      await page.setViewportSize({ width: 1680, height: 1000 })
+      await setLanguage('zh')
+    }
+    await panel.getByRole('button', { name: '返回插件' }).click()
+    expect(tripwire.pageErrors).toEqual([])
+  })
+
   it('localizes independent exports and falls back per field without activating the plugins', async () => {
     onTestFinished(closeSettings)
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-manager-exports'))
@@ -747,7 +791,8 @@ describe('web e2e: plugin manager', () => {
     await panel.getByText('Registry description for the fixture bundle.', { exact: true }).first().waitFor()
     expect([...scaffold.ctx.loader.entries()].some(entry => entry.options.name.startsWith('@fixture/bundle'))).toBe(false)
     await compareOrRefreshGolden(EXPORTS_EXPECTED, await captureStableAria(page, '[data-plugin-panel]', scaffold.workspaceCwd, {
-      replacements: [[FIXTURE_PLUGINS, '{{fixtures}}']],
+      replacements: [[JSON.stringify(join(FIXTURE_PLUGINS, 'fixture-bundle')).slice(1, -1), '{{fixtures}}/fixture-bundle'],
+        [join(FIXTURE_PLUGINS, 'fixture-bundle'), '{{fixtures}}/fixture-bundle'], [FIXTURE_PLUGINS, '{{fixtures}}']],
     }), MODE)
     try {
       await setLanguage('en')
@@ -756,7 +801,8 @@ describe('web e2e: plugin manager', () => {
       expect(await search.getByText('Search package introduction.', { exact: true }).count()).toBe(0)
       expect(await review.getByText('审查工作区中的改动。', { exact: true }).count()).toBe(0)
       await compareOrRefreshGolden(EXPORTS_EN_EXPECTED, await captureStableAria(page, '[data-plugin-panel]', scaffold.workspaceCwd, {
-        replacements: [[FIXTURE_PLUGINS, '{{fixtures}}']],
+        replacements: [[JSON.stringify(join(FIXTURE_PLUGINS, 'fixture-bundle')).slice(1, -1), '{{fixtures}}/fixture-bundle'],
+          [join(FIXTURE_PLUGINS, 'fixture-bundle'), '{{fixtures}}/fixture-bundle'], [FIXTURE_PLUGINS, '{{fixtures}}']],
       }), MODE)
       expect(await panel.locator('[data-plugin-name]').textContent()).toBe('@fixture/bundle')
     } finally {
@@ -1113,7 +1159,7 @@ describe('web e2e: plugin manager', () => {
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'manager.expected.md', 'live-enabled.expected.md', 'missing-bundle.expected.md', 'exports.expected.md', 'exports-en.expected.md', 'icons.expected.md', 'loading.expected.md', 'refresh.expected.md',
-      'ime-enter.expected.md', 'header-responsive.expected.md', 'preview.expected.md',
+      'ime-enter.expected.md', 'header-responsive.expected.md', 'preview.expected.md', 'package-details.expected.md',
     ])
   })
 })

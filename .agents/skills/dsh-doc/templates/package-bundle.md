@@ -27,6 +27,7 @@ Three to five sentences and at most 100 `wc -w`-style words: what a profile gain
 ## Table of Contents
 
 - [Use this package](#use-this-package)
+- [Source and attribution](#source-and-attribution)
 - [Understand the implementation](#understand-the-implementation)
 - [Further Exploration](#further-exploration)
 - [Model Experience](#model-experience)
@@ -52,6 +53,13 @@ State where in-box bundles resolve from, what the reconcile step activates, and 
 ### What you get
 
 The observable surface this layer adds: tools, providers, or UI rows, and which package owns each row's behavior.
+
+-----
+
+<a id="source-and-attribution"></a>
+## Source and attribution
+
+Link the package manifest for structured repository, license, documentation, author, maintainer, and upstream declarations. Link the detailed source record when code is reused; preserve original attribution, license notices, and the explanation of local changes there. Do not repeat mutable versions or upstream baselines in README prose, infer an unknown baseline, or treat missing declarations as evidence of original authorship.
 
 -----
 
@@ -100,4 +108,5 @@ None.
 
 - **Only `dsh.bundle.patch` packages use this template.** Verify the declaration in `package.json` before classifying; the `dsh plugin` reconcile activates a layer for exactly these packages.
 - **Test the install path.** Run `dsh plugin --profile <name> add <this-package>` in a scratch profile and reproduce the documented warning, layer activation, and failure modes before writing them.
+- **One fact, one owner.** Keep machine-readable declarations in `package.json` and detailed reuse accounting in the linked source record; the README introduces and links both. Follow [package display metadata](../../../../docs/cookbook/adding-a-package.md#plugin-display-metadata) without inventing attribution or a source record that does not exist.
 - Re-run `pnpm run verify-translation-pairing --write packages/<group>/<pkg>/README.md` after editing the pair.

@@ -39,6 +39,14 @@ The first list read shows a short group-heading placeholder and four skeleton ca
 
 The **Refresh** button shows its tooltip after 500 ms of hovering or keyboard focus. During a manual refresh, the button shows a spinner and stays disabled until all pending reads settle and at least 400 ms have elapsed, preventing a brief spinner flash; repeated refresh requests are ignored and the existing list remains visible. Success shows no toast. With a loaded list, a failed manual refresh keeps the cached content and shows a failure toast, including after leaving Plugins; select **Refresh** again to retry. Before any successful list read, failures show an in-place message with **Retry**. Background reads do not show the refresh spinner.
 
+### Package information and attribution
+
+Bundle and row detail pages show **Plugin information** and **Upstream projects and modifications**. Bundles keep **Installation information** separate. Plugin information shows the current package repository, a separately declared repository directory, license, optional author and maintainers as distinct text, and explicit documentation and homepage links. The documentation link follows the UI language with an English fallback; the page does not construct a README address. Each row uses its own metadata, not its bundle's attribution; a subpath does not inherit its parent package details.
+
+Upstream entries show the declared project link, relationship, baseline revision or release, license, localized change summary, and optional detailed source record. An omitted baseline reads **Not recorded**. Missing upstream declarations do not establish original authorship; unreadable details direct the user to the metadata diagnostic. These are package-author declarations, not a DSH security endorsement. Offline catalog details are marked as catalog declarations, not installed-version information. Links open only on user action; the panel does not fetch their content.
+
+Installation information describes dependency specs and versions, not code authorship or the current repository. See the [metadata declaration reference](../../util/package-manifest/README.md#package-details-and-upstream-declarations) for author fields.
+
 ### Installing a bundle
 
 The **Add plugin** control has a main button and a separate arrow for choosing how to add a plugin.
@@ -62,7 +70,7 @@ When the Host attributes a network failure or timeout to a GitHub address and of
 
 ### Switching a bundle
 
-A bundle's page shows its full package name under the title. Its **Source** section, after the rows, names the spec that installs it elsewhere, as `pnpm add` accepts it, or **Built in** for an official bundle the installation ships, then its current version. A bundle's switch changes its layer selection. A profile with HMR recomposes before the operation completes; one without HMR, and a bundle a higher layer overrides, say so in a toast. A bundle the Host cannot read carries a problem tag and its reason on its page and cannot be switched on; one that provides the management components stays locked. The Host answers with error codes, which the page's dictionary words; pnpm's and the Loader's own diagnostics are shown as they are. The page excludes built-in profile bundles from cards even when the profile holds them as dependencies or the Host reports an error. The Host inventory remains complete; the Settings Plugins section's Plugin list tab inspects their plugins.
+A bundle's page shows its full package name under the title. Its **Installation information** section, after the rows, names the spec that installs it elsewhere, as `pnpm add` accepts it, or **Built in** for an official bundle the installation ships, then its current version. A bundle's switch changes its layer selection. A profile with HMR recomposes before the operation completes; one without HMR, and a bundle a higher layer overrides, say so in a toast. A bundle the Host cannot read carries a problem tag and its reason on its page and cannot be switched on; one that provides the management components stays locked. The Host answers with error codes, which the page's dictionary words; pnpm's and the Loader's own diagnostics are shown as they are. The page excludes built-in profile bundles from cards even when the profile holds them as dependencies or the Host reports an error. The Host inventory remains complete; the Settings Plugins section's Plugin list tab inspects their plugins.
 
 ### Switching one row of a bundle
 

@@ -153,6 +153,15 @@ Append-only, prefix-stable, replacing, or independent behavior, including the ex
 
 Install 界面仍使用 `pnpm view` 返回的 npm registry 信息，不用 locale 元信息替换。
 
+### 包仓库与上游详情
+
+使用标准包字段 `repository`（URL 字符串或 `{ type?, url, directory? }`）、`license`、`homepage`、`author` 和 `maintainers` 描述当前包。在 `dsh.documentation` 中添加显式的公开文档链接，在 `dsh.upstreams` 中添加上游声明；通过 `./package.json` 导出包根 manifest。这些详情属于包，不属于 locale `meta`、组合包安装 spec 或子路径插件。关系字段、代码复用时必填的声明、URL 规则及未知基线见[声明参考](../../packages/util/package-manifest/README.zh.md#package-details-and-upstream-declarations)，发布前还须查阅[读取限制](../../packages/boot/app-boot/README.zh.md#reading-plugin-display-metadata)。
+
+<a id="source-and-attribution"></a>
+### 来源与署名
+
+按组合包或插件模板在包 README 中添加此节。每个事实只设一个归属：结构化声明链接包 manifest，复用文件、原作者署名、许可证声明和本地修改链接详细来源记录。README 正文不重复可变的包版本或上游基线。保留上游署名；描述本地修改时，不把他人的工作宣称为原创。基线未知时保持未记录，不作猜测。组合包安装与单个插件挂载仍须区分；署名信息不激活任何一方。
+
 验证结果：
 
 1. 在仓库根目录运行 `pnpm run verify-package-meta`，检查字段、资源 exports 和发布文件覆盖。

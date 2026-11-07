@@ -153,6 +153,15 @@ Only Settings shortens literal package-name and module-name fallbacks by removin
 
 The Install view still uses npm registry information from `pnpm view`, not locale metadata.
 
+### Package repository and upstream details
+
+Use standard package fields `repository` (URL string or `{ type?, url, directory? }`), `license`, `homepage`, `author`, and `maintainers` for the current package. Add explicit public documentation links in `dsh.documentation` and upstream declarations in `dsh.upstreams`; expose the package-root manifest through `./package.json`. These details belong to the package, not locale `meta`, bundle installation specs, or subpath plugins. Use the [declaration reference](../../packages/util/package-manifest/README.md#package-details-and-upstream-declarations) for relationship fields, required reuse declarations, URL rules, and unknown baselines, and [reader limits](../../packages/boot/app-boot/README.md#reading-plugin-display-metadata) before publishing.
+
+<a id="source-and-attribution"></a>
+### Source and attribution
+
+Add this section to the package README following the bundle or plugin template. Keep one owner per fact: link the package manifest for structured declarations and the detailed source record for reused files, original attribution, license notices, and local changes. Do not repeat mutable package versions or upstream baselines in README prose. Preserve upstream credit; describe local modifications without claiming others' work as original. When a baseline is unknown, leave it unrecorded rather than guessing. Bundle installation and individual plugin mounts remain distinct; attribution does not activate either.
+
 Verify the result:
 
 1. Run `pnpm run verify-package-meta` from the repository root to check fields, resource exports, and publication coverage.

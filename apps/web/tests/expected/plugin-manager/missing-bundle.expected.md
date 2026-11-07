@@ -5,7 +5,14 @@
 - text: 异常 未安装
 - paragraph:
   - code: "@fixture/missing-bundle"
-- status: "原因: dsh: cannot resolve profile bundle \"@fixture/missing-bundle\" from the dsh installation or {{home}}/profiles/scaffold; run 'dsh plugin --profile scaffold install' if its dependency is not installed"
-- heading "来源信息" [level=4]
-- term: 代码来源
+- status: "原因: dsh: cannot resolve profile bundle \"@fixture/missing-bundle\" from the dsh installation or {{profile}}; run 'dsh plugin --profile scaffold install' if its dependency is not installed"
+- heading "插件信息" [level=4]
+- term: 代码仓库（包声明）
+- definition: 未声明
+- term: 包许可证
+- definition: 未声明
+- heading "上游与改造" [level=4]
+- paragraph: 未提供上游说明；不能据此认定为原创
+- heading "安装信息" [level=4]
+- term: 安装来源
 - definition: 未安装

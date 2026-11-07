@@ -4,9 +4,10 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'n
 import { dirname, extname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ModuleLoader } from '@deepseek-ai/cordis-plugin-loader'
-import type { LocalizedText, PluginLocalizedMeta } from '@deepseek-ai/dsh-package-manifest'
+import type { LocalizedText, PluginLocalizedMeta, PluginPackageDetails } from '@deepseek-ai/dsh-package-manifest'
 import { barePackageName } from './profile-resolution/resolver.ts'
 import { realModuleFile } from './profile-resolution/legacy-links.ts'
+import { readPackageDetails } from './package-details.ts'
 
 const LANGUAGE_ID = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/u
 
@@ -110,7 +111,12 @@ function textOf(value: unknown, path: string): string | undefined {
 function readObject(file: string): Record<string, unknown> {
   let contents: unknown
   try {
-    contents = JSON.parse(readFileSync(file, 'utf8'))
+    // Package and locale JSON are discovery records; cap complete files before parsing.
+    const maxBytes = 1024 * 1024
+    if (statSync(file).size > maxBytes) throw new Error('metadata JSON exceeds 1 MiB')
+    const bytes = readFileSync(file)
+    if (bytes.length > maxBytes) throw new Error('metadata JSON exceeds 1 MiB')
+    contents = JSON.parse(bytes.toString('utf8'))
   } catch (error) {
     throw new Error(`${file}: ${String(error)}`)
   }
@@ -162,7 +168,10 @@ function localizedText(
  * A subpath specifier never reads package.json; its icon comes only from `<specifier>/icon`.
  * Manifest icons remain inside their declaring directory; exported icons remain inside their
  * owning package after realpath resolution. Both accept SVG, PNG, JPEG, or WebP up to 256 KiB.
- * Icon failures retain display text without falling back.
+ * Package details come only from the root manifest; absent upstreams make no authorship claim.
+ * Package-declaration and icon failures retain independently valid display fields and report an error.
+ * JSON files admit at most 1 MiB; complete package details admit at most 64 KiB of UTF-8 JSON.
+ * Package text admits 8 KiB per value, URLs 2 KiB, up to 32 upstreams/locales and 64 maintainers.
  * Non-package specifiers are skipped without invoking the resource resolver.
  * Language files share the directory containing the resolved English resource;
  * each file is resolved through the complete plugin specifier before reading.
@@ -186,14 +195,21 @@ export function readPluginMeta(specifier: string, parentURL: string): PluginLoca
       ...title === undefined ? {} : { title },
       ...description === undefined ? {} : { description },
     }
-    let icon: string | undefined
-    try {
-      icon = iconOf(specifier, packageName, parentURL, manifestPath, manifest?.icon)
-    } catch (error) {
-      return { ...text, error: `Plugin metadata for ${specifier}: ${String(error)}` }
+    const errors: string[] = []
+    let details: PluginPackageDetails | undefined
+    if (manifest !== undefined && manifestPath !== undefined) {
+      try { details = readPackageDetails(manifest, manifestPath) }
+      catch (error) { errors.push(String(error)) }
     }
-    if (title === undefined && description === undefined && icon === undefined) return undefined
-    return { ...text, ...icon === undefined ? {} : { icon } }
+    let icon: string | undefined
+    try { icon = iconOf(specifier, packageName, parentURL, manifestPath, manifest?.icon) }
+    catch (error) { errors.push(String(error)) }
+    if (title === undefined && description === undefined && icon === undefined
+      && details === undefined && errors.length === 0) return undefined
+    return {
+      ...text, ...icon === undefined ? {} : { icon }, ...details === undefined ? {} : { package: details },
+      ...errors.length === 0 ? {} : { error: `Plugin metadata for ${specifier}: ${errors.join('; ')}` },
+    }
   } catch (error) {
     return { error: `Plugin metadata for ${specifier}: ${String(error)}` }
   }

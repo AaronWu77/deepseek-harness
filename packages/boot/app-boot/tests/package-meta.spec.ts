@@ -41,6 +41,71 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
+describe('package-root details projection', () => {
+  const exports = { './package.json': './package.json', './locale/*.json': './locale/*.json',
+    './feature/locale/*.json': './feature-locale/*.json', './icon': './icon.svg' }
+
+  it('reads only the root manifest and never inherits its attribution for a subpath', () => {
+    manifest(exports, { repository: { url: 'git+https://github.com/example/localized.git', directory: 'plugins/localized' },
+      license: 'SEE LICENSE IN LICENSE.txt', author: { name: 'Author' }, maintainers: [{ name: 'Maintainer' }],
+      dsh: { documentation: 'https://example.org/docs', upstreams: [
+        { name: 'External API', repository: 'https://github.com/example/api', relation: 'integration' },
+      ] } })
+    dictionary('en', { meta: { title: 'Root', description: 'Root text' } })
+    dictionary('en', { meta: { title: 'Feature' } }, join(dir, 'feature-locale'))
+    expect(readPluginMeta('localized', parentURL)).toEqual({
+      title: { en: 'Root' }, description: { en: 'Root text' }, package: {
+        repository: { url: 'https://github.com/example/localized.git', directory: 'plugins/localized' },
+        license: 'SEE LICENSE IN LICENSE.txt', author: 'Author', maintainers: ['Maintainer'], documentation: 'https://example.org/docs',
+        upstreams: [{ name: 'External API', repository: 'https://github.com/example/api', relation: 'integration' }],
+      },
+    })
+    expect(readPluginMeta('localized/feature', parentURL)).toEqual({ title: { en: 'Feature' } })
+    expect(readPluginMeta('localized/missing', parentURL)).toBeUndefined()
+  })
+
+  it.each([null, false, {}, [{ name: 'Broken', repository: 'javascript:alert(1)', relation: 'copied' }],
+    [{ name: 'Partial', repository: 'https://example.org/repo', relation: 'patched', license: 'MIT', ref: 'v1' }]])
+  ('retains valid text and icon but omits invalid attribution %j', (upstreams) => {
+    manifest(exports, { repository: 'https://github.com/example/localized', dsh: { upstreams } })
+    dictionary('en', { meta: { title: 'Title', description: 'Description' } })
+    file(join(dir, 'icon.svg'), '<svg/>')
+    const meta = readPluginMeta('localized', parentURL)
+    expect(meta).toMatchObject({ title: { en: 'Title' }, description: { en: 'Description' }, icon: 'data:image/svg+xml;base64,PHN2Zy8+' })
+    expect(meta?.package).toBeUndefined()
+    expect(meta?.error).toContain('package.json: dsh.upstreams')
+  })
+
+  it('reports package and icon failures together without hiding text', () => {
+    manifest(exports, { icon: '/unsafe.svg', dsh: { upstreams: false } })
+    dictionary('en', { meta: { title: 'Title' } })
+    const meta = readPluginMeta('localized', parentURL)
+    expect(meta?.title).toEqual({ en: 'Title' })
+    expect(meta?.error).toContain('upstreams must be an array')
+    expect(meta?.error).toContain('icon must be a relative file path')
+  })
+
+  it('retains valid package details when the icon is malformed', () => {
+    manifest(exports, { license: 'MIT', icon: false })
+    expect(readPluginMeta('localized', parentURL)).toMatchObject({ title: 'localized', package: { license: 'MIT' } })
+    expect(readPluginMeta('localized', parentURL)?.error).toContain('icon')
+  })
+
+  it('keeps legacy manifests without package details unchanged', () => {
+    manifest(exports, { description: 'Package description' })
+    expect(readPluginMeta('localized', parentURL)).toEqual({ title: 'localized', description: 'Package description' })
+  })
+
+  it('bounds complete manifest files at one MiB before parsing', () => {
+    manifest(exports)
+    const base = JSON.stringify({ name: 'localized', exports })
+    file(join(dir, 'package.json'), base + ' '.repeat(1024 * 1024 - Buffer.byteLength(base)))
+    expect(readPluginMeta('localized', parentURL)).toEqual({ title: 'localized' })
+    file(join(dir, 'package.json'), base + ' '.repeat(1024 * 1024 - Buffer.byteLength(base) + 1))
+    expect(readPluginMeta('localized', parentURL)?.error).toContain('metadata JSON exceeds 1 MiB')
+  })
+})
+
 describe('plugin locale display metadata', () => {
   it.each([
     'C:\\plugins\\search.js',

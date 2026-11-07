@@ -1350,23 +1350,81 @@ label.registryOption {
   color: var(--dsw-alias-label-secondary);
 }
 
-/* A bundle's source facts: label at the start, value at the end, one ruled line each. */
+.packageNote {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.upstreams {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.upstream {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.upstreamTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.facts a,
+.upstreamTitle a,
+.sourceRecord {
+  color: var(--dsw-alias-state-business-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.facts a:focus-visible,
+.upstreamTitle a:focus-visible,
+.sourceRecord:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+
+.sourceRecord {
+  align-self: flex-start;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* Package declarations and installation facts share the same responsive list. */
 .facts {
   margin: 0;
 }
 
 .facts div {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
   min-height: 44px;
   padding: 8px 2px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
 
 .facts dt {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 20px;
   color: var(--dsw-alias-label-secondary);
@@ -1374,6 +1432,7 @@ label.registryOption {
 
 .facts dd {
   min-width: 0;
+  max-width: 100%;
   margin: 0;
   font-size: 13px;
   line-height: 20px;

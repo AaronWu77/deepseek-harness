@@ -32,6 +32,7 @@ import {
 import { managementText, noticeText, packageText, registryText, restartText, rowText, type Translate } from './presentation.ts'
 import type { PluginPackageRef, PluginRowRef, PluginsSubject } from './slot-contract.ts'
 import type { ConfigPageForm } from './slot-contract.ts'
+import { PackageInformation } from './PackageInformation.tsx'
 import css from './PluginManagerPage.module.css'
 import badgeSkillPreview from './assets/badge-skill-preview.svg'
 import badgeSkillPreviewZh from './assets/badge-skill-preview.zh.svg'
@@ -682,6 +683,7 @@ function RowDetail({ pkg, row, t, resolveText, onBack, renderSlot, form }: {
       </div>
       <MetadataError error={row.meta?.error} t={t} />
       <div className={css.detailSections} data-plugin-config>
+        <PackageInformation meta={row.meta} t={t} resolveText={resolveText} />
         {renderSlot('plugins.row.config', { view: 'page', form }, { entryKey: key })}
         {renderSlot('plugins.detail.section', { subject })}
       </div>
@@ -776,6 +778,7 @@ function PackageDetail({
       {pkg.readOnlyReason === undefined ? null : <p className={css.reason} role="status">{managementText({ code: pkg.readOnlyReason }, t)}</p>}
       {preview === undefined ? null : <PackagePreview src={preview} title={title} t={t} />}
       <div className={css.detailSections}>
+        <PackageInformation meta={pkg.meta} t={t} resolveText={resolveText} />
         {configured
           ? (
             <section className={css.detailSection} data-plugin-config>

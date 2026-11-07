@@ -1525,12 +1525,42 @@ it('lists absent Official entries offline without resolving their packages or co
   for (const entry of OFFICIAL_ON_DEMAND_CATALOG) {
     expect(bundles.filter(bundle => bundle.name === entry.packageName)).toEqual([{
       name: entry.packageName, official: true, availability: 'missing', enabled: false, installed: false, optional: false,
-      removable: false, rows: [], overrides: [], meta: entry.meta,
+      removable: false, rows: [], overrides: [], meta: { ...entry.meta, packageSource: 'catalog' },
       installTarget: { spec: `${entry.packageName}@${getDshRuntimeVersion()}`, version: getDshRuntimeVersion() },
     }])
     expect(resolve.mock.calls.some(([name]) => name === entry.packageName)).toBe(false)
   }
   expect(registry).not.toHaveBeenCalled()
+})
+
+it('uses readable local package attribution instead of the offline Official declaration', async () => {
+  const { manager, dir, bundle, profile } = await fixture()
+  const name = OFFICIAL_ON_DEMAND_CATALOG[0]!.packageName
+  bundle(name, [], profile.home)
+  const path = join(profile.home, 'node_modules', name, 'package.json')
+  const packaged = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+  writeFileSync(path, JSON.stringify({ ...packaged, exports: { './package.json': './package.json' },
+    repository: { type: 'git', url: 'https://github.com/local/fork' }, license: 'Apache-2.0',
+    dsh: { bundle: { patch: './cordis.patch.yml' }, upstreams: [{ name: 'Provider', repository: 'https://example.test/provider',
+      relation: 'adapted', license: 'MIT', changes: 'Local protocol integration.' }] },
+  }))
+  const manifest = readProfileManifest('test', dir)
+  manifest.dependencies = { ...manifest.dependencies, [name]: '1.0.0' }
+  writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest))
+  expect((await manager.listBundles()).find(item => item.name === name)?.meta?.package).toMatchObject({
+    repository: { url: 'https://github.com/local/fork' }, license: 'Apache-2.0',
+    upstreams: [{ name: 'Provider', relation: 'adapted', changes: 'Local protocol integration.' }],
+  })
+  const localManifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+  writeFileSync(path, JSON.stringify({ ...localManifest, engines: { dsh: '999.0.0' } }))
+  expect((await manager.listBundles()).find(item => item.name === name)).toMatchObject({
+    error: { code: 'incompatible-version' }, meta: { packageSource: 'package',
+      package: { repository: { url: 'https://github.com/local/fork' }, license: 'Apache-2.0' } },
+  })
+  writeFileSync(path, JSON.stringify({ ...packaged, exports: { './package.json': './package.json' }, dsh: { bundle: { patch: './cordis.patch.yml' }, upstreams: false } }))
+  const broken = (await manager.listBundles()).find(item => item.name === name)
+  expect(broken?.meta?.error).toContain('upstreams')
+  expect(broken?.meta?.package).toBeUndefined()
 })
 
 it('distinguishes an unreadable profile dependency from an absent catalog selection', async () => {
@@ -1684,4 +1714,5 @@ it.each(['absent', 'bundle', 'not-bundle', 'unreadable'])('keeps a missing sourc
   })
   expect((await manager.listBundles()).find(item => item.name === name)?.error?.diagnostic).toContain('restore the checkout')
   expect((await manager.listBundles()).find(item => item.name === name)?.installTarget).toBeUndefined()
+  expect((await manager.listBundles()).find(item => item.name === name)?.meta?.packageSource).toBe(state === 'bundle' ? 'package' : 'catalog')
 })

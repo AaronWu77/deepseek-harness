@@ -5,6 +5,10 @@
   "private": true,
   "description": "Registry description for the fixture bundle.",
   "type": "module",
+  "repository": { "type": "git", "url": "https://github.com/fixture/local-fork", "directory": "plugins/example" },
+  "license": "MIT",
+  "author": "Original Author",
+  "maintainers": ["Local Maintainer"],
   "main": "index.js",
   "exports": {
     "./icon": "./fallback-icon.svg",
@@ -18,6 +22,12 @@
     "./review/locale/*.json": "./locale/review/*.json"
   },
   "dsh": {
+    "documentation": { "en": "https://example.test/docs/en", "zh": "https://example.test/docs/zh" },
+    "upstreams": [{
+      "name": "Original Plugin", "repository": "https://github.com/fixture/original",
+      "relation": "adapted", "license": "Apache-2.0",
+      "changes": { "en": "Local compatibility and navigation changes.", "zh": "本地兼容与导航改造。" }
+    }],
     "bundle": {
       "patch": "./cordis.patch.yml"
     }

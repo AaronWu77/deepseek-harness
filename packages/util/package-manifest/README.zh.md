@@ -52,7 +52,26 @@ const manifest: DshPackageManifest = {
 | `dsh.manifestVersion` | manifest（元数据清单）格式标识；声明的格式为 `1`，独立于 npm 包版本和 Session 格式版本。 |
 | `engines.dsh` | 作者声明的兼容 DSH 版本，使用 SemVer 范围，也可填写精确的预发布版本。此字段与 `engines.node`、`engines.npm` 并列；engines 对象可省略 `dsh`。 |
 
-`LocalizedText` 携带字面文本或带必需英文回退值的语言映射。`PluginLocalizedMeta` 携带已安装插件的可选展示标题、描述、从包根 `package.json.icon` 或导出的 `<标识>/icon` 解析的图片 data URL，以及元信息诊断。[App boot](../../boot/app-boot/README.zh.md) 读取这些值；本包只提供其类型。
+`LocalizedText` 携带字面文本或带必需英文回退值的语言映射。`PluginLocalizedMeta` 携带已安装插件的可选展示标题、描述、从包根 `package.json.icon` 或导出的 `<标识>/icon` 解析的图片 data URL，可选的 `package` 详情，以及元信息诊断。[App boot](../../boot/app-boot/README.zh.md) 读取这些值；本包只提供其类型。
+
+<a id="package-details-and-upstream-declarations"></a>
+### 包详情与上游声明
+
+`PluginPackageDetails` 是 `PluginLocalizedMeta.package` 的已验证值。声明属于插件自身导出的包根 manifest；子路径插件不从父包或组合包继承这些声明。缺失字段保持未知，缺少上游说明从不构成原创认定。
+
+| manifest 声明 | 已验证的包详情 |
+|---|---|
+| `repository` | URL 字符串或 npm 仓库对象转为 `{ url, directory? }`；`directory` 表示不含路径穿越的相对目录，与链接分开保留。 |
+| `license`、`homepage` | 声明的包许可证和项目主页；两者均不描述上游项目。 |
+| `author`、`maintainers` | 作者文本与独立的维护者文本列表；npm 人员对象取其 `name`。读取器不从作者推断维护者，也不把人员转为链接。 |
+| `dsh.documentation` | 显式的公开文档 URL，可以是字符串，或使用小写语言标识且带非空 `en` 回退值的语言映射。读取器不推断分支或 README URL。 |
+| `dsh.upstreams` | `PluginUpstream` 声明数组，与当前包仓库和安装来源分开。 |
+
+每个上游声明 `name`、`repository` 和 `relation`：`copied`、`adapted`、`patched`、`integration` 或 `reference`。复制、改编和补丁修改的代码必须提供上游 `license` 和非空的 `changes` 摘要。`changes` 接受字面文本或与文档相同的本地化形式。可选 `ref` 记录上游修订或发布版本；省略表示未记录基线，不表示读取器可以推断。可选 `record` 链接公开的详细来源记录。记录复用代码时须保留原作者署名和许可证声明；这些元数据不能替代它们，也不认证安全性。
+
+包链接接受不含凭据的 HTTP(S)。仓库链接还接受 `git+http`/`git+https` 并规范化为网页 URL，但拒绝查询参数；不支持 SSH 地址、本地路径或可执行 URL。[App boot](../../boot/app-boot/README.zh.md#reading-plugin-display-metadata) 负责验证限制和诊断。
+
+插件管理器在 `package` 旁投影 `packageSource: "package" | "catalog"`，标明所选声明的来源。这个 Host 字段不是作者声明。即使兼容性检查拒绝激活，仍会保留可读取的已安装包声明；是否提供安装目标不影响目录声明的来源标记。
 
 公共组合声明定义在 [`src/types.ts`](src/types.ts) 中。内部 `configTrees`、`sessionFormatMigration` 和生成的 `moduleFallback` 元数据分别由镜像打包器、目录生成器和启动器读取方拥有；公共类型不暴露这些字段。
 

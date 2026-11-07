@@ -337,7 +337,7 @@ export class PluginManager extends TypertRemoteService {
         try { target = { installTarget: officialBundleInstallTarget(name, this.profile.installAnchor, runtimeVersion) } }
         catch (error) { targetError = managementError(error) }
       }
-      const catalogMeta = offered === undefined ? {} : { meta: offered.meta }
+      const catalogMeta = offered === undefined ? {} : { meta: { ...offered.meta, packageSource: 'catalog' as const } }
       if (offered !== undefined && !installed && !shipped) {
         bundles.push({ name, official, availability: 'missing', ...catalogMeta, ...target, enabled, installed, optional,
           removable: enabled, rows: [], overrides: [],
@@ -352,6 +352,7 @@ export class PluginManager extends TypertRemoteService {
       const readOnlyReason = this.protectsManager(name) ? 'management-required' as const : undefined
       let availability: BundleInfo['availability'] = 'missing'
       let version: string | undefined
+      let resolvedMeta: Pick<BundleInfo, 'meta'> = catalogMeta
       try {
         const info = bundleManifest(name, this.profile.dir, this.profile.installAnchor)
         availability = shipped ? 'installation' : 'profile'
@@ -362,20 +363,24 @@ export class PluginManager extends TypertRemoteService {
           continue
         }
         version = info.version
+        const dir = resolveBundleDir('dsh', name, this.profile.installAnchor, this.profile.dir)
+        const localMeta = readPluginMeta(info.name ?? name, pathToFileURL(join(dir, 'package.json')).href)
+        // Offline artwork and text remain a fallback; attribution always describes the readable local package.
+        const { package: _catalogPackage, ...catalogDisplay } = offered?.meta ?? {}
+        const meta = offered === undefined ? localMeta : { ...catalogDisplay, ...localMeta }
+        resolvedMeta = meta === undefined ? {} : { meta: { ...meta, packageSource: 'package' } }
         const compatibility = evaluatePluginCompatibility(info, exemptions)
         if (compatibility !== undefined && !compatibility.exempted) throw new ManagementFailure('incompatible-version', [incompatiblePlugin(compatibility)])
-        const dir = resolveBundleDir('dsh', name, this.profile.installAnchor, this.profile.dir)
-        const meta = offered?.meta ?? readPluginMeta(info.name ?? name, pathToFileURL(join(dir, 'package.json')).href)
         bundles.push({ name, official, availability, ...target, ...(version === undefined ? {} : { version }),
           ...(info.description === undefined || info.description === '' ? {} : { description: info.description }),
-          ...meta === undefined ? {} : { meta },
+          ...resolvedMeta,
           ...sourceOf(info.name), enabled, installed, optional, removable: removable && readOnlyReason === undefined,
           ...(readOnlyReason === undefined ? {} : { readOnlyReason }),
           ...this.declaredRows(name, info),
           ...targetError === undefined ? {} : { error: targetError } })
       } catch (error) {
         if (enabled || installed || optional || offered !== undefined) {
-          bundles.push({ name, official, availability, ...catalogMeta, ...target, ...(version === undefined ? {} : { version }),
+          bundles.push({ name, official, availability, ...resolvedMeta, ...target, ...(version === undefined ? {} : { version }),
             ...sourceOf(), enabled, installed, optional, removable: removable && readOnlyReason === undefined,
             ...(readOnlyReason === undefined ? {} : { readOnlyReason }),
             error: targetError ?? managementError(error), rows: [], overrides: [] })
