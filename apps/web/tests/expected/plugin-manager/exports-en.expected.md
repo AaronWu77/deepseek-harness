@@ -1,42 +1,19 @@
 - button "Back to plugins": Plugins
 - button "Uninstall @fixture/bundle": Uninstall
+- status
 - switch "Enable @fixture/bundle"
 - heading "@fixture/bundle" [level=3]
 - text: v0.0.1
 - paragraph:
   - code: "@fixture/bundle"
 - paragraph: Registry description for the fixture bundle.
-- heading "Plugin information" [level=4]
-- term: Repository (package declaration)
-- definition:
-  - link "https://github.com/fixture/local-fork":
-    - /url: https://github.com/fixture/local-fork
-- term: Package directory
-- definition:
-  - code: plugins/example
-- term: Package license
-- definition: MIT
-- term: Package author
-- definition: Original Author
-- term: Maintainers
-- definition: Local Maintainer
-- term: Documentation
-- definition:
-  - link "Documentation":
-    - /url: https://example.test/docs/en
-- heading "Upstream projects and modifications" [level=4]
-- paragraph: Declared by the package author; not a DSH security endorsement.
-- list:
-  - listitem:
-    - heading "Original Plugin" [level=5]:
-      - link "Original Plugin":
-        - /url: https://github.com/fixture/original
-    - paragraph: Adapted code
-    - term: Baseline version
-    - definition: Not recorded
-    - term: Package license
-    - definition: Apache-2.0
-    - paragraph: Local compatibility and navigation changes.
+- region "Details":
+  - heading "Fixture bundle" [level=1]
+  - paragraph: English | 中文
+  - paragraph:
+    - text: Registry fixture for the Web plugin-manager tests. It declares no
+    - code: meta.detail
+    - text: ", so its page shows this README."
 - heading "Components" [level=4]
 - text: 3 total · 3 off
 - list:
@@ -53,8 +30,8 @@
     - text: "@fixture/bundle/review"
     - code: fixture-review
     - text: "Off"
-- heading "Installation information" [level=4]
-- term: Installation source
+- heading "Source" [level=4]
+- term: Code source
 - definition:
   - code: file:{{fixtures}}/fixture-bundle
 - term: Current version

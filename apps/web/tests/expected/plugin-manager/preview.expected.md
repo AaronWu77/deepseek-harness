@@ -1,23 +1,14 @@
 - button "返回 实验性插件": 实验性插件
+- status
 - switch "启用 DSH 徽章技能"
 - heading "DSH 徽章技能" [level=3]
 - text: v{{version}} 实验性
 - paragraph:
   - code: "@deepseek-ai/dsh-experimental-badge-skill-bundle"
 - paragraph: 让 Agent 为文档、PR 等产出添加「powered by dsh」徽章。
-- img "DSH 徽章技能功能预览"
-- heading "插件信息" [level=4]
-- term: 代码仓库（包声明）
-- definition:
-  - link "https://github.com/deepseek-ai/deepseek-harness.git":
-    - /url: https://github.com/deepseek-ai/deepseek-harness.git
-- term: 仓库内目录
-- definition:
-  - code: packages/experimental/badge-skill-bundle
-- term: 包许可证
-- definition: MIT
-- heading "上游与改造" [level=4]
-- paragraph: 未提供上游说明；不能据此认定为原创
+- region "详细介绍":
+  - paragraph:
+    - img "DSH 徽章技能功能预览"
 - heading "包含的组件" [level=4]
 - text: 共 1 个 · 1 已停用
 - list:
@@ -26,8 +17,8 @@
     - code: skill-badge
     - code: "@deepseek-ai/dsh-skill-badge"
     - text: 已关闭
-- heading "安装信息" [level=4]
-- term: 安装来源
+- heading "来源信息" [level=4]
+- term: 代码来源
 - definition: 内置
 - term: 当前版本
 - definition: {{version}}

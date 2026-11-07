@@ -1,47 +1,32 @@
-/** Sidebar-right style contracts keep the docked scrim separate from fixed floating panes. */
+/** Right sidebar slide and reveal-flash style contracts. */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(fileURLToPath(new URL('../src/client/shell/SidebarRight.module.css', import.meta.url)), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+const host = String.raw`:global\(\[data-dockkit-host='dock'\]\)`
 
-function declarations(selector: string): Map<string, string> | undefined {
-  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, ' ')
-  for (const [, selectorList = '', body = ''] of withoutComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    if (!selectorList.split(',').map(value => value.trim()).includes(selector)) continue
-    const found = new Map<string, string>()
-    for (const part of body.split(';')) {
-      const colon = part.indexOf(':')
-      if (colon === -1) continue
-      found.set(part.slice(0, colon).trim(), part.slice(colon + 1).trim().replace(/\s+/g, ' '))
-    }
-    return found
-  }
-  return undefined
-}
-
-describe('SidebarRight.module.css floating pane visibility', () => {
-  it('keeps the panel ancestor visible while moving the collapsed scrim to a pseudo-element', () => {
-    expect(declarations('.panel')?.get('background')).toBe('transparent')
-    expect(declarations('.panel')?.has('opacity')).toBe(false)
-    expect(declarations('.panel')?.has('visibility')).toBe(false)
-    expect(declarations('.panel::before')).toBeDefined()
-    expect(declarations('.panel::before')?.get('opacity')).toBe('0')
-    expect(declarations('.panel[data-sidebar-right-open]::before')?.get('opacity')).toBe('1')
-    expect(declarations('.panel::before')?.get('transition')).toBe('none')
+describe('SidebarRight.module.css', () => {
+  it('starts docked items mounted by an opening at the closed position', () => {
+    expect(css).toMatch(new RegExp(String.raw`@starting-style\s*\{\s*\.panel\[data-sidebar-right-opening\] ${host},[^{}]*\{`
+      + String.raw`\s*transform: translateX\(var\(--dsh-sidebar-width\)\);\s*}\s*}`))
   })
 
-  it('adds a solid ground only while fullscreen is open', () => {
-    expect(declarations(".panel[data-sidebar-right-panel='fullscreen'][data-sidebar-right-open]")?.get('background')).toBe('var(--dsw-alias-bg-base)')
-    expect(declarations(".panel[data-sidebar-right-panel='fullscreen']")?.has('background')).toBe(false)
-    expect(declarations(".panel[data-sidebar-right-panel='fullscreen']")?.get('z-index')).toBe('40')
+  it('removes the open slide as well as the close slide for reduced motion', () => {
+    expect(css).toMatch(new RegExp(String.raw`@media \(prefers-reduced-motion: reduce\)\s*\{[^{}]*`
+      + String.raw`\.panel\[data-sidebar-right-open\] ${host}[^{}]*\{\s*transition: none;\s*}`))
   })
 
-  it('continues to hide only docked hosts and dividers while collapsed', () => {
-    expect(declarations(".panel :global([data-dockkit-host='dock'])")?.get('visibility')).toBe('hidden')
-    expect(declarations('.panel :global([data-dockkit-empty])')?.get('visibility')).toBe('hidden')
-    expect(declarations('.panel :global([data-dockkit-divider])')?.get('visibility')).toBe('hidden')
-    expect(declarations(".panel[data-sidebar-right-open] :global([data-dockkit-host='dock'])")?.get('visibility')).toBe('visible')
-    expect(css).not.toMatch(/\.panel\s*\{[^}]*\b(?:opacity|visibility)\s*:/s)
+  it('draws the reveal glow inside a docked pane above sticky code banners, and outside a floating panel over its own shadow', () => {
+    const pane = String.raw`\.panel :global\(\[data-dockkit-pane\]\[data-sidebar-right-flash\]\)`
+    const float = String.raw`\.panel :global\(\[data-dockkit-float\]\[data-sidebar-right-flash\]\)`
+    const layer = new RegExp(String.raw`${pane}::after\s*\{([^{}]*)}`).exec(css)?.[1] ?? ''
+    expect(layer).toMatch(/content: '';\s*position: absolute;\s*inset: 0;\s*z-index: 7;\s*pointer-events: none;/)
+    expect(layer).toMatch(/--sidebar-right-flash-from:\s*inset /)
+    expect(css).toMatch(new RegExp(String.raw`${pane}\s*\{\s*position: relative;\s*}`))
+    const panel = new RegExp(String.raw`${float}\s*\{(\s*--sidebar-right-flash-from[^{}]*)}`).exec(css)?.[1] ?? ''
+    expect(panel).toMatch(/--sidebar-right-flash-from:\s*var\(--dsw-elevation-prominent\),/)
+    expect(panel).toMatch(/--sidebar-right-flash-to:\s*var\(--dsw-elevation-prominent\),/)
   })
 })

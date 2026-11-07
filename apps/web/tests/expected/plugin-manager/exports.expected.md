@@ -1,42 +1,19 @@
 - button "返回插件": 插件
 - button "卸载 @fixture/bundle": 卸载
+- status
 - switch "启用 @fixture/bundle"
 - heading "@fixture/bundle" [level=3]
 - text: v0.0.1
 - paragraph:
   - code: "@fixture/bundle"
 - paragraph: Registry description for the fixture bundle.
-- heading "插件信息" [level=4]
-- term: 代码仓库（包声明）
-- definition:
-  - link "https://github.com/fixture/local-fork":
-    - /url: https://github.com/fixture/local-fork
-- term: 仓库内目录
-- definition:
-  - code: plugins/example
-- term: 包许可证
-- definition: MIT
-- term: 包作者
-- definition: Original Author
-- term: 维护者
-- definition: Local Maintainer
-- term: 使用文档
-- definition:
-  - link "使用文档":
-    - /url: https://example.test/docs/zh
-- heading "上游与改造" [level=4]
-- paragraph: 以下信息由包作者声明，不代表 DSH 的安全认证
-- list:
-  - listitem:
-    - heading "Original Plugin" [level=5]:
-      - link "Original Plugin":
-        - /url: https://github.com/fixture/original
-    - paragraph: 基于上游改造
-    - term: 基准版本
-    - definition: 未记录
-    - term: 包许可证
-    - definition: Apache-2.0
-    - paragraph: 本地兼容与导航改造。
+- region "详细介绍":
+  - heading "Fixture bundle" [level=1]
+  - paragraph: English | 中文
+  - paragraph:
+    - text: Registry fixture for the Web plugin-manager tests. It declares no
+    - code: meta.detail
+    - text: ", so its page shows this README."
 - heading "包含的组件" [level=4]
 - text: 共 3 个 · 3 已停用
 - list:
@@ -54,8 +31,8 @@
     - code: fixture-review
     - code: "@fixture/bundle/review"
     - text: 已关闭
-- heading "安装信息" [level=4]
-- term: 安装来源
+- heading "来源信息" [level=4]
+- term: 代码来源
 - definition:
   - code: file:{{fixtures}}/fixture-bundle
 - term: 当前版本
