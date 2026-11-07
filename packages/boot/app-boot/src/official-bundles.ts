@@ -9,7 +9,7 @@ export interface OfficialBundleCatalogEntry {
   /** Exact npm package name accepted by the existing bundle installer. */
   readonly packageName: string
   /** Package-owned localized text and a self-contained icon, embedded without provider code. */
-  readonly meta: Required<Pick<PluginLocalizedMeta, 'title' | 'description' | 'icon'>>
+  readonly meta: Required<Pick<PluginLocalizedMeta, 'title' | 'description' | 'icon'>> & Pick<PluginLocalizedMeta, 'package'>
 }
 
 export { OFFICIAL_ON_DEMAND_CATALOG } from './official-bundles.generated.ts'
