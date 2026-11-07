@@ -39,7 +39,7 @@ export type AppFrameProps =
 
 /** Center column grid item (session-body building block). */
 function CenterColumn(props: { children?: ReactNode; inert: boolean }) {
-  return <div className={css.centerCol} {...{ inert: props.inert ? '' : undefined }}>{props.children}</div>
+  return <div className={css.centerCol} data-dsh-surface="center" {...{ inert: props.inert ? '' : undefined }}>{props.children}</div>
 }
 
 /** Subscribe to the main key without subscribing the column frame to each panel id. */
