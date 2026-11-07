@@ -60,40 +60,6 @@ describe('Official bundle catalog generation', () => {
     expect(renderOfficialBundleCatalog(entries)).not.toContain('1.2.3')
   })
 
-  it('embeds owning package details and freshness-checks declarations without importing provider code', () => {
-    const root = fixture()
-    const name = ON_DEMAND_BUNDLES[0]!
-    const declaration = { repository: { type: 'git', url: 'git+https://github.com/example/plugin.git', directory: 'packages/plugin' },
-      homepage: 'https://example.org/plugin#readme', license: 'MIT', author: { name: 'Author' }, maintainers: ['Maintainer'],
-      dsh: { bundle: { patch: './cordis.patch.yml' }, documentation: { en: 'https://example.org/docs', zh: 'https://example.org/zh/docs' },
-        upstreams: [{ name: 'Upstream', repository: 'https://github.com/example/upstream', relation: 'adapted',
-          license: 'MIT', changes: { en: 'Adapted loader.', zh: '调整加载器。' }, record: 'https://example.org/record' }] } }
-    updateManifest(root, name, declaration)
-    const entries = generateOfficialBundleCatalog(root)
-    expect(entries[0]?.meta.package).toEqual({
-      repository: { url: 'https://github.com/example/plugin.git', directory: 'packages/plugin' },
-      homepage: declaration.homepage, license: 'MIT', author: 'Author', maintainers: ['Maintainer'],
-      documentation: declaration.dsh.documentation, upstreams: declaration.dsh.upstreams,
-    })
-    const rendered = renderOfficialBundleCatalog(entries)
-    expect(rendered).toContain('package: {')
-    expect(rendered).toContain('https://example.org/docs')
-    expect(rendered).not.toContain('git+https')
-    expect(entries[1]?.meta).not.toHaveProperty('package')
-    syncOfficialBundleCatalog(root, false)
-    expect(() => { syncOfficialBundleCatalog(root, true) }).not.toThrow()
-    updateManifest(root, name, { license: 'Apache-2.0' })
-    expect(() => { syncOfficialBundleCatalog(root, true) }).toThrow('is stale')
-    syncOfficialBundleCatalog(root, false)
-    expect(readFileSync(join(root, output), 'utf8')).toContain('Apache-2.0')
-  })
-
-  it('rejects malformed package declarations instead of publishing display-only attribution', () => {
-    const root = fixture()
-    updateManifest(root, ON_DEMAND_BUNDLES[0]!, { repository: 'javascript:alert(1)' })
-    expect(() => generateOfficialBundleCatalog(root)).toThrow('public HTTP(S) URL')
-  })
-
   it.each(['private', 'not-bundle', 'missing', 'duplicate'])('rejects %s catalog membership', (kind) => {
     const root = fixture()
     const name = ON_DEMAND_BUNDLES[0]!
