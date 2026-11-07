@@ -137,10 +137,14 @@
   position: absolute;
   inset: 0 0 auto;
   height: var(--plugin-header-paint-height, var(--plugin-header-rest-height));
-  background: var(--dsw-specific-sticky-fill);
-  -webkit-backdrop-filter: var(--dsw-specific-sticky-blur);
-  backdrop-filter: var(--dsw-specific-sticky-blur);
+  /* At rest nothing has scrolled under the bar, so it paints nothing. */
+  background: transparent;
   pointer-events: none;
+}
+
+/* Once the page scrolls, the bar floats over content and takes its fill. */
+.pageBar[data-natural][data-compact]::before {
+  background: var(--dsw-specific-sticky-fill);
 }
 
 .pageBar[data-natural][data-compact]::after {
