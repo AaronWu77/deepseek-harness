@@ -313,7 +313,6 @@ export function AppFrame({
       data-dragging={dragging || undefined}
       data-animating={animateTracks || undefined}
     >
-      <AmbientCanvas />
       <DocumentTitle
         productTitle={productTitle}
         useSessions={useSessions}
@@ -348,6 +347,7 @@ export function AppFrame({
       {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
         <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
       )}
+      <AmbientCanvas />
     </div>
   )
 }

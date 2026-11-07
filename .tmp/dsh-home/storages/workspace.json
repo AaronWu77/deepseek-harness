@@ -1,0 +1,25 @@
+{
+  "unit": {
+    "name": "workspace",
+    "version": 2
+  },
+  "global": {
+    "initialized": true,
+    "workspaceIds": [
+      "e8148f71-15db-474a-b8f4-c12fa5e86367"
+    ],
+    "archivedSessionIds": [],
+    "pinnedSessionIds": []
+  },
+  "tables": {
+    "workspaces": {
+      "e8148f71-15db-474a-b8f4-c12fa5e86367": {
+        "path": "C:\\Users\\30413\\.dsh\\remote-ssh\\workspaces\\2a0876d5-1cd5-4e0d-9caa-a5b2f5e9ac3d",
+        "title": "192.168.13.175 > SUPER",
+        "sessionIds": [],
+        "createdAt": "2026-11-07T07:21:59.571Z",
+        "updatedAt": "2026-11-07T07:21:59.571Z"
+      }
+    }
+  }
+}
