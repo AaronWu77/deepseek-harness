@@ -72,7 +72,7 @@ The following metadata fields are optional. Omitting them leaves the format vers
 
 Each upstream declares `name`, `repository`, and `relation`: `copied`, `adapted`, `patched`, `integration`, or `reference`. Copied, adapted, and patched code require the upstream `license` and a nonblank `changes` summary. `changes` accepts literal text or the same localized form as documentation. Optional `ref` records the upstream revision or release; omission means the baseline is not recorded, not that the reader may infer one. Optional `record` links a public detailed source record. Preserve original attribution and license notices when documenting reused code; these declarations do not replace them or certify safety.
 
-Package links accept HTTP(S) without credentials. Repository links also accept `git+http`/`git+https` and normalize them to web URLs, but reject queries; SSH addresses, local paths, and executable URLs are not supported. [App boot](../../boot/app-boot/README.md#reading-plugin-display-metadata) owns validation limits and diagnostics.
+Package links accept HTTP(S) without credentials. Repository links also accept `git+http`/`git+https` and normalize them to web URLs, but reject queries; SSH addresses, local paths, and executable URLs are not supported. App boot owns validation limits and diagnostics.
 
 The Plugin Manager projects `packageSource: "package" | "catalog"` beside `package` to identify the selected declaration source. This Host field is not an author declaration. Readable installed declarations remain available even when compatibility checks reject activation; catalog declarations are identified independently of whether an installation target is available.
 

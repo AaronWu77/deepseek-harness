@@ -31,18 +31,13 @@ interface SubagentCapabilities {
 interface SubagentActivationSpec {
   /** Registered backend to use. */
   readonly provider: string
-  /** Explicit local lifetime; omitted preserves existing provider dispatch. */
-  readonly lifecycle?: 'one-shot' | 'continuable'
   /** Short task label retained in cataloged child membership. */
   readonly label: string
   /** Optional reserved identity for a local child; external backends allocate their own ids. */
   readonly childId?: SessionId
   /** Task, parent, and backend-supported execution options. */
   readonly request: Omit<SubagentStartRequest, 'label' | 'signal'>
-  /**
-   * Startup cancellation; local one-shot and external executions also cancel after publication.
-   * Continuable callers use dispose after publication.
-   */
+  /** Cancellation before publication; callers own later cancellation through dispose. */
   readonly signal: AbortSignal
   /** Parent delivery notifies the model; caller delivery only returns the result. Local children always enter the parent catalog. */
   readonly delivery: 'parent' | 'caller'
@@ -87,7 +82,7 @@ interface SubagentStartRequest {
   readonly prompt: ContentBlock[]
   /**
    * The spawning agent. Its effective directory supplies the default cwd;
-   * continuable children retain its project origin; all local children retain lineage and delegation depth.
+   * in-process children retain its origin, lineage, and delegation depth.
    */
   readonly parent: Agent
   /**
@@ -134,7 +129,7 @@ interface ResolvedSubagentStartRequest extends SubagentStartRequest {
 
 Spawn alone supports an independent `agentPreset`; omission and fork inherit the parent's active composition. The [child preset rules](../../packages/subagent/subagent/README.md#restoring-child-composition) define explicit selection, event ordering, and historical restoration.
 
-A continuable local child has a durable Session and at most one live activation. The manager reserves identity and capacity, prepares the child through its backend, and owns input admission, cold resume, and child-first disposal. The activation result settles after resource release and completion notification. Disposal reports cleanup failure separately without replacing a captured result. Structured capture closes input for that activation; a later cold resume does not inherit the output schema.
+A local child has a durable Session and at most one live activation. The manager reserves identity and capacity, prepares the child through its backend, and owns input admission, cold resume, and child-first disposal. The activation result settles after resource release and completion notification. Disposal reports cleanup failure separately without replacing a captured result. Structured capture closes input for that activation; a later cold resume does not inherit the output schema.
 
 ```ts type-equiv
 /**
@@ -175,31 +170,6 @@ interface ContinuableCreateSpec {
   readonly seed?: readonly SessionEvent[]
 }
 ```
-
-```ts type-equiv
-/** Reserved local identity and task admitted before one-shot preparation. */
-interface LocalOneShotCreateRequest extends ResolvedSubagentStartRequest {
-  /** Manager-reserved durable child identity. */
-  readonly sessionId: SessionId
-}
-```
-
-```ts type-equiv
-/** Detached one-shot creation hooks; the manager alone creates and owns the child. */
-interface LocalOneShotCreateSpec {
-  /** Explicit child preset metadata; setup mounts its implementation. */
-  readonly agentPreset?: string
-  /** Scoped composition before publication; must not start child execution. */
-  readonly setup?: CreateAgentOptions['setup']
-  /**
-   * Startup probe after creation; its signal includes caller, manager and parent disposal cancellation.
-   * Rejection disposes the unpublished child.
-   */
-  readonly preflight?: (child: Agent, signal: AbortSignal) => Promise<void>
-}
-```
-
-Explicit `lifecycle: 'one-shot'` selects `prepareLocalOneShot`. The manager owns execution, cancellation and cleanup; trusted preparation hooks may compose and preflight the child. A one-shot child rejects follow-up input and cold resume.
 
 ## Messages and interruption
 
@@ -388,8 +358,8 @@ interface SubagentProvider {
    * OPTIONAL (continuable-creation capability): contribute the detached
    * creation inputs that distinguish this provider's continuable children —
    * only whether the child session is seeded with parent history. Method
-   * presence selects local continuable activation by default. Explicit one-shot
-   * lifetime uses prepareLocalOneShot; external executions use start.
+   * presence selects local activation execution. Providers without it execute
+   * through start and do not accept subsequent messages.
    *
    * This is the provider's ONLY participation in a continuable child. The
    * continuation manager owns identity reservation, composition, Agent
@@ -399,16 +369,6 @@ interface SubagentProvider {
    * data belonging only to `request.sessionId`.
    */
   prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
-  /**
-   * Prepare a fresh local one-shot child without creating or returning an Agent or handle.
-   * Selected only by explicit lifecycle: 'one-shot'; the manager owns execution,
-   * cancellation, result capture and quiescent disposal. Hooks may compose and
-   * probe the child, never deliver prompts or retain its lifecycle ownership.
-   * Preparation observes request.signal and returns hooks without awaiting native
-   * probes or child execution. The second signal is manager-owned startup cancellation
-   * and must stop provider work when the parent or manager drains.
-   */
-  prepareLocalOneShot?(request: LocalOneShotCreateRequest, managedSignal: AbortSignal): Promise<LocalOneShotCreateSpec>
 }
 ```
 

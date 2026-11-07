@@ -157,7 +157,7 @@ Install 界面仍使用 `pnpm view` 返回的 npm registry 信息，不用 local
 
 ### 包仓库与上游详情
 
-使用标准包字段 `repository`（URL 字符串或 `{ type?, url, directory? }`）、`license`、`homepage`、`author` 和 `maintainers` 描述当前包。在 `dsh.documentation` 中添加显式的公开文档链接，在 `dsh.upstreams` 中添加上游声明；通过 `./package.json` 导出包根 manifest。这些详情属于包，不属于 locale `meta`、组合包安装 spec 或子路径插件。关系字段、代码复用时必填的声明、URL 规则及未知基线见[声明参考](../../packages/util/package-manifest/README.zh.md#package-details-and-upstream-declarations)，发布前还须查阅[读取限制](../../packages/boot/app-boot/README.zh.md#reading-plugin-display-metadata)。
+使用标准包字段 `repository`（URL 字符串或 `{ type?, url, directory? }`）、`license`、`homepage`、`author` 和 `maintainers` 描述当前包。在 `dsh.documentation` 中添加显式的公开文档链接，在 `dsh.upstreams` 中添加上游声明；通过 `./package.json` 导出包根 manifest。这些详情属于包，不属于 locale `meta`、组合包安装 spec 或子路径插件。关系字段、代码复用时必填的声明、URL 规则及未知基线见[声明参考](../../packages/util/package-manifest/README.zh.md#package-details-and-upstream-declarations)，发布前还须查阅 App boot 的读取限制。
 
 <a id="source-and-attribution"></a>
 ### 来源与署名

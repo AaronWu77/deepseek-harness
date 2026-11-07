@@ -157,7 +157,7 @@ The Install view still uses npm registry information from `pnpm view`, not local
 
 ### Package repository and upstream details
 
-Use standard package fields `repository` (URL string or `{ type?, url, directory? }`), `license`, `homepage`, `author`, and `maintainers` for the current package. Add explicit public documentation links in `dsh.documentation` and upstream declarations in `dsh.upstreams`; expose the package-root manifest through `./package.json`. These details belong to the package, not locale `meta`, bundle installation specs, or subpath plugins. Use the [declaration reference](../../packages/util/package-manifest/README.md#package-details-and-upstream-declarations) for relationship fields, required reuse declarations, URL rules, and unknown baselines, and [reader limits](../../packages/boot/app-boot/README.md#reading-plugin-display-metadata) before publishing.
+Use standard package fields `repository` (URL string or `{ type?, url, directory? }`), `license`, `homepage`, `author`, and `maintainers` for the current package. Add explicit public documentation links in `dsh.documentation` and upstream declarations in `dsh.upstreams`; expose the package-root manifest through `./package.json`. These details belong to the package, not locale `meta`, bundle installation specs, or subpath plugins. Use the [declaration reference](../../packages/util/package-manifest/README.md#package-details-and-upstream-declarations) for relationship fields, required reuse declarations, URL rules, and unknown baselines, and the App boot reader limits before publishing.
 
 <a id="source-and-attribution"></a>
 ### Source and attribution

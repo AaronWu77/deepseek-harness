@@ -72,7 +72,7 @@ const manifest: DshPackageManifest = {
 
 每个上游声明 `name`、`repository` 和 `relation`：`copied`、`adapted`、`patched`、`integration` 或 `reference`。复制、改编和补丁修改的代码必须提供上游 `license` 和非空的 `changes` 摘要。`changes` 接受字面文本或与文档相同的本地化形式。可选 `ref` 记录上游修订或发布版本；省略表示未记录基线，不表示读取器可以推断。可选 `record` 链接公开的详细来源记录。记录复用代码时须保留原作者署名和许可证声明；这些元数据不能替代它们，也不认证安全性。
 
-包链接接受不含凭据的 HTTP(S)。仓库链接还接受 `git+http`/`git+https` 并规范化为网页 URL，但拒绝查询参数；不支持 SSH 地址、本地路径或可执行 URL。[App boot](../../boot/app-boot/README.zh.md#reading-plugin-display-metadata) 负责验证限制和诊断。
+包链接接受不含凭据的 HTTP(S)。仓库链接还接受 `git+http`/`git+https` 并规范化为网页 URL，但拒绝查询参数；不支持 SSH 地址、本地路径或可执行 URL。App boot 负责验证限制和诊断。
 
 插件管理器在 `package` 旁投影 `packageSource: "package" | "catalog"`，标明所选声明的来源。这个 Host 字段不是作者声明。即使兼容性检查拒绝激活，仍会保留可读取的已安装包声明；是否提供安装目标不影响目录声明的来源标记。
 

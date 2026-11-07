@@ -24,17 +24,17 @@
   en: a875e9dbb810c57c
   zh: b618e7d211823924
 /fork-deviations/local-one-shot-activation:
-  en: 9c7a0d93f880c1c2
-  zh: 1af529d56ffa2023
+  en: cf26db3162664bcd
+  zh: ff68aaf793c5659b
 /fork-deviations/preservation-registry:
   en: df641361e740f387
   zh: b9922b015675ebc5
 /fork-deviations/preservation-registry/runtime-patches:
-  en: 080b4254d3310413
-  zh: e48c0546e09a9019
+  en: 0cb70f887a41f9c8
+  zh: dec138f90aee8461
 /fork-deviations/preservation-registry/repository-build-and-recording-support:
   en: f95a003b7570167a
   zh: 2074e1271f605f55
 /fork-deviations/upstream-behavior-not-counted-as-customization:
-  en: 2d3d3a298f6ea582
-  zh: 339d9233b055d603
+  en: 25a9f3ffc12f488a
+  zh: f26d0b42d5e44176
