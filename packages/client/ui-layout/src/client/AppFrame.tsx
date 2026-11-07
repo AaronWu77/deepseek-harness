@@ -126,6 +126,14 @@ function DragHandle(props: { side: 'sidebar' | 'rightbar'; left: number; onStart
 }
 
 /** The three-column frame (see module doc). */
+/**
+ * Ambient canvas: the decorative layer the optional skin paints its colour fields on.
+ * Hidden by default; the stylesheet owns whether it is visible.
+ */
+function AmbientCanvas() {
+  return <div className={css.ambient} data-dsh-part="ambient" aria-hidden="true" />
+}
+
 export function AppFrame({
   useStore,
   useSessions,
@@ -289,6 +297,7 @@ export function AppFrame({
     <div
       ref={frameRef}
       className={css.frame}
+      data-dsh-surface="frame"
       style={{
         ...(windowsTitlebar
           ? { '--dsh-windows-sidebar-width': `${cols.sidebar}px` } : {}),
@@ -304,6 +313,7 @@ export function AppFrame({
       data-dragging={dragging || undefined}
       data-animating={animateTracks || undefined}
     >
+      <AmbientCanvas />
       <DocumentTitle
         productTitle={productTitle}
         useSessions={useSessions}

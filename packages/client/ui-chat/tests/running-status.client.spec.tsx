@@ -4,21 +4,28 @@ import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import type { ChatFlowSlotProps } from '../src/client/contract/slots.ts'
+import { RunningWhaleTail } from '../src/client/chat/RunningWhaleTail.tsx'
 import { RunningStatus } from '../src/client/chat/RunningStatus.tsx'
 import { zh } from '../src/client/locale.ts'
 
 const t = makeTranslate(zh, commonZh)
 
+const renderSlot: ChatFlowSlotProps['renderSlot'] = (name: string) => {
+  if (name !== 'conversation.chat.flow.running.icon') throw new Error(`Unexpected status slot: ${name}`)
+  return <RunningWhaleTail />
+}
+
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(5_000) })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 function statusHarness(startTime?: number) {
-  const view = render(<RunningStatus startTime={startTime} paused={false} t={t} />)
+  const view = render(<RunningStatus startTime={startTime} paused={false} t={t} renderSlot={renderSlot} />)
   return {
     ...view,
     content: () => view.container.querySelector('[data-chat-running] > :last-child'),
     set: (nextStartTime?: number, paused = false) => {
-      view.rerender(<RunningStatus startTime={nextStartTime} paused={paused} t={t} />)
+      view.rerender(<RunningStatus startTime={nextStartTime} paused={paused} t={t} renderSlot={renderSlot} />)
     },
   }
 }

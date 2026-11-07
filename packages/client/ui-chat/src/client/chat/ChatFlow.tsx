@@ -93,7 +93,7 @@ export const ChatFlow = memo(function ChatFlow({
   // the status slot (hidden) until its actions row takes the slot in the same commit.
   return [
     ...rows, ...leadingRows, ...openingRows,
-    ...running || holding ? [<RunningStatus key="running" startTime={runningStartTime} paused={disconnected}
+    ...running || holding ? [<RunningStatus key="running" renderSlot={renderSlot} startTime={runningStartTime} paused={disconnected}
       holding={holding} t={t} />] : [],
     ...pendingRows,
   ]

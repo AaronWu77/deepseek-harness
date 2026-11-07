@@ -1,3 +1,7 @@
+.ambient {
+  display: none;
+}
+
 .frame {
   position: relative; /* anchors the drag handles, which straddle column borders */
   display: grid;

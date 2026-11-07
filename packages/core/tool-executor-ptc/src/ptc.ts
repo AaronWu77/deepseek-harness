@@ -13,7 +13,7 @@ import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
 
 import type { ContentBlock, ToolCallId, ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { PtcBindingFunction, PtcRunResult, PtcRunSandbox, PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
-import { approveEscalation, ESCALATION_TARGETS, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { approveEscalation, ESCALATION_TARGETS, validateEscalationArgs, WIDER_MODES } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-working-directory'
@@ -103,8 +103,8 @@ const RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION
 
 const RUN_CODE_CONTROLS = {
   timeoutMs: { type: 'number', description: 'Positive elapsed-time budget in milliseconds, capped by the deployment maximum.' },
-  sandbox_permissions: { type: 'string', enum: [...ESCALATION_TARGETS], description: 'Wider sandbox mode for this complete program execution; requires justification and approval.' },
-  justification: { type: 'string', description: 'Reason this complete program needs wider access, shown to the user for approval. Use the language of the user’s current request.' },
+  sandbox_permissions: { type: 'string', enum: [...ESCALATION_TARGETS], description: 'Wider sandbox mode for this complete program execution; provide it only after an explicit sandbox denial, together with a non-empty justification, request the narrowest mode strictly wider than the current mode, and omit both fields when the current mode is danger-full-access.' },
+  justification: { type: 'string', minLength: 1, description: 'One non-empty sentence explaining why this complete program needs wider access, shown to the user for approval. Use the language of the user’s current request.' },
 } as const
 
 function controlParameters(runtime: PtcRuntime) {
@@ -118,6 +118,16 @@ function controlParameters(runtime: PtcRuntime) {
       justification: RUN_CODE_CONTROLS.justification,
     },
   }
+}
+
+/** Build actionable guidance when the model sends malformed run_code sandbox fields. */
+function runCodeSandboxArgumentMessage(message: string): string {
+  return [
+    'Invalid run_code sandbox arguments:',
+    '- Omit both sandbox_permissions and justification for ordinary or read-only work.',
+    '- After an actual sandbox denial, retry with a wider sandbox_permissions value and a non-empty justification sentence.',
+    'Original validation: ' + message,
+  ].join('\n')
 }
 
 function escalationGuidance(mode: PtcRuntime['sandboxMode']): string {
@@ -344,20 +354,29 @@ export function createRunCodeTool(
       }
       const runtime = requirePtcRuntime(ctx)
       const run = async (callSignal: AbortSignal): Promise<RunCodeOutput> => {
-        validateEscalationArgs(args.sandbox_permissions, args.justification)
+        const standingPolicy = runtime.sandboxMode === undefined ? undefined : resolveSandboxPolicy(ctx, exec)
+        const nonEscalating = standingPolicy !== undefined && args.sandbox_permissions !== undefined
+          && ESCALATION_TARGETS.some(mode => mode === args.sandbox_permissions)
+          && !(WIDER_MODES[standingPolicy.mode] ?? []).some(mode => mode === args.sandbox_permissions)
+        const sandboxPermissions = nonEscalating ? undefined : args.sandbox_permissions
+        const justification = nonEscalating ? undefined : args.justification
+        try {
+          validateEscalationArgs(sandboxPermissions, justification)
+        } catch (error: unknown) {
+          throw new Error(runCodeSandboxArgumentMessage(error instanceof Error ? error.message : String(error)))
+        }
         if (args.timeoutMs !== undefined && runtime.timeout === undefined) {
           throw new Error('timeoutMs is not available for this PTC runtime')
         }
         if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) {
           throw new Error('invalid timeoutMs: expected a positive finite number')
         }
-        const standingPolicy = runtime.sandboxMode === undefined ? undefined : resolveSandboxPolicy(ctx, exec)
         let policy = standingPolicy
-        if (args.sandbox_permissions !== undefined && args.justification !== undefined) {
+        if (sandboxPermissions !== undefined && justification !== undefined) {
           if (standingPolicy === undefined) throw new Error('sandbox_permissions is not available for this PTC runtime')
           const approvedMode = await approveEscalation({
-            requestedMode: args.sandbox_permissions,
-            justification: args.justification,
+            requestedMode: sandboxPermissions,
+            justification,
             effectiveMode: standingPolicy.mode,
             subject: 'program',
           }, {
