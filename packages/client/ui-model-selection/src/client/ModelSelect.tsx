@@ -352,27 +352,20 @@ export function ModelSelect(
     close()
   }
 
-  const showSelectionError = (code: string, message: string): void => {
-    toastSeq.current += 1
-    setToast({
-      seq: toastSeq.current,
-      text: code === 'session/writer-held'
-        ? t('error.sessionInUse')
-        : t('error.action', { message: code + ': ' + message }),
-    })
-  }
-
   const settleSelection = (result: Awaited<ReturnType<ModelSelectInjected['select']>>): void => {
     if (result === undefined) return
     if (result.ok) {
       if (rootRef.current !== null) closeAfterSelection()
       return
     }
-    showSelectionError(result.error.code, result.error.message)
-  }
-
-  const settleThrownSelection = (error: unknown): void => {
-    showSelectionError('gateway/internal', error instanceof Error ? error.message : String(error))
+    const { error } = result
+    toastSeq.current += 1
+    setToast({
+      seq: toastSeq.current,
+      text: error.code === 'session/writer-held'
+        ? t('error.sessionInUse')
+        : t('error.action', { message: `${error.code}: ${error.message}` }),
+    })
   }
 
   const submit = (selection: ModelSelection): void => {
@@ -380,7 +373,7 @@ export function ModelSelect(
     // Disabled option rows cannot retain focus while a selection is pending.
     setSelectionFocus(true)
     triggerRef.current?.focus()
-    void select(selection).then(settleSelection).catch(settleThrownSelection)
+    void select(selection).then(settleSelection)
   }
 
   const choose = (selection: ModelSelection): void => {
