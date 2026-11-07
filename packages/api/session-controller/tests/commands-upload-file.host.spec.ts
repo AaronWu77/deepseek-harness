@@ -239,7 +239,8 @@ describe('Session file uploads', () => {
   })
 
   it('resolves a cold ordinary Agent and releases the resolver registration', async () => {
-    const { ctx, uploads, agent, disposeAgent } = await uploadHarness()
+    const { ctx, agent, disposeAgent } = await uploadHarness()
+    const uploads = ctx.fileUploads
     await disposeAgent()
     const resolveAgent = vi.fn(async () => {
       await ctx.agents.register(agent)
@@ -259,6 +260,40 @@ describe('Session file uploads', () => {
     expect(() => { uploads.registerAgentResolver(replacement) }).toThrow('already registered')
     expect(disposeReplacement).toBeTypeOf('function')
     disposeReplacement()
+  })
+
+  it('releases the cold Agent resolver when its consumer unloads', async () => {
+    const { ctx, agent, disposeAgent } = await uploadHarness()
+    await disposeAgent()
+    let releaseAgent: (() => Promise<void>) | undefined
+    const resolveAgent = vi.fn(async () => {
+      releaseAgent = await ctx.agents.register(agent)
+      return agent
+    })
+    const consumer = {
+      name: 'upload-agent-resolver-consumer',
+      inject: ['fileUploads'],
+      apply(scope: Context) {
+        scope.effect(() => scope.fileUploads.registerAgentResolver(resolveAgent))
+      },
+    }
+    const first = ctx.plugin(consumer)
+    await first
+    await first.dispose()
+    const second = ctx.plugin(consumer)
+    await second
+    await expect(ctx.fileUploads.uploadStream({
+      sessionId: SESSION,
+      data: (async function* (): AsyncIterable<Uint8Array> { yield Uint8Array.of(1) })(),
+    })).resolves.toMatchObject({ file: { bytes: 1 } })
+    expect(resolveAgent).toHaveBeenCalledOnce()
+    await second.dispose()
+    if (releaseAgent === undefined) throw new Error('cold Agent was not registered')
+    await releaseAgent()
+    await expect(ctx.fileUploads.uploadStream({
+      sessionId: SESSION,
+      data: (async function* (): AsyncIterable<Uint8Array> {})(),
+    })).rejects.toMatchObject({ code: 'session/not-found' })
   })
 
   it('rejects a cold upload when no Agent resolver is registered', async () => {

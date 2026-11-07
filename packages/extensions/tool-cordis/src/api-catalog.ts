@@ -1074,7 +1074,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'registerAgentResolver(resolve: AgentResolver): () => void',
         description: 'Register the ordinary-Session resolver used when a raw upload addresses a cold Session.',
         parameters: [{ name: 'resolve', description: 'resolver that returns the exact live Agent or throws a Remote error.' }],
-        returns: 'disposer removing this resolver.',
+        returns: 'idempotent disposer removing only this registration, including through a Cordis service proxy.',
       },
       {
         signature: '@Remote(\'upload\') upload(agent: Agent, request: EncodedFileUploadRequest, signal: AbortSignal): Promise<FileUploadValue>',
@@ -6451,7 +6451,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PluginLocalizedMeta',
-    declaration: 'export interface PluginLocalizedMeta {\n    readonly title?: LocalizedText;\n    readonly description?: LocalizedText;\n    readonly icon?: string;\n    readonly error?: string;\n}',
+    declaration: 'export interface PluginLocalizedMeta {\n    readonly title?: LocalizedText;\n    readonly description?: LocalizedText;\n    readonly icon?: string;\n    readonly package?: PluginPackageDetails;\n    readonly packageSource?: \'package\' | \'catalog\';\n    readonly error?: string;\n}',
   },
   {
     name: 'PluginOptions',
@@ -6462,12 +6462,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PluginOptionValue = string | number | boolean | readonly string[];',
   },
   {
+    name: 'PluginPackageDetails',
+    declaration: 'export interface PluginPackageDetails {\n    readonly repository?: {\n        readonly url: string;\n        readonly directory?: string;\n    };\n    readonly homepage?: string;\n    readonly documentation?: LocalizedText;\n    readonly license?: string;\n    readonly author?: string;\n    readonly maintainers?: readonly string[];\n    readonly upstreams?: readonly PluginUpstream[];\n}',
+  },
+  {
     name: 'PluginRegistries',
     declaration: 'export interface PluginRegistries {\n    readonly registry: Registry;\n    readonly fallbackRegistries: readonly string[];\n    readonly resolved: string | null;\n}',
   },
   {
     name: 'PluginSpecInspection',
     declaration: 'export type PluginSpecInspection = {\n    readonly status: \'accepted\';\n    readonly kind: InstallSpecKind;\n    readonly name?: string;\n    readonly version?: string;\n    readonly description?: string;\n    readonly bundle: boolean | null;\n    readonly registry: Registry;\n    readonly host?: string;\n} | {\n    readonly status: \'refused\';\n    readonly problem: PluginInspectProblem;\n    readonly reason: string;\n    readonly registries?: Registry[];\n};',
+  },
+  {
+    name: 'PluginUpstream',
+    declaration: 'export interface PluginUpstream {\n    readonly name: string;\n    readonly repository: string;\n    readonly relation: \'copied\' | \'adapted\' | \'patched\' | \'integration\' | \'reference\';\n    readonly ref?: string;\n    readonly license?: string;\n    readonly changes?: LocalizedText;\n    readonly record?: string;\n}',
   },
   {
     name: 'PostToolDecision',

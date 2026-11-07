@@ -186,6 +186,19 @@ function verifyToolResultWriterParity(fixture: string, actual: string): void {
   expect(written, 'native tool-result messages match migration output').toEqual(expected)
 }
 
+/** Reject the complete provider response before either sibling reaches the tool scheduler. */
+function verifyPiAiInvalidToolArguments(log: string): void {
+  const events = parseSessionLog(log)
+  expect(events.filter(event => event.type === 'request/header')).toHaveLength(1)
+  expect(events.some(event => event.type === 'tool/call' || event.type === 'tool/result' || event.type === 'assistant/message')).toBe(false)
+  const attempt = events.find(event => event.type === 'assistant/attempt')
+  expect(attempt).toBeDefined()
+  expect(JSON.stringify(attempt)).toContain('Received arguments:')
+  expect(events.filter(event => event.type === 'turn/end')).toMatchObject([
+    { data: { turn: 1, reason: { kind: 'error', error: { code: 'INVALID_REQUEST' } } } },
+  ])
+}
+
 function headerOf(log: string): JsonObject {
   return records(log)[0] ?? {}
 }
@@ -1295,10 +1308,11 @@ describe('headless recorded-session snapshots', () => {
             task,
           ],
           tsconfigPath,
-          expectedExitCode: primaryReason?.kind === 'completed'
-            || primaryReason === undefined && scenario.manifest.input?.task !== undefined
-            ? 0
-            : 1,
+          expectedExitCode: scenario.name === 'pi-ai-invalid-tool-arguments' ? 1
+            : primaryReason?.kind === 'completed'
+              || primaryReason === undefined && scenario.manifest.input?.task !== undefined
+              ? 0
+              : 1,
           env: {
             DSH_SNAPSHOT: replaying ? 'replay' : 'record',
             DSH_SNAPSHOT_PROVIDER: model.provider,
@@ -1360,6 +1374,7 @@ describe('headless recorded-session snapshots', () => {
               expect(results.every(result => result.isError === false)).toBe(true)
               expect(log).toContain('# Office task routing')
             }
+            if (scenario.name === 'pi-ai-invalid-tool-arguments') verifyPiAiInvalidToolArguments(actualLogs[0]!.content)
             if (scenario.name === 'advanced-toolchain') verifyAdvancedToolchain(actualLogs)
             if (scenario.name === 'session-query-spill') {
               await verifySessionQuerySpill(actualLogs[0]!.content, spillRoot, locatorRoot)
