@@ -611,8 +611,8 @@ listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<Subagen
 /**
  * Register a provider under its name. Registration is effect-scoped and HMR
  * safe; removing a provider blocks new starts but does not revoke runs that
- * were already returned to their holders. Providers without `start`, `prepareContinuable`,
- * or `prepareLocalOneShot` are rejected with UNSUPPORTED_CAPABILITY before registration.
+ * were already returned to their holders. Providers without either execution
+ * method are rejected with UNSUPPORTED_CAPABILITY before registration.
  * @param provider - the trusted provider implementation.
  * @returns the exact Cordis effect disposer.
  */

@@ -187,9 +187,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async list(): Promise<AgentPreset[]>',
-        description: 'Read every declared preset, including activation failures.',
+        description: 'Read every user-selectable declared preset, including activation failures.',
         parameters: [],
-        returns: 'Display metadata and loading diagnostics.',
+        returns: 'Display metadata and loading diagnostics; non-selectable role presets are omitted.',
       },
       {
         signature: '@Remote(\'list\') async remoteExportList(): Promise<AgentPresetRoster>',
@@ -4288,6 +4288,17 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'The web access service. Registered as `ctx.web` (one instance per context).\n\nSelection semantics (resolved at execution time, never order-dependent):\n\n- A configured id that is registered and `available()` → that provider.\n- A configured id not registered → `WEB_PROVIDER_CONFIGURED_MISSING`.\n- A configured id registered but unavailable → `WEB_PROVIDER_CONFIGURED_UNAVAILABLE`.\n- No id configured, exactly one registered usable provider → that provider.\n- No id configured, multiple usable providers → `WEB_PROVIDER_AMBIGUOUS`.\n- No id configured, no usable provider → `WEB_PROVIDER_UNAVAILABLE`.',
     methods: [
       {
+        signature: 'getSearchProvider(): string | undefined',
+        description: 'Read the explicitly configured search provider id.\n\nEnvironment fallback is applied only when search executes, so an absent value here does not mean that no provider is configured for the process.',
+        parameters: [],
+        returns: 'the current explicit provider id, or undefined when it is unset.',
+      },
+      {
+        signature: 'setSearchProvider(provider: string | undefined): void',
+        description: 'Set or clear the explicitly configured search provider id.',
+        parameters: [{ name: 'provider', description: 'provider id to pin, or undefined to restore automatic selection.' }],
+      },
+      {
         signature: 'registerSearchProvider(provider: WebSearchProvider): () => void',
         description: 'Register a search provider. Throws WebError `WEB_DUPLICATE_PROVIDER` if its id is already registered for search. Returns a disposer; disposed with the calling fiber.',
         parameters: [{ name: 'provider', description: 'the provider; its `id` is the registry key.' }],
@@ -6857,7 +6868,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'JsonSchemaNode',
-    declaration: 'export interface JsonSchemaNode {\n    type?: JsonSchemaType;\n    oneOf?: JsonSchemaNode[];\n    properties?: Record<string, JsonSchemaNode>;\n    required?: string[];\n    additionalProperties?: boolean;\n    items?: JsonSchemaNode;\n    enum?: JsonSchemaScalar[];\n    const?: JsonSchemaScalar;\n    description?: string;\n    title?: string;\n    default?: JsonValue;\n    examples?: JsonValue;\n}',
+    declaration: 'export interface JsonSchemaNode {\n    type?: JsonSchemaType;\n    oneOf?: JsonSchemaNode[];\n    properties?: Record<string, JsonSchemaNode>;\n    required?: string[];\n    additionalProperties?: boolean;\n    items?: JsonSchemaNode;\n    enum?: JsonSchemaScalar[];\n    minLength?: number;\n    const?: JsonSchemaScalar;\n    description?: string;\n    title?: string;\n    default?: JsonValue;\n    examples?: JsonValue;\n}',
   },
   {
     name: 'JsonSchemaScalar',
@@ -7497,7 +7508,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PluginLocalizedMeta',
-    declaration: 'export interface PluginLocalizedMeta {\n    readonly title?: LocalizedText;\n    readonly description?: LocalizedText;\n    readonly icon?: string;\n    readonly error?: string;\n}',
+    declaration: 'export interface PluginLocalizedMeta {\n    readonly title?: LocalizedText;\n    readonly description?: LocalizedText;\n    readonly icon?: string;\n    readonly package?: PluginPackageDetails;\n    readonly packageSource?: \'package\' | \'catalog\';\n    readonly error?: string;\n}',
   },
   {
     name: 'PluginOperation',
@@ -7514,6 +7525,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PluginOptionValue',
     declaration: 'export type PluginOptionValue = string | number | boolean | readonly string[];',
+  },
+  {
+    name: 'PluginPackageDetails',
+    declaration: 'export interface PluginPackageDetails {\n    readonly repository?: {\n        readonly url: string;\n        readonly directory?: string;\n    };\n    readonly homepage?: string;\n    readonly documentation?: LocalizedText;\n    readonly license?: string;\n    readonly author?: string;\n    readonly maintainers?: readonly string[];\n    readonly upstreams?: readonly PluginUpstream[];\n}',
   },
   {
     name: 'PluginRegistries',
@@ -7534,6 +7549,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PluginUpdateStep',
     declaration: 'export type PluginUpdateStep = \'checking\' | \'removing\' | \'installing\' | \'restoring\';',
+  },
+  {
+    name: 'PluginUpstream',
+    declaration: 'export interface PluginUpstream {\n    readonly name: string;\n    readonly repository: string;\n    readonly relation: \'copied\' | \'adapted\' | \'patched\' | \'integration\' | \'reference\';\n    readonly ref?: string;\n    readonly license?: string;\n    readonly changes?: LocalizedText;\n    readonly record?: string;\n}',
   },
   {
     name: 'PluginVersion',
@@ -7573,7 +7592,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PresetDefinition',
-    declaration: 'export interface PresetDefinition {\n    readonly id: string;\n    readonly name?: string;\n    readonly description?: string;\n    readonly order?: number;\n    readonly plugins: readonly (Omit<EntryOptions, \'id\' | \'disabled\'> & {\n        id?: string;\n        disabled?: EntryOptions[\'disabled\'] | JsExpr;\n    })[];\n}',
+    declaration: 'export interface PresetDefinition {\n    readonly id: string;\n    readonly name?: string;\n    readonly description?: string;\n    readonly order?: number;\n    readonly selectable?: boolean;\n    readonly plugins: readonly (Omit<EntryOptions, \'id\' | \'disabled\'> & {\n        id?: string;\n        disabled?: EntryOptions[\'disabled\'] | JsExpr;\n    })[];\n}',
   },
   {
     name: 'PresetOption',
