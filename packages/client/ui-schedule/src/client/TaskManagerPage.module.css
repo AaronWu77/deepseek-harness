@@ -6,7 +6,7 @@
   min-height: 0;
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-base);
+  background: var(--dsw-specific-page-fill);
   font-size: 14px;
   line-height: 1.6;
 }

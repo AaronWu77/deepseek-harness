@@ -137,7 +137,9 @@
   position: absolute;
   inset: 0 0 auto;
   height: var(--plugin-header-paint-height, var(--plugin-header-rest-height));
-  background: var(--dsw-alias-bg-base);
+  background: var(--dsw-specific-sticky-fill);
+  -webkit-backdrop-filter: var(--dsw-specific-sticky-blur);
+  backdrop-filter: var(--dsw-specific-sticky-blur);
   pointer-events: none;
 }
 
