@@ -1,0 +1,32 @@
+# Pin the unused shell and skill catalog inputs for the recorded PI protocol.
+- id: bash-sandbox
+  disabled: false
+
+- id: tool-bash
+  disabled: false
+
+- id: tool-pwsh
+  disabled: true
+
+- id: pwsh-sandbox
+  disabled: true
+
+# Use the same unused replay runner as the default headless composition.
+- id: sandbox
+  config:
+    runnerCommand:
+      - bash
+      - -c
+      - while [ "$1" != "--" ]; do shift; done; shift; exec "$@"
+      - passthrough-runner
+    runnerFailureSignatures:
+      - 'passthrough-runner: profile rejected'
+
+- id: skill-filesystem
+  config:
+    includeDefaultRoots: false
+    watch: false
+
+- insert:
+    - id: pi-ai-snapshot-inputs
+      name: '../../../packages/test-support/session-snapshot/tests/fixtures/pi-ai-snapshot-inputs.ts'

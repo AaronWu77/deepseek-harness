@@ -1,0 +1,15 @@
+- id: bash-sandbox
+  disabled: false
+
+- id: tool-bash
+  disabled: false
+
+- id: tool-pwsh
+  disabled: true
+
+- id: pwsh-sandbox
+  disabled: true
+
+- insert:
+    - id: pi-ai-snapshot-inputs
+      name: '../../../packages/test-support/session-snapshot/tests/fixtures/pi-ai-snapshot-inputs.ts'

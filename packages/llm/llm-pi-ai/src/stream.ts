@@ -74,8 +74,9 @@ function classifyPiAiError(message: string): string {
  * @returns the mapped harness reason. Recognized error text, `stop` usage above
  *   `contextWindow`, and zero-output `length` usage that fills the window map
  *   to `CONTEXT_WINDOW_EXCEEDED`; a `stop` with no content blocks maps to an
- *   `EMPTY_RESPONSE` error, while terminal `pending` and `deferred` states map
- *   to non-retryable `PI_AI_ERROR` failures.
+ *   `EMPTY_RESPONSE` error. Completed calls with malformed tool arguments map
+ *   to `INVALID_REQUEST`; output-token truncation still maps to `max-tokens`.
+ *   Terminal `pending` and `deferred` states map to non-retryable `PI_AI_ERROR` failures.
  */
 export function mapStopReason(message: AssistantMessage, contextWindow?: number): FinishReason {
   const piAiOverflow = isContextOverflow(message, contextWindow)
@@ -89,6 +90,20 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
         message: message.errorMessage ?? `pi-ai detected context overflow for model "${message.model}"`,
         code: CONTEXT_WINDOW_EXCEEDED_CODE,
       },
+    }
+  }
+
+  if (message.stopReason === 'stop' || message.stopReason === 'toolUse') {
+    for (const block of message.content) {
+      if (block.type === 'toolCall' && block.argumentsError !== undefined) {
+        return {
+          kind: 'error',
+          failure: {
+            message: `pi-ai model "${message.model}" returned invalid arguments for tool "${block.name}": ${block.argumentsError}`,
+            code: 'INVALID_REQUEST',
+          },
+        }
+      }
     }
   }
 

@@ -1,0 +1,40 @@
+- id: llm-deepseek
+  disabled: true
+
+- id: llm-pi-ai
+  disabled: true
+
+- id: bash-sandbox
+  disabled: false
+
+- id: tool-bash
+  disabled: false
+
+- id: tool-pwsh
+  disabled: true
+
+- id: pwsh-sandbox
+  disabled: true
+
+- id: sandbox
+  name: '@deepseek-ai/dsh-sandbox-local'
+  config:
+    runnerCommand:
+      - bash
+      - -c
+      - while [ "$1" != "--" ]; do shift; done; shift; exec "$@"
+      - passthrough-runner
+    runnerFailureSignatures:
+      - 'passthrough-runner: profile rejected'
+
+- id: skill-filesystem
+  config:
+    includeDefaultRoots: false
+    watch: false
+
+- insert:
+    - id: pi-ai-snapshot-inputs
+      name: '../../../packages/test-support/session-snapshot/tests/fixtures/pi-ai-snapshot-inputs.ts'
+
+    - id: pi-ai-invalid-tool-arguments-fixture
+      name: '../../../packages/test-support/session-snapshot/tests/fixtures/pi-ai-invalid-tool-arguments.ts'

@@ -1,0 +1,12 @@
+version: 1
+scenario: pi-ai-invalid-tool-arguments
+profile: headless
+composition: pi-ai-invalid-tool-arguments
+recording: authored
+header:
+  class: pi-ai-invalid-tool-arguments
+  pin: true
+workspace:
+  final: true
+environment:
+  PI_AI_SNAPSHOT_KEY: snapshot-key

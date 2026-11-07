@@ -723,9 +723,9 @@ describe('toStreamChunks', () => {
     const requested = getBuiltinModels('anthropic').find(model => model.id === requestedModel)
     if (requested === undefined) throw new Error('missing Anthropic catalog model')
     expect(transformMessages(context.messages, requested)[0]).toMatchObject({ content: native.content })
-    expect(transformMessages(context.messages, { ...requested, id: 'other-model' })[0]).toMatchObject({
-      content: [{ type: 'text', text: 'reason' }],
-    })
+    expect(transformMessages(context.messages, { ...requested, id: 'other-model' })[0]).toMatchObject({ content: [] })
+    expect(context.messages[0]).toMatchObject({ content: native.content })
+    expect(transformMessages(context.messages, requested)[0]).toMatchObject({ content: native.content })
   })
 
   const partialWithToolCall = assistant({
@@ -954,6 +954,35 @@ describe('mapStopReason / mapUsage', () => {
   ])('maps pi-ai transport wording %j', (errorMessage) => {
     expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
       .toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT' } })
+  })
+
+  it.each([
+    '413 {"message":"failed to parse request"}',
+    'github-copilot API error (413): {"message":"failed to parse request"}',
+  ])('maps provider request-size overflow %j', (errorMessage) => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toMatchObject({ kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE } })
+  })
+
+  it('does not treat an HTTP status mentioned inside an error body as overflow', () => {
+    expect(mapStopReason(assistant({
+      stopReason: 'error', errorMessage: 'OpenAI API error (400): request req_413 was invalid',
+    }))).toMatchObject({ kind: 'error', failure: { code: 'INVALID_REQUEST' } })
+  })
+
+  it.each(['stop', 'toolUse'] as const)('rejects malformed completed tool arguments on %s', (stopReason) => {
+    const argumentsError = 'Invalid JSON\n\nReceived arguments:\n{"text":'
+    expect(mapStopReason(assistant({ stopReason, content: [
+      { type: 'toolCall', id: 'call-invalid', name: 'record', arguments: {}, argumentsError },
+    ] }))).toMatchObject({
+      kind: 'error', failure: { code: 'INVALID_REQUEST', message: expect.stringContaining(argumentsError) },
+    })
+  })
+
+  it('keeps output-token truncation for a malformed tool call non-executable', () => {
+    expect(mapStopReason(assistant({ stopReason: 'length', content: [
+      { type: 'toolCall', id: 'call-truncated', name: 'record', arguments: {}, argumentsError: 'Truncated JSON' },
+    ] }))).toEqual({ kind: 'max-tokens' })
   })
 
   it('uses pi-ai provider-specific overflow classification without losing rate-limit exclusions', () => {

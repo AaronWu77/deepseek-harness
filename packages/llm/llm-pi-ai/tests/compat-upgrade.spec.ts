@@ -58,6 +58,17 @@ describe('pi-ai gateway compatibility declarations', () => {
       .toThrow(/which is not configurable here/)
   })
 
+  it.each(['openai', 'azure', 'openai-codex'])(
+    'withholds catalog-owned mid-conversation effort on %s', (provider) => {
+      const profile: import('../src/config.ts').PiAiProviderProfile = { compat: {
+        // @ts-expect-error Catalog-owned flags are forbidden in typed profiles.
+        supportsMidConvoEffort: true,
+      } }
+      expect(() => resolveProfiles({ [provider]: profile }))
+        .toThrow(/which is not configurable here/)
+    },
+  )
+
   it('withholds Mistral conversation capabilities', () => {
     expect(() => resolveProfiles({
       mistral: { compat: { supportsMidConvoSystemMessages: true } as never },
