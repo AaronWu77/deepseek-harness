@@ -320,7 +320,7 @@ export function AppFrame({
       />
       {drawer && <div className={css.drawerMask} data-sidebar-mask aria-hidden="true"
         onClick={drawerOpen ? () => { actions.toggleSidebar() } : undefined} />}
-      <div className={css.sidebarCol}
+      <div className={css.sidebarCol} data-dsh-part="sidebar-column"
         style={drawer ? { width: sidebarWidth } : undefined}
         {...{ inert: drawer && sidebarCollapsed ? '' : undefined }}>
         {sidebar}
