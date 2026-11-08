@@ -18,6 +18,7 @@
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  scroll-timeline: --trajectory-scroll block;
   padding-bottom: var(--dsh-trajectory-bottom-clearance, 0px);
   container: trajectory-table / inline-size;
 }
@@ -114,6 +115,18 @@
   font: var(--dsw-font-xxs-12);
 }
 
+@keyframes trajectory-header-backing {
+  from { background-color: transparent; }
+  to { background-color: var(--dsw-specific-sticky-fill); }
+}
+
+@supports not (animation-timeline: --trajectory-scroll) {
+  .table th {
+    animation: none;
+    background: var(--dsw-specific-sticky-fill);
+  }
+}
+
 .eventColumn {
   width: 122px;
 }
@@ -136,7 +149,12 @@
   overflow: hidden;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
   color: var(--dsw-alias-label-tertiary);
-  background: var(--dsw-specific-sticky-fill);
+  /* The bar takes its fill only after a row reaches it; see stats.module.css. */
+  background: transparent;
+  animation-name: trajectory-header-backing;
+  animation-fill-mode: both;
+  animation-timeline: --trajectory-scroll;
+  animation-range: 1px 33px;
   font: var(--dsw-font-xxs-12);
   font-weight: 500;
   text-align: left;

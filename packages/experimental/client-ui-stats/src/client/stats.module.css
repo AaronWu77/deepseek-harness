@@ -20,6 +20,7 @@
   height: 100%;
   min-height: 0;
   overflow-y: auto;
+  scroll-timeline: --stats-scroll block;
   /* No top padding: a sticky header sits at the scrollport top, and padding
      here would leave a strip where rows scroll above it. */
   padding: 0 20px 16px;
@@ -66,14 +67,34 @@
   box-sizing: border-box;
   padding: 4px 8px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-specific-sticky-fill);
+  /* At rest nothing has scrolled under the header, so it paints nothing; a skin
+     whose page is transparent would otherwise show an opaque band above the
+     first turn. The range ends where the header itself leaves the scrollport. */
+  background: transparent;
   background-clip: padding-box;
+  animation-name: stats-header-backing;
+  animation-fill-mode: both;
+  animation-timeline: --stats-scroll;
+  animation-range: 1px 48px;
   color: var(--dsw-alias-label-tertiary);
   font: var(--dsw-font-xxs-12);
   font-weight: 500;
   line-height: 1.25;
   vertical-align: bottom;
   white-space: normal;
+}
+
+@keyframes stats-header-backing {
+  from { background-color: transparent; }
+  to { background-color: var(--dsw-specific-sticky-fill); }
+}
+
+@supports not (animation-timeline: --stats-scroll) {
+  .thLeft,
+  .th {
+    animation: none;
+    background: var(--dsw-specific-sticky-fill);
+  }
 }
 
 .thLeft {
