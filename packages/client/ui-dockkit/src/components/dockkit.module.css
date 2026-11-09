@@ -167,9 +167,13 @@
   pointer-events: auto;
 }
 
-.tabHost:not(.float),
+.tabHost:not(.float) {
+  background: var(--dsw-specific-page-fill);
+}
+
+/* An empty dock column reserves no tab, so it must not paint over the frame. */
 .emptyTabHost {
-  background: var(--dsw-alias-bg-base);
+  background: transparent;
 }
 
 .tabCell[data-dockkit-host='dock'][data-dockkit-column='0'] > .tabHost {

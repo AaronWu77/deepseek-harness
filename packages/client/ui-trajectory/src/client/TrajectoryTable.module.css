@@ -8,7 +8,7 @@
   width: 100%;
   min-height: 0;
   overflow: hidden;
-  background: var(--dsw-alias-bg-layer-1);
+  background: var(--dsw-specific-page-fill);
   container-type: inline-size;
 }
 
@@ -111,7 +111,7 @@
   border-spacing: 0;
   table-layout: fixed;
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-layer-1);
+  background: var(--dsw-specific-page-fill);
   font: var(--dsw-font-xxs-12);
 }
 

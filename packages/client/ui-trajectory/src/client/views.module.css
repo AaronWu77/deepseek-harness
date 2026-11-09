@@ -14,7 +14,7 @@
   width: 100%;
   box-sizing: border-box;
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-layer-1);
+  background: var(--dsw-specific-page-fill);
 }
 
 .ledger {
