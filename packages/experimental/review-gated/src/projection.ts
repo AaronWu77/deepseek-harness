@@ -252,9 +252,8 @@ export function foldRgState(state: RgProjectionState, event: SessionEvent): RgPr
     const { start, inserted } = event.data
     const removed = event.data.removedCount ?? 0
     const matching = inserted.filter(message => message.id === admission.messageId)
-    if (matching.length > 0) {
-      const message = matching[0]
-      if (message === undefined) return invalid()
+    const message = matching[0]
+    if (message !== undefined) {
       if (matching.length !== 1 || admission.index !== null || admission.taskId === null
         || !z.literal('user').safeParse(message.role).success || message.source.kind !== 'user'
         || message.content.length !== 1 || message.content[0]?.type !== 'text' || message.content[0].text !== state.taskInputText) return invalid()
