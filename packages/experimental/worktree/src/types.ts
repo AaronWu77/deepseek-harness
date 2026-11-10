@@ -1,4 +1,4 @@
-/** Public requests and results for creating a Git worktree and entering it, and for restoring a removed one. */
+/** Public requests and results for provisioning, entering, and restoring retained Git worktrees. */
 
 /** A new checkout from a locally available Git commit, branch, or tag. */
 export interface CreateWorktreeRequest {
@@ -6,6 +6,24 @@ export interface CreateWorktreeRequest {
   name?: string
   /** Local revision to resolve before creation; omission selects HEAD. */
   from?: string
+}
+
+/** Checkout allocation that leaves the calling Session's working directory unchanged. */
+export interface ProvisionWorktreeRequest extends CreateWorktreeRequest {
+  /** Use a detached HEAD without creating a branch; omission or false creates a new branch. */
+  detached?: boolean
+}
+
+/** Retained checkout and pinned local baseline, without a Session directory change. */
+export interface ProvisionedWorktree {
+  /** Canonical absolute checkout directory in the filesystem provider's execution world. */
+  path: string
+  /** Newly created branch name, or null for a detached checkout. */
+  branch: string | null
+  /** Resolved commit object name; repository-local replacement refs can change its checked-out content. */
+  baseCommit: string
+  /** Canonical root of the source checkout. */
+  repositoryRoot: string
 }
 
 /** Committed Git baseline and the calling Session's resulting working directory. */
@@ -21,10 +39,9 @@ export interface CreatedWorktree {
 }
 
 /**
- * Stage of one creation or restoration, reported before it begins: `prepare`
- * validates the request, allocates the checkout directory, and creates the
- * branch, which a restoration creates again only when it is gone; `checkout`
- * writes the files and, for a creation, enters the checkout.
+ * Stage reported before it begins: `prepare` validates and allocates the checkout,
+ * creating a branch unless detached or restoring an existing branch; `checkout`
+ * writes files and, only for `create`, enters the checkout.
  */
 export type CreateWorktreePhase = 'prepare' | 'checkout'
 

@@ -2,8 +2,11 @@ import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { Context } from '@deepseek-ai/cordis'
+import Include from '@deepseek-ai/cordis-plugin-include'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { unsupportedModel, unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -82,6 +85,41 @@ export async function harness(root: string, config: Config = {}, mode: SandboxMo
     await ctx.plugin(SandboxPolicyService, { mode, workspaceRoot: root })
     await ctx.plugin(WorkingDirectoryService)
     await ctx.plugin(WorktreeService, config)
+    return ctx
+  } catch (error) {
+    await ctx.fiber.dispose()
+    throw error
+  }
+}
+
+/** Boot the real service providers from a private Loader config, without a model request. */
+export async function loaderHarness(root: string, mode: SandboxMode = 'danger-full-access'): Promise<Context> {
+  const modules = new Map<string, unknown>([
+    ['session-projections', SessionProjectionRegistry],
+    ['agents', AgentRegistry],
+    ['system-prompt', SystemPrompt],
+    ['fs', LocalFileSystem],
+    ['subprocess', LocalSubprocessRuntime],
+    ['sandbox', LocalSandbox],
+    ['sandbox-policy', SandboxPolicyService],
+    ['working-directory', WorkingDirectoryService],
+    ['worktree', WorktreeService],
+  ])
+  const config = [...modules.keys()].flatMap(name => [
+    `- name: 'cordis:${name}'`,
+    ...name === 'fs' ? ['  config:', `    cwd: ${JSON.stringify(root)}`] : [],
+    ...name === 'sandbox-policy' ? ['  config:', `    mode: ${mode}`, `    workspaceRoot: ${JSON.stringify(root)}`] : [],
+  ]).join('\n') + '\n'
+  const configPath = join(root, 'cordis.yml')
+  await writeFile(configPath, config)
+  const ctx = new Context()
+  try {
+    ctx.baseUrl = pathToFileURL(root).href + '/'
+    await ctx.plugin(Loader)
+    ctx.loader.builtins.include = Include
+    for (const [name, plugin] of modules) ctx.loader.builtins[name] = plugin
+    await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
+    await ctx.loader.await()
     return ctx
   } catch (error) {
     await ctx.fiber.dispose()

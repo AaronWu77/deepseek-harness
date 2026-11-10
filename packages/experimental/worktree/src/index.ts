@@ -1,4 +1,4 @@
-/** Creates a new Git branch and checkout, then changes the calling Session's working directory; restores a removed checkout. */
+/** Provisions retained branch or detached Git checkouts, optionally enters them, and restores removed branch checkouts. */
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -12,10 +12,11 @@ import { PREPARE_DIRECTORY } from './directory.ts'
 import { generatedWorktreeName } from './name.ts'
 import { runCommand } from './process.ts'
 import type { ProcessConfig } from './process.ts'
-import type { CreatedWorktree, CreateWorktreePhase, CreateWorktreeRequest, RestoredWorktree, RestoreWorktreeRequest } from './types.ts'
+import type { CreatedWorktree, CreateWorktreePhase, CreateWorktreeRequest, ProvisionedWorktree, ProvisionWorktreeRequest, RestoredWorktree, RestoreWorktreeRequest } from './types.ts'
 
-export type { CreatedWorktree, CreateWorktreePhase, CreateWorktreeRequest, RestoredWorktree, RestoreWorktreeRequest } from './types.ts'
+export type { CreatedWorktree, CreateWorktreePhase, CreateWorktreeRequest, ProvisionedWorktree, ProvisionWorktreeRequest, RestoredWorktree, RestoreWorktreeRequest } from './types.ts'
 export { generatedWorktreeName } from './name.ts'
+export { WorktreeProcessUnknownError } from './process.ts'
 
 /** Worktree location, generated names, executables, and subprocess resource limits. */
 export interface Config {
@@ -37,8 +38,9 @@ export interface Config {
 
 type ResolvedConfig = Required<Config> & ProcessConfig
 
-interface WorktreeSpec {
-  branch: string
+interface WorktreeSpec<Branch extends string | null> {
+  name: string
+  branch: Branch
   revision: string
 }
 
@@ -116,9 +118,44 @@ export class WorktreeService extends Service {
     signal?: AbortSignal,
     onPhase?: (phase: CreateWorktreePhase) => void,
   ): Promise<CreatedWorktree> {
+    const spec = this.resolve(agent, request)
+    return this.provisionCheckout(agent, { ...spec, branch: spec.name }, true, signal, onPhase)
+  }
+
+  /**
+   * Provision a checkout at a pinned local revision without changing the calling Session directory.
+   * Omitted or false `detached` creates a new branch; true creates a detached HEAD and no branch.
+   * Names claim an unused checkout path; branch mode also requires an unused branch.
+   * Source edits are not copied, missing objects are not fetched, and existing permissions apply.
+   * Checkout disables configured filters; repository-local replacement refs still apply.
+   * Failure or cancellation may retain allocated artifacts at the path reported in the error;
+   * callers own inspection and cleanup. Disposal aborts and drains pending operations.
+   * @param agent - caller whose current directory selects the source repository and file policy.
+   * @param request - checkout name, local revision, and detached choice; defaults are generated name, HEAD, and a new branch.
+   * @param signal - cancellation of lookup and checkout creation.
+   * @param onPhase - receives each stage before it begins; it must not throw.
+   * @returns canonical checkout path, new branch name or null, pinned commit, and source repository root.
+   */
+  async provision(
+    agent: Agent,
+    request: ProvisionWorktreeRequest = {},
+    signal?: AbortSignal,
+    onPhase?: (phase: CreateWorktreePhase) => void,
+  ): Promise<ProvisionedWorktree> {
+    const spec = this.resolve(agent, request)
+    return this.provisionCheckout(agent, { ...spec, branch: request.detached === true ? null : spec.name }, false, signal, onPhase)
+  }
+
+  private async provisionCheckout<Branch extends string | null>(
+    agent: Agent,
+    spec: WorktreeSpec<Branch>,
+    enter: boolean,
+    signal: AbortSignal | undefined,
+    onPhase: ((phase: CreateWorktreePhase) => void) | undefined,
+  ): Promise<ProvisionedWorktree & { branch: Branch }> {
     const operationSignal = signal === undefined ? this.lifetime.signal : AbortSignal.any([this.lifetime.signal, signal])
     operationSignal.throwIfAborted()
-    const operation = this.createCheckout(agent, this.resolve(agent, request), operationSignal, onPhase)
+    const operation = this.createCheckout(agent, spec, enter, operationSignal, onPhase)
     this.pending.add(operation)
     try {
       return await operation
@@ -158,47 +195,60 @@ export class WorktreeService extends Service {
     }
   }
 
-  private resolve(agent: Agent, request: CreateWorktreeRequest): WorktreeSpec {
-    const branch = request.name ?? generatedWorktreeName(this.config.namePrefix, agent.session.id)
-    if (!relativePath(branch) || branch.startsWith('-')) throw new Error('worktree name must be a relative Git branch name')
+  private resolve(agent: Agent, request: CreateWorktreeRequest): { name: string; revision: string } {
+    const name = request.name ?? generatedWorktreeName(this.config.namePrefix, agent.session.id)
+    if (!relativePath(name) || name.startsWith('-')) throw new Error('worktree name must be a relative Git branch name')
     const revision = request.from ?? 'HEAD'
     if (revision.length === 0) throw new Error('worktree from must name a local commit, branch, or tag')
-    return { branch, revision }
+    return { name, revision }
   }
 
-  private async createCheckout(
+  private async createCheckout<Branch extends string | null>(
     agent: Agent,
-    { branch, revision }: WorktreeSpec,
+    { name, branch, revision }: WorktreeSpec<Branch>,
+    enter: boolean,
     signal: AbortSignal,
     onPhase: ((phase: CreateWorktreePhase) => void) | undefined,
-  ): Promise<CreatedWorktree> {
+  ): Promise<ProvisionedWorktree & { branch: Branch }> {
     onPhase?.('prepare')
-    const cwd = await this.ctx.workingDirectory.ensure(agent, signal)
+    const cwd = enter
+      ? await this.ctx.workingDirectory.ensure(agent, signal)
+      : this.ctx.fs.processPath(await this.ctx.fs.resolve(this.ctx.workingDirectory.get(agent.session), { signal }))
     const policy = this.ctx.sandboxPolicy.resolve({ session: agent.session })
     const run = this.gitRunner(policy, signal)
-    await run(cwd, ['check-ref-format', `refs/heads/${branch}`])
+    await run(cwd, ['check-ref-format', `refs/heads/${name}`])
     const rootOutput = await run(cwd, ['rev-parse', '--show-toplevel'])
     const rootTarget = await this.ctx.fs.resolve(rootOutput.stdout.replace(/\r?\n$/, ''), { cwd, signal })
     const repositoryRoot = this.ctx.fs.processPath(rootTarget)
     const base = await run(repositoryRoot, ['rev-parse', '--verify', '--end-of-options', `${revision}^{commit}`])
     const baseCommit = base.stdout.trim()
-    const existing = await run(repositoryRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], [0, 1])
-    if (existing.exitCode === 0) throw new Error(`worktree branch already exists: ${branch}`)
+    if (branch !== null) {
+      const existing = await run(repositoryRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], [0, 1])
+      if (existing.exitCode === 0) throw new Error(`worktree branch already exists: ${branch}`)
+    }
     const pool = await this.ctx.fs.resolve(this.config.directory, { cwd: repositoryRoot, signal })
     const poolPath = this.ctx.fs.processPath(pool)
-    const destination = await this.ctx.fs.resolve(branch, { cwd: poolPath, signal })
+    const destination = await this.ctx.fs.resolve(name, { cwd: poolPath, signal })
     const path = this.ctx.fs.processPath(destination)
+    if (!this.ctx.fs.contains(rootTarget, pool) || !this.ctx.fs.contains(pool, destination)) {
+      throw new Error('worktree checkout must resolve inside the configured pool within the source checkout root')
+    }
     if (await this.ctx.fs.lstat(path, undefined, signal) !== undefined) throw new Error(`worktree path already exists: ${path}`)
     try {
       await this.prepareDirectory(policy, repositoryRoot, poolPath, path, signal)
-      await run(repositoryRoot, ['--work-tree', repositoryRoot, 'worktree', 'add', '--no-checkout', '-b', branch, '--', path, baseCommit])
+      await run(repositoryRoot, [
+        '--work-tree', repositoryRoot, 'worktree', 'add', '--no-checkout',
+        ...branch === null ? ['--detach'] : ['-b', branch], '--', path, baseCommit,
+      ])
       const overrides = await filterOverrides(run, path)
       onPhase?.('checkout')
       await run(path, ['--work-tree', path, 'reset', '--hard', '--no-recurse-submodules', baseCommit], undefined, overrides)
-      const canonicalPath = await this.ctx.workingDirectory.set(agent, path, signal)
+      const canonicalPath = enter
+        ? await this.ctx.workingDirectory.set(agent, path, signal)
+        : this.ctx.fs.processPath(await this.ctx.fs.resolve(path, { signal }))
       return { path: canonicalPath, branch, baseCommit, repositoryRoot }
     } catch (error) {
-      throw new Error(`Could not finish worktree ${branch} at ${path}. Any created checkout and branch are retained. ${error instanceof Error ? error.message : String(error)}`, { cause: error })
+      throw new Error(`Could not finish worktree ${name} at ${path}. Any created checkout and branch are retained. ${error instanceof Error ? error.message : String(error)}`, { cause: error })
     }
   }
 

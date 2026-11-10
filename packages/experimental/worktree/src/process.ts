@@ -15,6 +15,17 @@ export interface ProcessConfig {
   maxOutputBytes: number
 }
 
+/** Process cleanup failed or its managed range could not be confirmed empty; dependent work must stop. */
+export class WorktreeProcessUnknownError extends Error {
+  override readonly name = 'WorktreeProcessUnknownError'
+  /** Stable classifier for an unconfirmed process cleanup outcome. */
+  readonly code = 'WORKTREE_PROCESS_UNKNOWN'
+
+  constructor(readonly cwd: string, cause: unknown) {
+    super(`Worktree process cleanup could not be confirmed in ${cwd}. Retain artifacts and inspect them before continuing.`, { cause })
+  }
+}
+
 /** Clear inherited repository, attribute-tree, command-line configuration, and replacement-ref selectors. */
 const GIT_ENV: NodeJS.ProcessEnv = Object.fromEntries([
   'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
@@ -25,6 +36,8 @@ const GIT_ENV: NodeJS.ProcessEnv = Object.fromEntries([
 
 /**
  * Run an argv without a shell and await termination of its managed process range.
+ * A cleanup error or unconfirmed empty range rejects with WorktreeProcessUnknownError,
+ * even after command success, failure, or cancellation; retained artifacts are not rolled back.
  * @param ctx - subprocess and sandbox providers in the same execution world.
  * @param config - complete process resource limits.
  * @param policy - unchanged calling Session policy.
@@ -78,7 +91,12 @@ export async function runCommand(
     if (stdout.lossy) throw new Error('worktree command output exceeds maxOutputBytes')
     return { stdout: stdout.text, exitCode: outcome.exitCode }
   } finally {
-    child.terminate()
-    await child.waitForExit()
+    try {
+      try { child.terminate() } finally {
+        if (!await child.waitForExit()) throw new Error('The subprocess provider did not confirm an empty managed range.')
+      }
+    } catch (cause) {
+      throw new WorktreeProcessUnknownError(cwd, cause)
+    }
   }
 }
