@@ -79,8 +79,8 @@ function directTaskRecorded(events: readonly SessionEvent[], creation: number, t
   prepared: Extract<SessionEvent, { type: 'review-gated/direct-task-prepared' }>): boolean {
   if (prepared.data.messageId !== task.originMessageId) return false
   const intentIndex = events.findIndex(event => event.type === 'agent/claim/intent' && event.seq === prepared.data.intentSeq)
-  const intent = events[intentIndex]
-  if (intentIndex < 0 || intentIndex >= creation || intent?.type !== 'agent/claim/intent') return false
+  const intent = intentIndex < 0 || intentIndex >= creation ? undefined : events[intentIndex]
+  if (intent?.type !== 'agent/claim/intent') return false
   let origin: UserMessage | undefined
   for (const input of intent.data.inputs) {
     const message = input.message
@@ -92,19 +92,17 @@ function directTaskRecorded(events: readonly SessionEvent[], creation: number, t
     break
   }
   if (origin === undefined) return false
-  for (let index = intentIndex + 1; index < creation; index++) {
-    const event = events[index]
-    if (event?.type === 'agent/claim/settled' && event.data.intentSeq === intent.seq) return false
+  for (const event of events.slice(intentIndex + 1, creation)) {
+    if (event.type === 'agent/claim/settled' && event.data.intentSeq === intent.seq) return false
   }
   let admitted: UserMessage | undefined
   let count = 0
-  for (let index = creation + 1; index < events.length; index++) {
-    const event = events[index]
-    if (event?.type === 'user/message' && event.data.id === task.originMessageId) {
+  for (const event of events.slice(creation + 1)) {
+    if (event.type === 'user/message' && event.data.id === task.originMessageId) {
       admitted = event.data
       count++
     }
-    if (event?.type !== 'agent/claim/settled' || event.data.intentSeq !== intent.seq) continue
+    if (event.type !== 'agent/claim/settled' || event.data.intentSeq !== intent.seq) continue
     if (event.data.outcome !== 'entered' || count !== 1 || admitted?.source.kind !== 'user') return false
     const matches = event.data.messages.filter(message => message.id === task.originMessageId)
     return matches.length === 1 && matches[0]?.source.kind === 'user' && isDeepStrictEqual(matches[0], admitted)
@@ -115,9 +113,7 @@ function directTaskRecorded(events: readonly SessionEvent[], creation: number, t
 /** Verify that the current task's input was recorded after its most recent creation. */
 function taskInputRecorded(events: readonly SessionEvent[], task: RgTask): boolean {
   let creation = -1
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index]
-    if (event === undefined) continue
+  for (const [index, event] of [...events.entries()].reverse()) {
     if (event.type !== 'review-gated/state' && event.type !== 'review-gated/task-prepared'
       && event.type !== 'review-gated/direct-task-prepared') continue
     const candidate = event.data.state?.task
@@ -131,9 +127,7 @@ function taskInputRecorded(events: readonly SessionEvent[], task: RgTask): boole
   if (creation === -1) return false
   const event = events[creation]
   if (event?.type === 'review-gated/direct-task-prepared') return directTaskRecorded(events, creation, task, event)
-  for (let index = creation + 1; index < events.length; index++) {
-    const entry = events[index]
-    if (entry === undefined) continue
+  for (const entry of events.slice(creation + 1)) {
     if (entry.type === 'user/message' && entry.data.id === task.originMessageId && entry.data.source.kind === 'user'
       && entry.data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim() === task.objective) return true
   }
@@ -142,9 +136,7 @@ function taskInputRecorded(events: readonly SessionEvent[], task: RgTask): boole
 
 /** A recorded RG state that the projection no longer reports means the projection failed. */
 function stateContradicted(events: readonly SessionEvent[], value: RgSessionState | null): boolean {
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index]
-    if (event === undefined) continue
+  for (const event of events.toReversed()) {
     if (event.type === 'review-gated/state') return (event.data.state !== null) !== (value !== null)
     if (event.type === 'review-gated/task-prepared' || event.type === 'review-gated/direct-task-prepared') {
       return value === null

@@ -369,6 +369,73 @@ describe('RG bounded review scope', () => {
     const signal = AbortSignal.abort(new Error('stop scope capture'))
     await expect(captureScope(h.ctx.fs, h.root, ['.'], h.limits, signal)).rejects.toThrow()
   })
+  it('reports an absent path, an unsupported file, and an exhausted byte budget in the tree', async () => {
+    const h = await fixture()
+    await writeFile(join(h.root, 'only.txt'), 'only')
+    // An absent sibling makes the tree walk observe a missing entry.
+    await unlink(join(h.root, 'only.txt'))
+    const absent = await h.capture([], {})
+    expect(absent.treeDiagnostic).toBeNull()
+    await writeFile(join(h.root, 'only.txt'), 'only')
+    // A FIFO is neither a file nor a directory, so the tree identity stays unknown.
+    const fifo = join(h.root, 'pipe')
+    const { execFileSync } = await import('node:child_process')
+    try {
+      execFileSync('mkfifo', [fifo])
+      const unsupported = await h.capture([], {})
+      expect(unsupported.treeFingerprint).toBeNull()
+      expect(unsupported.treeDiagnostic).toMatch(/unsupported file/i)
+    } catch { /* Windows has no mkfifo; the file-type branch is exercised on POSIX only. */ }
+    // A zero remaining budget is reported instead of hashing a truncated tree.
+    await writeFile(join(h.root, 'big.txt'), 'x'.repeat(64))
+    const exhausted = await h.capture([], { maxScopeBytes: 64 })
+    expect(exhausted.treeFingerprint).toBeNull()
+    expect(exhausted.treeDiagnostic).toMatch(/byte limit/i)
+  })
+
+  it('records an entry that vanished before the whole-tree walk reached it', async () => {
+    const h = await fixture()
+    await writeFile(join(h.root, 'a.txt'), 'alpha')
+    const original = h.ctx.fs.stat.bind(h.ctx.fs)
+    const spy = vi.spyOn(h.ctx.fs, 'stat').mockImplementation(async (...args) => {
+      if (JSON.stringify(args[0]).includes('a.txt')) return undefined
+      return original(...args)
+    })
+    try {
+      // The declared scope is empty, so only the tree walk observes the entry.
+      const result = await h.capture([], {})
+      expect(result.treeFingerprint).toMatch(/^v1:[a-f0-9]{64}$/)
+      expect(result.treeDiagnostic).toBeNull()
+    } finally { spy.mockRestore() }
+  })
+
+  it('reports an unsupported entry type and a non-Error failure in the tree', async () => {
+    const h = await fixture()
+    await writeFile(join(h.root, 'a.txt'), 'alpha')
+    const original = h.ctx.fs.stat.bind(h.ctx.fs)
+    const spy = vi.spyOn(h.ctx.fs, 'stat').mockImplementation(async (...args) => {
+      const result = await original(...args)
+      if (result !== undefined && JSON.stringify(args[0]).includes('a.txt')) return { ...result, type: 'other' }
+      return result
+    })
+    try {
+      // A device, socket, or other non-file entry cannot be hashed as content.
+      const unsupported = await h.capture([], {})
+      expect(unsupported.treeFingerprint).toBeNull()
+      expect(unsupported.treeDiagnostic).toMatch(/unsupported file/i)
+      // A failure that is not an Error is formatted into the diagnostic. The
+      // declared scope still resolves, so only the tree walk reports it.
+      const resolvedRoot = await h.ctx.fs.resolve(h.root, { signal: new AbortController().signal })
+      spy.mockImplementation(async (...args) => {
+        if (JSON.stringify(args[0]) === JSON.stringify(resolvedRoot)) throw 'plain failure'
+        return original(...args)
+      })
+      const thrown = await h.capture(['a.txt'], {})
+      expect(thrown.treeFingerprint).toBeNull()
+      expect(thrown.treeDiagnostic).toBe('plain failure')
+    } finally { spy.mockRestore() }
+  })
+
   it('reports an unchanged declared scope separately from whole-tree drift', async () => {
     const h = await fixture()
     await writeFile(join(h.root, 'a.txt'), 'alpha')

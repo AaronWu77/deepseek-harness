@@ -214,4 +214,33 @@ describe('direct task projection', () => {
     expect(schema.safeParse({ ...current, directClaim: { ...direct, objective: ' '.repeat(50) } }).success).toBe(false)
     expect(schema.safeParse({ ...current, directClaim: { ...direct, phase: 'settled', admitted: 0 } }).success).toBe(false)
   })
+
+  it('rejects malformed claim intents and malformed direct-claim checkpoints', () => {
+    const session = Session.create(SessionId('direct-malformed-events'))
+    session.append('review-gated/state', { version: 1, state: empty })
+    const input = human('task')
+    session.append('agent/claim/intent', { target: 'next-turn', turn: 1, step: 1,
+      inputs: [{ target: 'next-turn', message: input }] })
+    const folded = fold(session)
+    expect(folded.directClaim).toMatchObject({ messageId: input.id })
+    const intent = session.snapshotEvents().filter(event => event.type === 'agent/claim/intent').at(-1)
+    if (intent === undefined) throw new Error('missing claim intent')
+    for (const content of [[7], [{ type: 'text' }], [[]]]) {
+      const broken = { ...intent, seq: SessionSeq(intent.seq + 1),
+        data: { ...intent.data, inputs: [{ target: 'next-turn' as const, message: { ...input, content } }] } }
+      // @ts-expect-error -- malformed persisted events are not typed producer inputs.
+      expect(foldRgState(folded, broken).failure).toContain('RG_STATE_INVALID')
+    }
+    const f = fixture()
+    appendPrepared(f)
+    const current = fold(f.session)
+    const direct = current.directClaim
+    if (direct === null) throw new Error('missing direct claim')
+    const schema = rgProjectionDefinition.stateSchema
+    expect(schema.safeParse({ ...current, value: { ...current.value!, diagnostic: null } }).success).toBe(false)
+    expect(schema.safeParse({ ...current, value: { ...current.value!, role: 'reviewer' } }).success).toBe(false)
+    expect(schema.safeParse({ ...current, taskAdmission: { messageId: direct.messageId,
+      taskId: brandString<RgTaskId>('other'), index: 0 } }).success).toBe(false)
+    expect(schema.safeParse({ ...current, taskInputText: 'unrelated' }).success).toBe(false)
+  })
 })

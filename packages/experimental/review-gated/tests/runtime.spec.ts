@@ -1211,6 +1211,24 @@ describe('RG Host runtime', () => {
     expect(steer).toContain('not a pass')
   })
 
+  it('refuses model entry when the RG projection reports a durable failure', async () => {
+    const f = await setup()
+    const { agent } = await f.task()
+    const prepared = f.adapter.calls.length
+    const before = f.runtime.read(agent.session)
+    if (before === null) throw new Error('expected an RG state')
+    // A prepared task without its opening admission is an inconsistent durable
+    // record, so the RG projection fails closed from then on.
+    agent.session.append('review-gated/task-prepared', { version: 1, messageId: 'foreign' as never,
+      input: 'unrelated', state: { ...before, policy: null } })
+    // The failed projection publishes no usable state and every read refuses.
+    expect(f.ctx.sessionProjections.snapshot(agent.session).values.reviewGated).toBeNull()
+    expect(() => f.runtime.read(agent.session)).toThrow(/RG_STATE_INVALID/)
+    await expect(f.runtime.startRole(agent, 'worker', handoff, undefined, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'RG_NOT_READY' })
+    expect(f.adapter.calls).toHaveLength(prepared)
+  })
+
   it('keeps existing role tools fail-closed while RG is disabled or has no configured policy', async () => {
     const f = await setup()
     const { agent } = await f.task()

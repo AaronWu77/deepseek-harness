@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
-import SessionStore from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -112,6 +112,49 @@ describe('RG scoped role contribution', () => {
     const batch = await ctx.tools.execute({ calls: [{ type: 'tool-call', id: ToolCallId('write'),
       name: 'write', arguments: JSON.stringify({ path: 'probe.txt', content: 'x' }) }], signal })
     expect(JSON.stringify(batch.results[0]?.result)).not.toContain('read-only')
+  })
+
+  it('reports claim state through the status tool for every availability branch', async () => {
+    const ctx = await harness()
+    await ctx.plugin(Role, { role: 'main' })
+    const input = { calls: [{ type: 'tool-call' as const, id: ToolCallId('rg_status'), name: 'rg_status', arguments: '{}' }],
+      signal: new AbortController().signal }
+    // No Agent at all is already covered; these branches need one with RG composed.
+    const agent = { session: ctx.sessions.create(SessionId('rg-status-agent')), claimProtectionStatus: 'saving' as const,
+      claimRecovery: { intentSeq: 1, target: 'next-turn' as const, turn: 1, step: 1, inputs: [] } }
+    const reports: unknown[] = []
+    let recorded: unknown = null
+    const runtime = {
+      // The main-role mutation guard reads RG state on every tool call.
+      read: () => null,
+      claimReport: (_session: unknown, status: unknown, claim: unknown) => {
+        reports.push(claim)
+        return { claimStatus: status, claim }
+      },
+      claimOf: () => recorded,
+    }
+    const child = ctx.extend({})
+    child.provide('reviewGated', runtime)
+    // The status tool reads only these two Agent capabilities, so a partial
+    // stand-in covers the branches without fabricating a full Agent.
+    const run = async (target: object) =>
+      (await child.tools.execute({ ...input, agent: target as never })).results[0]?.result
+    // A live saving claim is reported without consulting the projection.
+    expect(JSON.stringify(await run(agent))).toContain('"claimStatus":"saving"')
+    // A settled claim with no live recovery reads the projection instead.
+    recorded = { intentSeq: 1, target: 'next-turn', turn: 1, step: 1, inputs: [], phase: 'rejected' }
+    expect(JSON.stringify(await run({ session: agent.session, claimProtectionStatus: null, claimRecovery: null })))
+      .toContain('"claimStatus":null')
+    expect(reports).toHaveLength(2)
+    // A live recovery without a saving status still takes the recovery branch.
+    expect(JSON.stringify(await run({ session: agent.session, claimProtectionStatus: null, claimRecovery: {
+      intentSeq: 2, target: 'next-turn', turn: 1, step: 1, inputs: [] } }))).toContain('"claimStatus":null')
+    // No live claim and no projection fails closed rather than reporting ready.
+    recorded = undefined
+    expect(JSON.stringify(await run({ session: agent.session, claimProtectionStatus: null, claimRecovery: null })))
+      .toContain('The input claim record is unavailable')
+    // A missing protected-claim capability fails closed before any report.
+    expect(JSON.stringify(await run({ session: agent.session }))).toContain('Protected input claims are unavailable')
   })
 
   it.each(['main', 'worker', 'reviewer'] as const)('accepts fixed role %s', (role) => {
