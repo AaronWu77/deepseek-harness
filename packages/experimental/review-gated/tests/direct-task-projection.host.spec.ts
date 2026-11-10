@@ -215,6 +215,38 @@ describe('direct task projection', () => {
     expect(schema.safeParse({ ...current, directClaim: { ...direct, phase: 'settled', admitted: 0 } }).success).toBe(false)
   })
 
+  it('rejects every inconsistent direct-task preparation and admission record', () => {
+    // Each case is one durable record that the fold must refuse instead of
+    // guessing an owner, an index, or a task identity.
+    const prepared = () => {
+      const f = fixture()
+      appendPrepared(f)
+      return f
+    }
+    // A task-prepared event without the opening admission cannot be attributed.
+    const noAdmission = prepared()
+    const preparedEvent = noAdmission.session.snapshotEvents()
+      .filter(event => event.type === 'review-gated/direct-task-prepared').at(-1)
+    if (preparedEvent === undefined) throw new Error('missing prepared event')
+    const state = fold(prepared().session)
+    const variants: unknown[] = [
+      { ...preparedEvent.data, version: 2 },
+      { ...preparedEvent.data, messageId: MessageId('other') },
+      { ...preparedEvent.data, state: { ...state.value, task: null } },
+      { ...preparedEvent.data, state: { ...state.value, diagnostic: null } },
+      { ...preparedEvent.data, state: { ...state.value, task: { ...state.value!.task!, workRevision: 1 } } },
+    ]
+    for (const data of variants) {
+      // @ts-expect-error -- malformed persisted events are not typed producer inputs.
+      expect(foldRgState({ ...state, directClaim: { ...state.directClaim!, phase: 'intent' } }, { ...preparedEvent, data }).failure)
+        .toContain('RG_STATE_INVALID')
+    }
+    // A claim settlement at an unrelated intent is left alone instead of failing.
+    const earlier = { ...preparedEvent, type: 'agent/claim/settled' as const, seq: SessionSeq(preparedEvent.seq - 1),
+      data: { intentSeq: SessionSeq(999), outcome: 'entered' as const, messages: [] } }
+    expect(foldRgState({ ...state, directClaim: { ...state.directClaim!, phase: 'intent' } }, earlier).failure).toBeNull()
+  })
+
   it('rejects malformed claim intents and malformed direct-claim checkpoints', () => {
     const session = Session.create(SessionId('direct-malformed-events'))
     session.append('review-gated/state', { version: 1, state: empty })

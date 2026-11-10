@@ -105,7 +105,8 @@ function directTaskRecorded(events: readonly SessionEvent[], creation: number, t
     if (event.type !== 'agent/claim/settled' || event.data.intentSeq !== intent.seq) continue
     if (event.data.outcome !== 'entered' || count !== 1 || admitted?.source.kind !== 'user') return false
     const matches = event.data.messages.filter(message => message.id === task.originMessageId)
-    return matches.length === 1 && matches[0]?.source.kind === 'user' && isDeepStrictEqual(matches[0], admitted)
+    const match = matches[0]
+    return matches.length === 1 && match !== undefined && match.source.kind === 'user' && isDeepStrictEqual(match, admitted)
   }
   return false
 }
@@ -126,7 +127,7 @@ function taskInputRecorded(events: readonly SessionEvent[], task: RgTask): boole
   }
   if (creation === -1) return false
   const event = events[creation]
-  if (event?.type === 'review-gated/direct-task-prepared') return directTaskRecorded(events, creation, task, event)
+  if (event !== undefined && event.type === 'review-gated/direct-task-prepared') return directTaskRecorded(events, creation, task, event)
   for (const entry of events.slice(creation + 1)) {
     if (entry.type === 'user/message' && entry.data.id === task.originMessageId && entry.data.source.kind === 'user'
       && entry.data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim() === task.objective) return true
@@ -145,14 +146,20 @@ function stateContradicted(events: readonly SessionEvent[], value: RgSessionStat
   return false
 }
 
-/** A rejected or empty claim cannot establish the task whose origin it captured. */
+/** A rejected or empty claim cannot establish the task whose origin it captured.
+ * Claim inputs round-trip through Session JSON, so the structural checks below
+ * are a parser boundary: an absent or non-object entry carries no origin.
+ */
 function claimRejectedOrigin(claim: ClaimWireState | null | undefined, task: RgTask | null | undefined): boolean {
-  if (task == null || (claim?.phase !== 'rejected' && claim?.phase !== 'empty')) return false
+  if (claim == null || task == null || (claim.phase !== 'rejected' && claim.phase !== 'empty')) return false
   return claim.inputs.some(({ message }) => message !== null && typeof message === 'object' && !Array.isArray(message)
     && message.id === task.originMessageId)
 }
 
-/** A missing, malformed, or still-pending origin cannot authorize a cold task view. */
+/** A missing, malformed, or still-pending origin cannot authorize a cold task view.
+ * The inbox projection is wire JSON, so each entry is validated before its id is
+ * compared; absence of the projection is not evidence of an empty inbox.
+ */
 function noPendingOrigin(inbox: InboxWireState | undefined, origin: MessageId): boolean {
   if (inbox === undefined) return false
   for (const target of ['next-turn', 'next-step'] as const) {
