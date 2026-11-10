@@ -43,6 +43,8 @@ export const reviewReportSchema = z.object({
 /** Checked file-scope identity. */
 export const scopeSchema = z.object({
   root: text, paths: list, fingerprint: text.nullable(), diagnostic: text.nullable(), capturedAt: z.number(),
+  // Defaulted so records written before this field existed still read as "no tree identity".
+  treeFingerprint: text.nullable().default(null), treeDiagnostic: text.nullable().default(null),
 }).strict()
 /** Budgeted role execution state. */
 export const runSchema = z.object({

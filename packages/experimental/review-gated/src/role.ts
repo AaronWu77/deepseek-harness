@@ -27,6 +27,9 @@ const callSchema = z.object({
 }).strict()
   .refine(value => (value.provider === undefined) === (value.model === undefined), 'Supply provider and model together.')
 
+/** Tool names that change workspace content; a reviewer may never run one. */
+const MUTATING_TOOLS = ['write', 'edit', 'apply_patch', 'str_replace_editor']
+
 const mainGuidance = `# RG: work and independent review
 
 Keep the human task, clarifications, progress, and delivery in this conversation. Answer ordinary questions directly. For substantive changes, delegate only useful bounded work with rg_worker, integrate and validate the result, then normally request a fresh rg_reviewer. You may work directly; do not spawn roles merely for ceremony. A direct human request to skip review is allowed and must be reported.
@@ -58,26 +61,21 @@ export function apply(ctx: Context, config: Config): void {
       }
     }
     if (!canProceed()) return { kind: 'reject' }
-    const state = JSON.stringify(runtime.read(agent.session))
-    const selected = JSON.stringify(agent.model.current())
-    try {
-      if (!await ctx.sessions.flush(agent.session)) throw new Error('No Session writer completed the flush')
-    } catch (error) {
-      ctx.logger.error('RG request checkpoint failed: %s', error)
-      throw new RgError('RG_NOT_READY', 'The Session save outcome is uncertain. Inspect the Session and workspace before continuing.')
-    }
-    signal.throwIfAborted()
-    if (ctx.get('reviewGated') === undefined) throw new RgError('RG_NOT_READY', 'RG is unavailable after saving the Session. Inspect the Session before continuing.')
-    if (!canProceed()) return { kind: 'reject' }
-    if (JSON.stringify(runtime.read(agent.session)) !== state || JSON.stringify(agent.model.current()) !== selected) {
-      throw new RgError('RG_NOT_READY', 'The RG task or model changed while saving the Session. Inspect the Session before continuing.')
-    }
+    // The loop flushes the claim intent before this waterfall and the admitted
+    // settlement afterwards, both before the request, so a second checkpoint
+    // here would only repeat that barrier.
     return next()
   })
   ctx.effect(() => ctx.systemPrompt.section({ name: `review-gated:${config.role}`,
     order: ctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
     text: config.role === 'main' ? mainGuidance
       : 'This RG role is one-shot and PTC-only. Inspect the assigned requirements and workspace. Report actual validation and unverified areas. Submit the final report by calling tools.structured_output inside run_code; never call structured_output directly. Do not delegate further or assume completion grants permission to deliver.' }))
+  // A reviewer inspects; it does not edit. This denial is enforcement, not
+  // guidance: it holds for direct calls and for nested PTC dispatches alike.
+  if (config.role === 'reviewer') {
+    ctx.effect(() => ctx.tools.guard(exec => MUTATING_TOOLS.includes(exec.name)
+      ? 'The RG reviewer role is read-only. Report the needed change to the parent instead of making it.' : undefined))
+  }
   if (config.role !== 'main') return
   ctx.effect(() => ctx.tools.guard((exec) => {
     if (exec.agent === undefined) return undefined

@@ -24,7 +24,7 @@ import { RgError } from './errors.ts'
 import { RG_TASK_ADMISSION_OWNER, rgProjectionDefinition, TASK_SAVE_UNCERTAIN } from './projection.ts'
 import { gitProjectionDefinition, gitStateSchema } from './git-projection.ts'
 import { sessionStateSchema } from './schemas.ts'
-import type { RgClaimReport, RgView } from './types.ts'
+import type { RgClaimReport, RgReviewReport, RgView } from './types.ts'
 import { LocalGitDelivery } from './git-delivery.ts'
 import type { RgGitState } from './git-types.ts'
 import type { RgProjectionState } from './projection.ts'
@@ -1279,6 +1279,10 @@ export default class ReviewGatedService extends TypertRemoteService {
           const end = await captureScope(this.ctx.fs, scope.root, scope.paths, policy, this.lifecycle.signal)
           matches = scope.fingerprint !== null && end.fingerprint === scope.fingerprint
           if (!matches) diagnostic = end.diagnostic ?? 'The inspected scope changed during review.'
+          else if (scope.treeFingerprint !== null && end.treeFingerprint !== scope.treeFingerprint) {
+            // Reported, not enforced: the pass covers the declared scope only.
+            diagnostic = 'Workspace content outside the declared review scope changed during the review. Treat the pass as scoped and inspect the other changes separately.'
+          }
           scope = end
         }
       }
@@ -1342,11 +1346,28 @@ export default class ReviewGatedService extends TypertRemoteService {
         task: { ...confirmedState.task, reviewStatus: confirmedState.task.reviewStatus === 'reported-pass' ? 'stale' : confirmedState.task.reviewStatus } })
     }
     if (liveParent && ownsResult && gitMatches) {
+      if (bounded.report?.kind === 'reviewer' && bounded.reviewStatus === 'changes-requested') {
+        this.steerChangesRequested(live.parent, bounded.report, policy.maxReportChars)
+      }
       live.parent.followup(this.notice(bounded.text))
     }
   }
 
   private notice(text: string): UserMessage {
     return { id: brandString<MessageId>(randomUUID()), role: 'user', content: [{ type: 'text', text }], source: { kind: 'review-gated' } }
+  }
+
+  /** Tell the parent that a review asked for changes, so it cannot report a pass.
+   * @param parent - the live main Agent owning the task.
+   * @param report - the settled reviewer report, already validated.
+   * @param maxChars - frozen complete-notice budget.
+   */
+  private steerChangesRequested(parent: Agent, report: RgReviewReport, maxChars: number): void {
+    if (this.ctx.agents.get(parent.id) !== parent || parent.ctx.fiber.state !== FiberState.ACTIVE) return
+    const findings = report.findings.map(finding => '- ' + finding.location + ': ' + finding.impact)
+    const notice = ['The RG reviewer requested changes. This review is not a pass; report these findings and fix or disclose them before delivering.',
+      ...findings, ...report.unverified.length === 0 ? [] : ['Unverified areas:', ...report.unverified.map(item => '- ' + item)]].join('\n')
+    const bounded = notice.length <= maxChars ? notice : notice.slice(0, maxChars - 3) + '...'
+    parent.steer({ id: brandString<MessageId>(randomUUID()), role: 'user', content: [{ type: 'text', text: bounded }], source: { kind: 'review-gated' } })
   }
 }

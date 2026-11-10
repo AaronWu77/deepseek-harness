@@ -160,7 +160,15 @@ export type RgReport = RgWorkerReport | RgReviewReport
 export interface RgScopeSnapshot {
   readonly root: string
   readonly paths: readonly string[]
+  /** Content identity of the explicitly declared scope. */
   readonly fingerprint: string | null
+  /**
+   * Content identity of every workspace file, so a change outside the declared
+   * scope is observable. Null with a reason when the workspace exceeds the
+   * inspection budgets, so a subset is never reported as identity.
+   */
+  readonly treeFingerprint: string | null
+  readonly treeDiagnostic: string | null
   readonly diagnostic: string | null
   readonly capturedAt: number
 }

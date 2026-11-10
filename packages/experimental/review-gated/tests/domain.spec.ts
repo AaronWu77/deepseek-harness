@@ -352,7 +352,8 @@ describe('RG projection recovery', () => {
     await ctx.plugin(SessionStore)
     await ctx.plugin(SessionProjections)
     const handle = await ctx.sessionProjections.register<'reviewGated', RgProjectionState>(rgProjectionDefinition)
-    const scope = { root: '/workspace', paths: ['a'], fingerprint: 'a'.repeat(64), diagnostic: null, capturedAt: 1 }
+    const scope = { root: '/workspace', paths: ['a'], fingerprint: 'a'.repeat(64), treeFingerprint: 'b'.repeat(64),
+      treeDiagnostic: null, diagnostic: null, capturedAt: 1 }
     const completed = settleRun(reserveRun(task(), policy(), run('reviewer')), brandString<RgRunId>('reviewer-attempt'),
       { status: 'completed', report: pass(), diagnostic: null, scope }, true)
     const legacy = sessionState(completed)
@@ -376,10 +377,15 @@ describe('RG projection recovery', () => {
     const unverifiable = { ...completed, lastReview: { ...completed.lastReview!, scope: { ...scope, fingerprint: null } } }
     session.append('review-gated/state', { version: 1, state: sessionState(unverifiable) })
     expect(handle.stateOf(session).value?.task?.reviewStatus).toBe('stale')
+    // A v2 generation can no longer authenticate a pass; only v3 does.
     const current = { ...completed, lastReview: { ...completed.lastReview!, scope: { ...scope, fingerprint: 'v2:' + 'a'.repeat(64) } } }
     session.append('review-gated/state', { version: 1, state: sessionState(current) })
+    expect(handle.stateOf(session).value?.task?.reviewStatus).toBe('stale')
+    const verifiable = { ...completed, lastReview: { ...completed.lastReview!, scope: { ...scope, fingerprint: 'v3:' + 'a'.repeat(64),
+      treeFingerprint: 'v1:' + 'b'.repeat(64) } } }
+    session.append('review-gated/state', { version: 1, state: sessionState(verifiable) })
     expect(handle.stateOf(session).value?.task?.reviewStatus).toBe('reported-pass')
-    session.append('review-gated/state', { version: 1, state: sessionState({ ...current, lastReview: { ...current.lastReview, scope: null } }) })
+    session.append('review-gated/state', { version: 1, state: sessionState({ ...verifiable, lastReview: { ...verifiable.lastReview, scope: null } }) })
     expect(handle.stateOf(session).value?.task?.reviewStatus).toBe('reported-pass')
   })
 

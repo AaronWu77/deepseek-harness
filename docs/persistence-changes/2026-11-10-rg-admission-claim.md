@@ -9,7 +9,7 @@ English | [中文](2026-11-10-rg-admission-claim.zh.md)
 
 ## Summary
 
-Add required events for exclusive task admission, direct-task preparation, and recoverable input claims.
+Add required events for exclusive task admission, direct-task preparation, and recoverable input claims, and record whole-workspace review scope identity.
 
 ## Table of Contents
 
@@ -44,23 +44,31 @@ changes:
     decision: same-version
   - root: "event:review-gated/direct-task-prepared"
     previous: null
-    after: "1b3368b5400def24c17c15e5ee0b3ba507a3219bdee2e6dc6000f1116e0a9649"
+    after: "528503dbc80ad1aca5d412c200fe596c04d848b701fdaa9716499b15f2a39b5e"
+    decision: same-version
+  - root: "event:review-gated/result-prepared"
+    previous: "2026-11-09-rg-result-confirmation"
+    after: "1cf8519b6f55fb60461234fbc39639f8c983d96f258e869ea6b224cf10bbae7d"
+    decision: same-version
+  - root: "event:review-gated/state"
+    previous: "2026-11-08-rg-model-pools"
+    after: "cdb9c4ff160de1a7178b6b56cd07a3628dcfcdb78c01ca364e8bec100f70c25c"
     decision: same-version
   - root: "event:review-gated/task-prepared"
     previous: null
-    after: "3aeac8d4fae4ccb993ae47ac2eca5606ae3c808e7d99f93de6ae4537fa747c6c"
+    after: "c8770292671017732975cd1ea11050c392285e9936fb254463fb7495211329a9"
     decision: same-version
 ```
 
 <a id="compatibility"></a>
 ## Compatibility
 
-Current readers accept earlier logs. Older readers refuse each new required event rather than interpreting the new protocol; the first admission event precedes explicit task preparation, and claim intent precedes input removal and direct-task preparation. Unconfirmed or interrupted work is not automatically replayed. A failed flush does not establish whether its event reached storage.
+Current readers accept earlier logs. Older readers refuse each new required event rather than interpreting the new protocol; the first admission event precedes explicit task preparation, and claim intent precedes input removal and direct-task preparation. Unconfirmed or interrupted work is not automatically replayed. A failed flush does not establish whether its event reached storage. Review scope records gain a tree fingerprint and diagnostic; a record written before those fields existed reads as having no tree identity, which cannot authenticate a pass.
 
 <a id="verification"></a>
 ## Verification
 
-The Agent loop suite passed 539 tests with one skipped, including real JSONL prefix, cancellation, fork, and checkpoint tests. The RG admission and legacy projection tests cover task preparation and uncertain receipt-only history.
+The Agent loop suite passed 539 tests with one skipped, including real JSONL prefix, cancellation, fork, and checkpoint tests. The RG admission and legacy projection tests cover task preparation and uncertain receipt-only history. The RG scope tests cover whole-workspace drift, budget exhaustion, and generation upgrades.
 
 <a id="dev-note"></a>
 ## Dev Note

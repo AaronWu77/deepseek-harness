@@ -90,6 +90,30 @@ describe('RG scoped role contribution', () => {
     expect(batch.results[0]?.result).toMatchObject({ isError: true, error: { info: { code: 'RG_NOT_READY' } } })
   })
 
+  it('denies every workspace-mutating tool to a reviewer scope', async () => {
+    const ctx = await harness()
+    await ctx.plugin(Role, { role: 'reviewer' })
+    const signal = new AbortController().signal
+    for (const name of ['write', 'edit', 'apply_patch', 'str_replace_editor']) {
+      const batch = await ctx.tools.execute({ calls: [{ type: 'tool-call', id: ToolCallId(name), name, arguments: '{}' }], signal })
+      expect(batch.results[0]?.result, name).toMatchObject({ isError: true })
+      expect(JSON.stringify(batch.results[0]?.result)).toContain('read-only')
+    }
+    // Read-only inspection stays available; the guard denies only mutations.
+    const read = await ctx.tools.execute({ calls: [{ type: 'tool-call', id: ToolCallId('bash'),
+      name: 'bash', arguments: '{"command":"true"}' }], signal })
+    expect(JSON.stringify(read.results[0]?.result)).not.toContain('read-only')
+  })
+
+  it('keeps the mutation denial scoped to reviewers', async () => {
+    const ctx = await harness()
+    await ctx.plugin(Role, { role: 'worker' })
+    const signal = new AbortController().signal
+    const batch = await ctx.tools.execute({ calls: [{ type: 'tool-call', id: ToolCallId('write'),
+      name: 'write', arguments: JSON.stringify({ path: 'probe.txt', content: 'x' }) }], signal })
+    expect(JSON.stringify(batch.results[0]?.result)).not.toContain('read-only')
+  })
+
   it.each(['main', 'worker', 'reviewer'] as const)('accepts fixed role %s', (role) => {
     expect(Role.Config({ role })).toEqual({ role })
   })

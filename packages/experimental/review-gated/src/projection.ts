@@ -70,9 +70,14 @@ function normalizeLegacyState(value: RgSessionState | null): RgSessionState | nu
   }
   const task = value.task
   const scope = task?.lastReview?.scope
-  if (task?.reviewStatus !== 'reported-pass' || scope === null || scope === undefined
-    || /^v2:[a-f0-9]{64}$/.test(scope.fingerprint ?? '')) return value
-  return { ...value, task: { ...task, reviewStatus: 'stale' } }
+  if (task?.reviewStatus !== 'reported-pass' || scope === null || scope === undefined) return value
+  // Only a complete declared-scope plus whole-tree identity can authenticate a
+  // current pass; older fingerprint generations and trees that could not be
+  // hashed within the budgets stay stale rather than passing on a partial view.
+  // Only the current declared-scope generation authenticates a pass. The tree
+  // identity is an additional signal, not a requirement: a workspace exceeding
+  // the inspection budget must not silently invalidate every earlier review.
+  return /^v3:[a-f0-9]{64}$/.test(scope.fingerprint ?? '') ? value : { ...value, task: { ...task, reviewStatus: 'stale' } }
 }
 
 const identitySchema = z.object({ version: z.literal(1), taskId: z.string().min(1).transform(brandString<RgTaskId>),

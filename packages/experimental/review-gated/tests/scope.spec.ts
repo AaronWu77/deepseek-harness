@@ -37,7 +37,9 @@ describe('RG bounded review scope', () => {
     await writeFile(join(h.root, 'b.txt'), 'beta')
     const first = await h.capture(['b.txt', 'a.txt', 'a.txt'])
     const second = await h.capture(['a.txt', 'b.txt'])
-    expect(first.fingerprint).toMatch(/^v2:[a-f0-9]{64}$/)
+    expect(first.fingerprint).toMatch(/^v3:[a-f0-9]{64}$/)
+    expect(first.treeFingerprint).toMatch(/^v1:[a-f0-9]{64}$/)
+    expect(first.treeDiagnostic).toBeNull()
     expect(first.diagnostic).toBeNull()
     expect(first.root).toBe(h.root)
     expect(first.paths).toEqual(['b.txt', 'a.txt', 'a.txt'])
@@ -48,7 +50,7 @@ describe('RG bounded review scope', () => {
   it('accepts an absolute path inside the workspace', async () => {
     const h = await fixture()
     await writeFile(join(h.root, 'source'), 'source')
-    expect((await h.capture([join(h.root, 'source')])).fingerprint).toMatch(/^v2:[a-f0-9]{64}$/)
+    expect((await h.capture([join(h.root, 'source')])).fingerprint).toMatch(/^v3:[a-f0-9]{64}$/)
   })
 
   it('detects changed files even when content contains another file metadata record', async () => {
@@ -176,7 +178,7 @@ describe('RG bounded review scope', () => {
     await mkdir(join(h.root, '.git'))
     await writeFile(join(h.root, '.git', 'HEAD'), 'detached')
     const result = await h.capture(['.git/HEAD'], { maxScopeBytes: 8 })
-    expect(result.fingerprint).toMatch(/^v2:[a-f0-9]{64}$/)
+    expect(result.fingerprint).toMatch(/^v3:[a-f0-9]{64}$/)
     expectUnverified(await h.capture([], { maxScopeBytes: 7 }), /.+/)
   })
 
@@ -367,4 +369,31 @@ describe('RG bounded review scope', () => {
     const signal = AbortSignal.abort(new Error('stop scope capture'))
     await expect(captureScope(h.ctx.fs, h.root, ['.'], h.limits, signal)).rejects.toThrow()
   })
+  it('reports an unchanged declared scope separately from whole-tree drift', async () => {
+    const h = await fixture()
+    await writeFile(join(h.root, 'a.txt'), 'alpha')
+    await writeFile(join(h.root, 'shared.txt'), 'shared')
+    const before = await h.capture(['a.txt'])
+    expect(before.fingerprint).not.toBeNull()
+    expect(before.treeFingerprint).not.toBeNull()
+    // A change outside the declared scope keeps the declared fingerprint while
+    // the whole-tree identity moves, which is what makes the gap observable.
+    await writeFile(join(h.root, 'shared.txt'), 'shared changed')
+    const after = await h.capture(['a.txt'])
+    expect(after.fingerprint).toBe(before.fingerprint)
+    expect(after.treeFingerprint).not.toBe(before.treeFingerprint)
+  })
+
+  it('reports an uninspectable workspace as an explicit tree diagnostic', async () => {
+    const h = await fixture()
+    await writeFile(join(h.root, 'a.txt'), 'a')
+    await writeFile(join(h.root, 'shared.txt'), 'x'.repeat(64))
+    // The declared scope fits its budget; the whole workspace does not, so the
+    // scope still has an identity while the tree reports why it has none.
+    const result = await h.capture(['a.txt'], { maxScopeBytes: 32 })
+    expect(result.fingerprint).toMatch(/^v3:[a-f0-9]{64}$/)
+    expect(result.treeFingerprint).toBeNull()
+    expect(result.treeDiagnostic).toMatch(/byte limit/i)
+  })
+
 })

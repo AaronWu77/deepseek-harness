@@ -28,7 +28,8 @@ export async function captureScope(fs: FileSystem, cwd: string, paths: readonly 
   let root: FsTarget
   try { root = await fs.resolve(cwd, { signal }) } catch (error) {
     signal.throwIfAborted()
-    return { ...base, fingerprint: null, diagnostic: error instanceof Error ? error.message : String(error) }
+    return { ...base, fingerprint: null, treeFingerprint: null, treeDiagnostic: null,
+      diagnostic: error instanceof Error ? error.message : String(error) }
   }
   const rootUri = fs.fileUrl(root).replace(/\/$/, '')
   const byName = (left: { name: string }, right: { name: string }) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0
@@ -115,9 +116,64 @@ export async function captureScope(fs: FileSystem, cwd: string, paths: readonly 
         throw new Error('The review scope changed while its contents were inspected.')
       }
     }
-    return { ...base, fingerprint: `v2:${hash.digest('hex')}`, diagnostic: null }
+    const tree = await treeFingerprint(fs, root, rootUri, limits, signal)
+    return { ...base, fingerprint: `v3:${hash.digest('hex')}`, treeFingerprint: tree.fingerprint,
+      treeDiagnostic: tree.diagnostic, diagnostic: null }
   } catch (error) {
     signal.throwIfAborted()
-    return { ...base, fingerprint: null, diagnostic: error instanceof Error ? error.message : String(error) }
+    return { ...base, fingerprint: null, treeFingerprint: null, treeDiagnostic: null,
+      diagnostic: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
+ * Hash every tracked-path-independent workspace file so a change outside the
+ * declared scope still invalidates a review. Budget failures return an explicit
+ * diagnostic instead of a truncated success; no file content leaves this call.
+ * @param fs - filesystem in the Agent's execution world.
+ * @param root - resolved workspace root.
+ * @param rootUri - the root's file URL without a trailing separator.
+ * @param limits - frozen file-count and byte budgets.
+ * @param signal - cancels inspection.
+ * @returns a content identity, or null with the reason it could not be established.
+ */
+async function treeFingerprint(fs: FileSystem, root: FsTarget, rootUri: string,
+  limits: Pick<RgPolicy, 'maxScopeFiles' | 'maxScopeBytes'>, signal: AbortSignal): Promise<{ fingerprint: string | null; diagnostic: string | null }> {
+  const hash = createHash('sha256').update('review-gated/tree/v1\0')
+  const frame = (value: string | Uint8Array): void => {
+    const length = typeof value === 'string' ? Buffer.byteLength(value, 'utf8') : value.byteLength
+    hash.update(String(length) + ':').update(value)
+  }
+  let count = 0
+  let bytes = 0
+  const walk = async (target: FsTarget): Promise<void> => {
+    signal.throwIfAborted()
+    const uri = fs.fileUrl(target)
+    const name = uri === rootUri ? '.' : uri.slice(rootUri.length + 1)
+    if (++count > limits.maxScopeFiles) throw new Error('The workspace exceeds the configured review file-count limit.')
+    const info = await fs.stat(target, signal)
+    frame(JSON.stringify([name, info?.type ?? 'absent']))
+    if (info === undefined) return
+    if (info.type === 'directory') {
+      const entries = (await fs.listDir(target, signal)).sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+      for (const entry of entries) {
+        if (entry.name === '.git') continue
+        await walk(entry.target)
+      }
+      return
+    }
+    if (info.type !== 'file') throw new Error('The workspace contains an unsupported file.')
+    const remaining = limits.maxScopeBytes - bytes
+    if (remaining <= 0) throw new Error('The workspace exceeds the configured review byte limit.')
+    const content = await fs.readBytes(target, signal, remaining)
+    bytes += content.byteLength
+    frame(content)
+  }
+  try {
+    await walk(root)
+    return { fingerprint: `v1:${hash.digest('hex')}`, diagnostic: null }
+  } catch (error) {
+    signal.throwIfAborted()
+    return { fingerprint: null, diagnostic: error instanceof Error ? error.message : String(error) }
   }
 }

@@ -8,7 +8,8 @@ import { main, settings } from './fixture.client.ts'
 export function reviewRun(): RgRun {
   return { id: 'review-1' as RgRunId, childId: 'child-1' as SessionId, role: 'reviewer', workRevision: 3,
     selection: { ...main, reasoningEffort: 'high' }, status: 'completed', diagnostic: null,
-    scope: { root: '/work', paths: ['src/first.ts'], fingerprint: 'fingerprint', diagnostic: null, capturedAt: 1 },
+    scope: { root: '/work', paths: ['src/first.ts'], fingerprint: 'fingerprint', treeFingerprint: 'tree',
+      treeDiagnostic: null, diagnostic: null, capturedAt: 1 },
     report: { kind: 'reviewer', verdict: 'pass', summary: 'Inspected the requested change', inspectedScope: ['src/first.ts'],
       findings: [{ location: 'src/first.ts:4', impact: 'Incorrect output', evidence: 'A negative input returns zero' }],
       validation: ['unit suite passed'], unverified: ['cross-platform behavior'] } }

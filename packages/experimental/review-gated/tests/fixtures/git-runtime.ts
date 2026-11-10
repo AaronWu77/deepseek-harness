@@ -107,10 +107,12 @@ export async function gitRuntimeFixture(
   await mountAgentLoopTestHarness(ctx)
   await ctx.plugin(Jsonl, { root: join(base, 'sessions'), compression: 'none' })
   let worktreeFiber: Fiber | undefined
+  // The reviewer enforces its read-only claim through the sandbox policy, so the
+  // fixture composes it even when no Git backend is requested.
+  await ctx.plugin(SandboxPolicy, { mode: 'danger-full-access', workspaceRoot: root })
   if (options.backend !== false) {
     await ctx.plugin(Subprocess)
     await ctx.plugin(UnusedSandbox)
-    await ctx.plugin(SandboxPolicy, { mode: 'danger-full-access', workspaceRoot: root })
     worktreeFiber = ctx.plugin(Worktrees)
     await worktreeFiber.await()
   }

@@ -25,6 +25,7 @@ import type { PeerId, RemoteInvocation } from '@deepseek-ai/dsh-typert-protocol'
 import ModelSelectionSettings from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 import type {} from '@deepseek-ai/dsh-tool-subagent/src/model-selection-state.ts'
 import type {} from '@deepseek-ai/dsh-fs'
+import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import { workerOutputSchema } from '../src/report-schema.ts'
 import ReviewGated from '../src/runtime.ts'
 import * as Role from '../src/role.ts'
@@ -108,6 +109,8 @@ async function setup(input = settings(),
   }
   ctx.loader.builtins.rgRole = Role
   await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
+  // The reviewer role enforces its read-only claim through the sandbox policy.
+  await ctx.plugin(SandboxPolicy, { mode: 'danger-full-access', workspaceRoot: root })
   const loop = await mountAgentLoopTestHarness(ctx)
   if (options.persistence !== false) await ctx.plugin(Jsonl, { root: join(root, 'sessions'), compression: 'none' })
   await ctx.plugin(AgentPresets, { default: 'standard' })
@@ -1181,6 +1184,33 @@ describe('RG Host runtime', () => {
     }
   })
 
+  it('steers the parent with the findings when the reviewer requests changes', async () => {
+    const f = await setup({ ...settings(), reviewer: { mode: 'custom', pool: pool({ ...main, model: 'reviewer' }) } })
+    const { agent } = await f.task()
+    const changes = { kind: 'reviewer', verdict: 'changes-requested', summary: 'The implementation misses a requirement',
+      inspectedScope: ['probe.txt'], findings: [{ location: 'probe.txt', impact: 'The required behavior is missing', evidence: 'The file is unchanged' }],
+      validation: ['Read probe.txt'], unverified: [] }
+    f.adapter.script = options => options.model === 'worker' || options.model === 'reviewer' ? structured(changes) : text('done')
+    const steered: string[] = []
+    const off = f.ctx.on('session/event', (session, event) => {
+      if (session !== agent.session || event.type !== 'user/message') return
+      if (event.data.source.kind !== 'review-gated') return
+      steered.push(event.data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''))
+    })
+    try {
+      const notice = f.notice(agent)
+      expect(await f.call(agent, 'rg_reviewer', { handoff, provider: 'fixture', model: 'reviewer' })).toMatchObject({ isError: false })
+      await notice
+      await agent.whenIdle()
+    } finally { off() }
+    expect(f.runtime.read(agent.session)?.task?.reviewStatus).toBe('changes-requested')
+    const steer = steered.find(message => message.includes('requested changes'))
+    expect(steer).toBeDefined()
+    expect(steer).toContain('probe.txt')
+    expect(steer).toContain('The required behavior is missing')
+    expect(steer).toContain('not a pass')
+  })
+
   it('keeps existing role tools fail-closed while RG is disabled or has no configured policy', async () => {
     const f = await setup()
     const { agent } = await f.task()
@@ -1457,15 +1487,18 @@ describe('RG Host runtime', () => {
     const release = f.gate()
     const entered = Promise.withResolvers<undefined>()
     const original = f.ctx.fs.readBytes.bind(f.ctx.fs)
-    let inspections = 0
+    let rechecking = false
+    let waiting = false
+    // The start resolves after the initial capture, so every read after this
+    // point belongs to the final recheck that disable is meant to interrupt.
     const spy = vi.spyOn(f.ctx.fs, 'readBytes').mockImplementation(async (...args) => {
-      inspections += 1
-      if (inspections === 2) { entered.resolve(undefined); await release.promise }
+      if (rechecking && !waiting) { waiting = true; entered.resolve(undefined); await release.promise }
       return original(...args)
     })
     onTestFinished(() => { spy.mockRestore() })
     const runtime = f.runtime
     await runtime.startRole(agent, 'reviewer', handoff, undefined, new AbortController().signal)
+    rechecking = true
     await entered.promise
     const shutdown = f.enabled(false)
     release.resolve(undefined)
