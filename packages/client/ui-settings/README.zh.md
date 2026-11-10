@@ -33,6 +33,8 @@ kind: "package-reference"
 
 功能适配器使用 `ctx.configForms.get(entryId)` 获取该 Host 条目所有编辑器共享的已接受值和写入队列。快照包含解析后的 `value`、继承 `base`、原始 `user`、修订号和可写性。`set` 与 `unset` 提交单个操作，`mutate` 提交一个原子操作列表。暂存编辑器传入编辑前读取的修订号；冲突时保留草稿。清除操作移除覆盖并恢复继承。
 
+当 Host schema 包含无法序列化的转换时，功能可以通过 `ctx.configForms.registerDecoder(entryId, decoder)` 注册一个严格且可在浏览器运行的解码器，并通过 `ctx.effect` 持有返回的 disposer。解码器验证完整的不可信配置分节，返回 `undefined` 表示拒绝。同一条目不接受第二个解码器。注册和撤销会重新检查当前镜像，但不替换共享写入队列。如果解码器拒绝较新的配置分节，最后接受的值仍保留其对应修订号，按快照设置栅栏的写入不会使用被拒绝的修订号；Host 验证仍是写入的权威依据。
+
 配置表单对每个已认证浏览器都通过 Host settings 服务持久化；该策略由[已认证浏览器 Host 偏好笔记](../../../.agents/notes/implemented/bug-fix/2026-09-15-authenticated-browser-host-preferences.zh.md)拥有。写入是否被接受由 `settings.describe.writable` 决定。
 
 ### 跟随被服务的命名空间
@@ -48,7 +50,7 @@ kind: "package-reference"
 
 ### 可观察的成功与失败
 
-已提交的写入将应答合入共享镜像。被拒绝的写入刷新最新 Host 值。浏览器使用序列化的 Config schema 校验；Host 校验完整配置，包括无法序列化的检查。
+已提交的配置表单写入应答会合入共享镜像，但不会覆盖已持有的更新修订。重连或命名空间撤销会取消旧视图尚未发出的排队写入，并拒绝结果无法确认的在途写入；其结果可能已到达 Host。被拒绝的写入刷新最新 Host 值。浏览器使用序列化的 Config schema 校验；Host 校验完整配置，包括无法序列化的检查。
 
 -----
 

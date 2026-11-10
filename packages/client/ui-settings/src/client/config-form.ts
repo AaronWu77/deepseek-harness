@@ -53,12 +53,15 @@ export class ConfigFormController<T> implements ConfigForm<T> {
   private writeGeneration = 0
   private disposed = false
   private readonly unsubscribe: () => void
+  private decoder: ((section: unknown) => T | undefined) | undefined
   /**
    * Revision answered by a superseded write still ahead of the mirror: the
    * mirror only folds the LATEST settlement in, so a queued successor takes
    * its fence from here first.
    */
   private pendingRevision: number | undefined
+  private pendingConnection = 0
+  private pendingNamespace = 0
 
   /**
    * @param ctx - the providing plugin's context, whose `remote.settings`
@@ -129,9 +132,20 @@ export class ConfigFormController<T> implements ConfigForm<T> {
   mutate(ops: readonly SettingsPathOpView[], expectedRevision?: number): Promise<boolean> {
     const ownedOps = structuredClone(ops) as SettingsPathOpView[]
     const generation = ++this.writeGeneration
+    const connection = this.mirror.connectionGeneration
+    const namespace = this.mirror.namespaceGeneration(this.spec.namespace)
     return this.enqueue(async () => {
+      if (connection !== this.mirror.connectionGeneration
+        || namespace !== this.mirror.namespaceGeneration(this.spec.namespace)) return false
+      if (connection !== this.pendingConnection || namespace !== this.pendingNamespace) {
+        this.pendingConnection = connection
+        this.pendingNamespace = namespace
+        this.pendingRevision = undefined
+      }
       const revision = expectedRevision ?? this.pendingRevision ?? this.getSnapshot().revision
       const response = await this.ctx.remote.settings.mutate(this.spec.namespace, ownedOps, revision)
+      if (connection !== this.mirror.connectionGeneration) throw new Error('The settings connection changed before the write result was confirmed.')
+      if (namespace !== this.mirror.namespaceGeneration(this.spec.namespace)) throw new Error('The settings namespace changed before the write result was confirmed.')
       if (!response.ok) {
         await this.recover(generation)
         return false
@@ -139,9 +153,11 @@ export class ConfigFormController<T> implements ConfigForm<T> {
       if (this.disposed) return true
       if (generation === this.writeGeneration) {
         this.pendingRevision = undefined
-        this.mirror.acceptView(response.value)
+        const current = this.mirror.namespace(this.spec.namespace)
+        if (current === undefined || current.revision <= response.value.revision) this.mirror.acceptView(response.value)
       } else {
-        this.pendingRevision = response.value.revision
+        this.pendingRevision = this.decoder !== undefined && this.decode(response.value) === undefined
+          ? undefined : response.value.revision
       }
       return true
     })
@@ -152,6 +168,31 @@ export class ConfigFormController<T> implements ConfigForm<T> {
     if (this.disposed || generation !== this.writeGeneration) return
     this.pendingRevision = undefined
     await this.mirror.load()
+  }
+
+  /** Register the one feature-owned decoder for this shared namespace.
+   * @param decoder - validates the complete untrusted Host section; undefined rejects it.
+   * @returns a synchronous disposer that restores schema-based decoding.
+   * @throws if a decoder already owns this form or it has been disposed.
+   */
+  registerDecoder(decoder: (section: unknown) => T | undefined): () => void {
+    if (this.disposed) throw new Error('ui-settings: cannot register a decoder on a disposed form')
+    if (this.decoder !== undefined || this.spec.decode !== undefined) throw new Error('ui-settings: a form decoder is already registered')
+    this.decoder = decoder
+    this.resetDecoderView()
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.decoder = undefined
+      this.resetDecoderView()
+    }
+  }
+
+  private resetDecoderView(): void {
+    if (this.disposed) return
+    this.store.update((draft) => { draft.status = 'loading'; draft.value = undefined })
+    this.derive()
   }
 
   /**
@@ -193,10 +234,12 @@ export class ConfigFormController<T> implements ConfigForm<T> {
     }
     const decoded = this.decode(view)
     this.store.update((draft) => {
+      draft.writable = writable
+      // A rejected feature section cannot authorize writes based on an older accepted value.
+      if (this.decoder !== undefined && decoded === undefined && draft.value !== undefined) return
       draft.revision = view.revision
       draft.base = view.base
       draft.user = view.user
-      draft.writable = writable
       if (decoded === undefined) return
       draft.status = 'ready'
       draft.value = decoded
@@ -204,7 +247,10 @@ export class ConfigFormController<T> implements ConfigForm<T> {
   }
 
   private decode(view: SettingsNamespaceView): T | undefined {
-    if (this.spec.decode !== undefined) return this.spec.decode(view.value)
+    const decoder = this.decoder ?? this.spec.decode
+    if (decoder !== undefined) {
+      try { return decoder(view.value) } catch (_invalidSection) { return undefined }
+    }
     // Sections are plain objects by construction; schemastery alone would
     // resolve null or an array through object defaults instead of refusing.
     if (typeof view.value !== 'object' || view.value === null || Array.isArray(view.value)) return undefined
@@ -282,14 +328,28 @@ export class ConfigForms extends Service {
    * @returns The entry's form, owned by this provider.
    */
   get<T>(entryId: string): ConfigForm<T> {
+    return this.formFor(entryId) as ConfigFormController<T>
+  }
+
+  private formFor(entryId: string): ConfigFormController<unknown> {
     const existing = this.forms.get(entryId)
-    if (existing !== undefined) return existing as ConfigFormController<T>
-    const form = new ConfigFormController<T>(
+    if (existing !== undefined) return existing
+    const form = new ConfigFormController<unknown>(
       this.owner, { namespace: entryId }, this.mirror, this.schema,
     )
     this.forms.set(entryId, form)
     void this.mirror.ensure()
     return form
+  }
+
+  /** Install the sole feature decoder on a shared form without replacing its write queue.
+   * @param entryId - unique Host plugin entry id.
+   * @param decoder - validates the complete untrusted section; undefined rejects it.
+   * @returns a disposer; the caller owns it through its fiber effect.
+   * @throws if another decoder is registered for the namespace.
+   */
+  registerDecoder(entryId: string, decoder: (section: unknown) => unknown): () => void {
+    return this.formFor(entryId).registerDecoder(decoder)
   }
 
   /**

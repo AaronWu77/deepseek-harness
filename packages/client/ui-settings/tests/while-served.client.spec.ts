@@ -30,6 +30,24 @@ async function bench(namespaces: readonly string[]) {
 }
 
 describe('ConfigForms.whileServed', () => {
+  it('waits while the first description is still in flight', async () => {
+    let finish!: (value: ReturnType<typeof described>) => void
+    const pending = new Promise<ReturnType<typeof described>>((resolve) => { finish = resolve })
+    const describeCall = vi.fn().mockReturnValue(pending)
+    const ctx = new Context()
+    new TestRemote(ctx, { settings: { describe: describeCall } })
+    const mirror = new SettingsDescribeMirror(ctx)
+    await ctx.plugin(ConfigForms, { mirror, schema: new SettingsSchemaService(ctx) }).await()
+    const register = vi.fn(() => () => {})
+    const stop = ctx.configForms.whileServed(['shell'], register)
+    expect(register).not.toHaveBeenCalled()
+    finish(described(['shell']))
+    await mirror.ensure()
+    expect(register).toHaveBeenCalledOnce()
+    stop()
+    await ctx.fiber.dispose()
+  })
+
   it('registers once any watched namespace is served, and withdraws when none is', async () => {
     const { ctx, mirror, describeCall } = await bench(['agent-loop'])
     const dispose = vi.fn()

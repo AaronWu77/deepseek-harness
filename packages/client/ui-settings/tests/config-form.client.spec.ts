@@ -97,6 +97,108 @@ describe('ConfigFormController', () => {
     })
   })
 
+  it('never applies an old connection write response after a newer Host view', async () => {
+    const pending = deferred<Answer<SettingsNamespaceView>>()
+    const entered = deferred<undefined>()
+    const describe = vi.fn().mockResolvedValueOnce(described({ preference: 'light' }, 1))
+      .mockResolvedValueOnce(described({ preference: 'system' }, 3))
+    const mutate = vi.fn(() => { entered.resolve(undefined); return pending.promise })
+    const { mirror, scope } = derivedScope({ describe, mutate })
+    await mirror.load()
+    const write = scope.set('preference', 'dark')
+    const outcome = write.then(() => null, (error: unknown) => error)
+    await entered.promise
+    await mirror.load()
+    expect(scope.getSnapshot()).toMatchObject({ value: { preference: 'system' }, revision: 3 })
+    pending.resolve(ok(view({ preference: 'dark' }, 2)))
+    await outcome
+    expect(scope.getSnapshot()).toMatchObject({ value: { preference: 'system' }, revision: 3 })
+  })
+
+  it('does not resurrect a namespace withdrawn while its write is pending', async () => {
+    const pending = deferred<Answer<SettingsNamespaceView>>()
+    const entered = deferred<undefined>()
+    const describe = vi.fn().mockResolvedValueOnce(described({ preference: 'light' }, 1))
+      .mockResolvedValueOnce(ok({ writable: true, hasDocument: true, namespaces: [] }))
+    const mutate = vi.fn(() => { entered.resolve(undefined); return pending.promise })
+    const { mirror, scope } = derivedScope({ describe, mutate })
+    await mirror.load()
+    const outcome = scope.set('preference', 'dark').then(() => null, (error: unknown) => error)
+    await entered.promise
+    await mirror.load()
+    expect(scope.getSnapshot().status).toBe('unavailable')
+    pending.resolve(ok(view({ preference: 'dark' }, 2)))
+    expect(await outcome).toBeInstanceOf(Error)
+    expect(scope.getSnapshot().status).toBe('unavailable')
+    expect(mirror.namespace('ui-test')).toBeUndefined()
+  })
+
+  it('does not apply old queued writes after namespace withdrawal and reappearance', async () => {
+    const pending = deferred<Answer<SettingsNamespaceView>>()
+    const entered = deferred<undefined>()
+    const describe = vi.fn().mockResolvedValueOnce(described({ preference: 'light' }, 1))
+      .mockResolvedValueOnce(ok({ writable: true, hasDocument: true, namespaces: [] }))
+      .mockResolvedValueOnce(described({ preference: 'system' }, 1))
+    const mutate = vi.fn().mockImplementationOnce(() => { entered.resolve(undefined); return pending.promise })
+      .mockResolvedValueOnce(ok(view({ preference: 'light' }, 2)))
+    const { mirror, scope } = derivedScope({ describe, mutate })
+    await mirror.load()
+    const oldWrite = scope.set('preference', 'dark').then(() => null, (error: unknown) => error)
+    const oldQueued = scope.set('preference', 'system')
+    await entered.promise
+    await mirror.load()
+    await mirror.load()
+    const newWrite = scope.set('preference', 'light')
+    pending.resolve(ok(view({ preference: 'dark' }, 99)))
+    expect(await oldWrite).toBeInstanceOf(Error)
+    expect(await oldQueued).toBe(false)
+    expect(await newWrite).toBe(true)
+    expect(mutate).toHaveBeenCalledTimes(2)
+    expect(mutate.mock.calls[1]?.[2]).toBe(1)
+    expect(scope.getSnapshot()).toMatchObject({ value: { preference: 'light' }, revision: 2 })
+  })
+
+  it('retires old writes and queued operations when the connection changes', async () => {
+    const pending = deferred<Answer<SettingsNamespaceView>>()
+    const entered = deferred<undefined>()
+    const describe = vi.fn().mockResolvedValueOnce(described({ preference: 'light' }, 1))
+      .mockResolvedValueOnce(described({ preference: 'system' }, 3))
+    const mutate = vi.fn().mockImplementationOnce(() => { entered.resolve(undefined); return pending.promise })
+      .mockResolvedValueOnce(ok(view({ preference: 'light' }, 4)))
+    const { mirror, scope } = derivedScope({ describe, mutate })
+    await mirror.load()
+    const oldWrite = scope.set('preference', 'dark').then(() => null, (error: unknown) => error)
+    const oldQueued = scope.set('preference', 'system')
+    await entered.promise
+    await mirror.reconnect()
+    const newWrite = scope.set('preference', 'light')
+    pending.resolve(ok(view({ preference: 'dark' }, 99)))
+    expect(await oldWrite).toBeInstanceOf(Error)
+    expect(await oldQueued).toBe(false)
+    expect(await newWrite).toBe(true)
+    expect(mutate).toHaveBeenCalledTimes(2)
+    expect(mutate.mock.calls[1]?.[2]).toBe(3)
+    expect(scope.getSnapshot()).toMatchObject({ value: { preference: 'light' }, revision: 4 })
+  })
+
+  it('does not publish a stale in-flight describe after reconnecting', async () => {
+    const old = deferred<ReturnType<typeof described>>()
+    const entered = deferred<undefined>()
+    const describe = vi.fn().mockResolvedValueOnce(described({ preference: 'light' }, 1))
+      .mockImplementationOnce(() => { entered.resolve(undefined); return old.promise })
+      .mockResolvedValueOnce(described({ preference: 'system' }, 3))
+    const { mirror, scope } = derivedScope({ describe })
+    await mirror.load()
+    const values = trackValues(scope)
+    const first = mirror.load()
+    await entered.promise
+    const reconnected = mirror.reconnect()
+    old.resolve(described({ preference: 'dark' }, 2))
+    await Promise.all([first, reconnected])
+    expect(values).toEqual([{ preference: 'light' }, { preference: 'system' }])
+    expect(scope.getSnapshot()).toMatchObject({ value: { preference: 'system' }, revision: 3 })
+  })
+
   it('keeps the last good value across invalid, rejected, and failed reads while tracking revisions', async () => {
     const describeCall = vi.fn()
       .mockResolvedValueOnce(described({ preference: 'dark' }, 3))
@@ -106,9 +208,10 @@ describe('ConfigFormController', () => {
       .mockResolvedValueOnce(described(['queue'], 7))
       .mockResolvedValueOnce(rejected())
       .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce('transport unavailable')
     const { mirror, scope } = derivedScope({ describe: describeCall })
     const good = trackValues(scope)
-    for (let i = 0; i < 7; i++) await mirror.load()
+    for (let i = 0; i < 8; i++) await mirror.load()
     expect(scope.getSnapshot()).toMatchObject({
       status: 'ready', value: { preference: 'dark' }, revision: 7,
     })
@@ -526,4 +629,117 @@ describe('ConfigForms.get', () => {
     expect(theme.getSnapshot()).toMatchObject({ revision: 1 })
   })
 
+})
+
+describe('feature-owned shared form decoder', () => {
+  it('does not write an old accepted section with a newer rejected revision', async () => {
+    const describeCall = vi.fn().mockResolvedValue(described({ preference: 'dark' }, 4))
+    const mutate = vi.fn().mockImplementation(async (_namespace, _ops, revision) =>
+      revision === 5 ? ok(view({ preference: 'light' }, 6)) : rejected())
+    const { mirror, scope } = derivedScope({ describe: describeCall, mutate })
+    const stop = scope.registerDecoder((section) => {
+      if (typeof section !== 'object' || section === null || !('preference' in section)) return undefined
+      const preference = section.preference
+      return preference === 'light' || preference === 'dark' || preference === 'system' ? { preference } : undefined
+    })
+    await mirror.load()
+    mirror.acceptView(view({ preference: 'unsupported-new-value' }, 5))
+    expect(scope.getSnapshot()).toMatchObject({ status: 'ready', value: { preference: 'dark' }, revision: 4 })
+    const accepted = await scope.mutate([{ op: 'set', path: ['preference'], value: 'light' }], scope.getSnapshot().revision)
+    expect(accepted).toBe(false)
+    expect(mutate).toHaveBeenCalledWith('ui-test', [{ op: 'set', path: ['preference'], value: 'light' }], 4)
+    mirror.acceptView(view({ preference: 'system' }, 6))
+    expect(scope.getSnapshot()).toMatchObject({ status: 'ready', value: { preference: 'system' }, revision: 6 })
+    stop()
+    await scope.dispose()
+  })
+
+  it('does not carry a rejected intermediate write revision into a queued successor', async () => {
+    const first = deferred<Answer<SettingsNamespaceView>>()
+    const describeCall = vi.fn().mockResolvedValue(described({ preference: 'dark' }, 4))
+    const mutate = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce(rejected())
+    const { mirror, scope } = derivedScope({ describe: describeCall, mutate })
+    const stop = scope.registerDecoder((section) => {
+      if (typeof section !== 'object' || section === null || !('preference' in section)) return undefined
+      const preference = section.preference
+      return preference === 'light' || preference === 'dark' || preference === 'system' ? { preference } : undefined
+    })
+    await mirror.load()
+    const earlier = scope.set('preference', 'light')
+    const later = scope.set('preference', 'system')
+    await vi.waitFor(() => { expect(mutate).toHaveBeenCalledOnce() })
+    first.resolve(ok(view({ preference: 'unsupported-new-value' }, 5)))
+    expect(await earlier).toBe(true)
+    expect(await later).toBe(false)
+    expect(mutate).toHaveBeenNthCalledWith(2, 'ui-test', [{ op: 'set', path: ['preference'], value: 'system' }], 4)
+    stop()
+    await scope.dispose()
+  })
+
+  it('refuses another decoder when a constructor decoder owns the form', async () => {
+    const { scope } = derivedScope({}, { namespace: 'ui-test', decode: () => undefined })
+    expect(() => scope.registerDecoder(() => undefined)).toThrow('already registered')
+    await scope.dispose()
+    expect(() => scope.registerDecoder(() => undefined)).toThrow('disposed form')
+  })
+
+  it('allows an owner to dispose its decoder after the shared form has closed', async () => {
+    const { scope } = derivedScope({})
+    const stop = scope.registerDecoder(() => ({ preference: 'dark' }))
+    await scope.dispose()
+    stop()
+    stop()
+    expect(scope.getSnapshot().value).toBeUndefined()
+  })
+
+  it('decodes a Host-only transform after JSON transport and restores schema validation when disposed', async () => {
+    const transformed = z.object({ preference: z.transform(z.string(), value => value.toUpperCase()) }).toJSON()
+    const transported = JSON.parse(JSON.stringify(transformed)) as JsonValue
+    const describeCall = vi.fn().mockResolvedValue(ok({ writable: true, hasDocument: true, namespaces: [
+      { ...view({ preference: 'dark' }, 4), schema: transported },
+    ] }))
+    const mirror = new SettingsDescribeMirror(ctxWith({ describe: describeCall }))
+    const ctx = new Context()
+    new TestRemote(ctx, { settings: { describe: describeCall } })
+    await ctx.plugin(ConfigForms, { mirror, schema: settingsSchema }).await()
+    const form = ctx.configForms.get<UiTestSettings>('ui-test')
+    await mirror.load()
+    expect(form.getSnapshot()).toMatchObject({ status: 'loading', writable: true, revision: 4 })
+    const decoder = (section: unknown): UiTestSettings | undefined => {
+      if (typeof section !== 'object' || section === null || !('preference' in section)) return undefined
+      const preference = section.preference
+      return preference === 'light' || preference === 'dark' || preference === 'system' ? { preference } : undefined
+    }
+    const dispose = ctx.configForms.registerDecoder('ui-test', decoder)
+    expect(ctx.configForms.get<UiTestSettings>('ui-test')).toBe(form)
+    expect(form.getSnapshot()).toMatchObject({ status: 'ready', value: { preference: 'dark' }, revision: 4 })
+    expect(() => ctx.configForms.registerDecoder('ui-test', decoder)).toThrow('already registered')
+    mirror.acceptView({ ...view({ preference: 'invalid' }, 5), schema: transported })
+    expect(form.getSnapshot()).toMatchObject({ status: 'ready', value: { preference: 'dark' }, revision: 4 })
+    dispose()
+    expect(form.getSnapshot()).toMatchObject({ status: 'loading', value: undefined, revision: 5 })
+    const second = ctx.configForms.registerDecoder('ui-test', decoder)
+    dispose()
+    expect(() => ctx.configForms.registerDecoder('ui-test', decoder)).toThrow('already registered')
+    second()
+    await ctx.fiber.dispose()
+  })
+
+  it('contains decoder exceptions and withdraws registrations with their owning fiber', async () => {
+    const describeCall = vi.fn().mockResolvedValue(described({ preference: 'dark' }, 1))
+    const mirror = new SettingsDescribeMirror(ctxWith({ describe: describeCall }))
+    const ctx = new Context()
+    new TestRemote(ctx, { settings: { describe: describeCall } })
+    await ctx.plugin(ConfigForms, { mirror, schema: settingsSchema }).await()
+    const form = ctx.configForms.get<UiTestSettings>('ui-test')
+    await mirror.load()
+    const fiber = ctx.plugin({ inject: ['configForms'], apply(plugin: Context) {
+      plugin.effect(() => plugin.configForms.registerDecoder('ui-test', () => { throw new Error('bad wire section') }))
+    } })
+    await fiber.await()
+    expect(form.getSnapshot()).toMatchObject({ status: 'loading', value: undefined })
+    await fiber.dispose()
+    expect(form.getSnapshot()).toMatchObject({ status: 'ready', value: { preference: 'dark' } })
+    await ctx.fiber.dispose()
+  })
 })

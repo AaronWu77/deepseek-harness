@@ -1,11 +1,9 @@
 /**
- * One plugin's settings form as its page on the Plugins page shows it: the
- * read-only notice when the deployment stores settings read-only, the
- * plugin's controls, and the save that writes every staged edit. The page
- * draws the plugin's title and one-liner itself.
+ * A settings form frame with a read-only notice, owner-supplied controls, and
+ * one save action for all staged edits. The owner draws the page title.
  *
- * Only a save writes. Leaving the page drops every staged edit, so the form
- * discards on unmount and offers no discard control. A form whose namespace
+ * Only a save writes. By default, leaving the page discards staged edits; an owner
+ * can retain them across unmount and supply its own discard control. A namespace
  * the Host stopped serving says so in place of its controls rather than
  * showing fields nothing would accept.
  */
@@ -36,8 +34,10 @@ export interface SettingsFormProps {
   state: SettingsFormShell
   /** Write every staged edit. */
   onSave: () => void
-  /** Drop every staged edit; the form calls it when it leaves the page. */
+  /** Drop every staged edit; called on unmount unless the owner opts out. */
   onDiscard: () => void
+  /** Set false only when the owner retains and can explicitly discard the draft. Defaults to true. */
+  discardOnUnmount?: boolean
   /** The plugin's controls. */
   children: ReactNode
 }
@@ -49,9 +49,9 @@ export interface SettingsFormProps {
  */
 export function SettingsForm(props: SettingsFormProps) {
   const { state, labels } = props
-  const discard = useRef(props.onDiscard)
-  discard.current = props.onDiscard
-  useEffect(() => () => { discard.current() }, [])
+  const cleanup = useRef({ discard: props.onDiscard, enabled: props.discardOnUnmount !== false })
+  cleanup.current = { discard: props.onDiscard, enabled: props.discardOnUnmount !== false }
+  useEffect(() => () => { if (cleanup.current.enabled) cleanup.current.discard() }, [])
   if (!state.available) return <p className={css.unavailable} role="status">{labels.unavailable}</p>
   const blocked = !state.dirty || state.invalid || state.saving
   return (

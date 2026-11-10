@@ -75,6 +75,8 @@ export class SettingsDescribeMirror implements SettingsDescribeFace {
   private inFlight: Promise<void> | undefined
   private rerun = false
   private generation = 0
+  private connectionEpoch = 0
+  private readonly namespaceEpochs = new Map<string, number>()
 
   /**
    * @param ctx - the providing plugin's context, whose `remote.settings`
@@ -117,6 +119,27 @@ export class SettingsDescribeMirror implements SettingsDescribeFace {
     this.inFlight = run
     return run
   }
+
+  /**
+   * Invalidate prior-connection answers and refresh the held view.
+   * @returns settlement after the new connection's read.
+   */
+  reconnect(): Promise<void> {
+    this.connectionEpoch += 1
+    this.generation += 1
+    return this.load()
+  }
+
+  /** Generation fencing in-flight settings writes across connections.
+   * @returns the current connection generation.
+   */
+  get connectionGeneration(): number { return this.connectionEpoch }
+
+  /** Count observed withdrawals of one Host namespace.
+   * @param namespace - Host settings namespace.
+   * @returns the number of observed withdrawals since this mirror was created.
+   */
+  namespaceGeneration(namespace: string): number { return this.namespaceEpochs.get(namespace) ?? 0 }
 
   /**
    * Resolve once an answer is held, reading only from `idle`.
@@ -182,6 +205,12 @@ export class SettingsDescribeMirror implements SettingsDescribeFace {
         // A write answer invalidates a document read before that write committed.
         if (generation !== this.generation) continue
         if ('view' in outcome) {
+          const previous = this.store.getSnapshot().view?.namespaces ?? []
+          for (const namespace of previous) {
+            if (!outcome.view.namespaces.some(candidate => candidate.ns === namespace.ns)) {
+              this.namespaceEpochs.set(namespace.ns, this.namespaceGeneration(namespace.ns) + 1)
+            }
+          }
           this.store.set({ status: 'ready', view: outcome.view, error: null })
         } else {
           const held = this.store.getSnapshot()

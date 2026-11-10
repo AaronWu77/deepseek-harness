@@ -67,6 +67,19 @@ it('says the document is read-only over the controls', () => {
   expect(screen.getByLabelText('Field')).toBeTruthy()
 })
 
+
+it('retains staged changes on unmount only when the owner opts out', () => {
+  const onDiscard = vi.fn()
+  const { rerender, unmount } = render(
+    <SettingsForm labels={labels} state={settled} onSave={vi.fn()} onDiscard={onDiscard} discardOnUnmount={true}><span /></SettingsForm>,
+  )
+  rerender(<SettingsForm labels={labels} state={settled} onSave={vi.fn()} onDiscard={onDiscard} discardOnUnmount={false}>
+    <span />
+  </SettingsForm>)
+  unmount()
+  expect(onDiscard).not.toHaveBeenCalled()
+})
+
 it('discards when it leaves the page, calling the latest discard it was given', () => {
   const first = vi.fn()
   const second = vi.fn()

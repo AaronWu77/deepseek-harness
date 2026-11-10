@@ -33,6 +33,8 @@ Feature plugins use this package to store and edit their preferences without re-
 
 Feature adapters use `ctx.configForms.get(entryId)` to obtain accepted values and a write queue shared by every editor of that Host entry. Snapshots contain resolved `value`, inherited `base`, raw `user`, revision, and writability. `set` and `unset` submit one operation; `mutate` submits one atomic operation list. Staged editors pass the revision read before editing; conflicts preserve their drafts. Unsetting removes the override and restores inheritance.
 
+When a Host schema contains a non-serializable transformation, its feature may register one strict browser-safe decoder with `ctx.configForms.registerDecoder(entryId, decoder)` and own the returned disposer through `ctx.effect`. The decoder validates the complete untrusted section and returns `undefined` to reject it. A second decoder for the same entry is refused. Registration and withdrawal re-evaluate the current mirror without replacing the shared write queue. If the decoder rejects a newer section, the last accepted value retains its own revision, so a write fenced by the snapshot does not use the rejected revision; Host validation remains authoritative for writes.
+
 A configuration form persists through the Host settings service for every authenticated browser; the [authenticated-browser Host preferences note](../../../.agents/notes/implemented/bug-fix/2026-09-15-authenticated-browser-host-preferences.md) owns that policy. `settings.describe.writable` is the authority on whether a write is accepted.
 
 ### Following served namespaces
@@ -48,7 +50,7 @@ To customize a page's navigation icon, use `ctx.slots.inject('settings.section.i
 
 ### Observable success and failures
 
-A committed write folds its answer into the shared mirror. Refused writes refresh the latest Host values. Browser validation uses the serialized Config schema; the Host validates complete configuration, including checks that cannot be serialized.
+A committed configuration-form write folds its answer into the shared mirror unless a newer revision is already held. Reconnection and namespace withdrawal retire queued writes from the prior view and reject an in-flight write whose result can no longer be confirmed; its outcome may already have reached the Host. Refused writes refresh the latest Host values. Browser validation uses the serialized Config schema; the Host validates complete configuration, including checks that cannot be serialized.
 
 -----
 

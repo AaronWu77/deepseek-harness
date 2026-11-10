@@ -50,7 +50,8 @@ export interface ConfigForm<T> {
    * @param ops - ordered field operations copied when queued.
    * @param expectedRevision - optional fixed revision read by the domain editor.
    * @returns true for Host acceptance, false for refusal or skipped writes, after any latest-write recovery.
-   * Transport failures reject.
+   * Transport failures reject. A connection change or namespace withdrawal while
+   * the write is in flight also rejects because the Host outcome is unknown.
    */
   mutate(ops: readonly SettingsPathOpView[], expectedRevision?: number): Promise<boolean>
   /**
@@ -60,7 +61,8 @@ export interface ConfigForm<T> {
    * @param field - scalar field inside the namespace section.
    * @param value - JSON-shaped value selected by the user.
    * @returns true for Host acceptance, false for refusal or skipped writes, after any latest-write recovery.
-   * Transport failures reject.
+   * Transport failures reject. A connection change or namespace withdrawal while
+   * the write is in flight also rejects because the Host outcome is unknown.
    */
   set(field: string, value: unknown): Promise<boolean>
   /**
@@ -68,7 +70,8 @@ export interface ConfigForm<T> {
    * Shares {@link set}'s ordering, revision, and recovery contract.
    * @param field - scalar field inside the namespace section.
    * @returns true for Host acceptance, false for refusal or skipped writes, after any latest-write recovery.
-   * Transport failures reject.
+   * Transport failures reject. A connection change or namespace withdrawal while
+   * the write is in flight also rejects because the Host outcome is unknown.
    */
   unset(field: string): Promise<boolean>
 }
