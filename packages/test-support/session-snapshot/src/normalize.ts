@@ -413,6 +413,7 @@ export function normalizeSessionLog(
       if ('durationMs' in data) data.durationMs = 0
     }
     normalizeFeedbackClocks(record)
+    normalizeReviewScopeClocks(record)
     if ((record.type === 'job/registered' || record.type === 'job/settled')
       && record.data !== null && typeof record.data === 'object') {
       const data = record.data as Record<string, unknown>
@@ -605,6 +606,7 @@ export function scrubSessionSnapshot(rawLog: string): string {
       record.sourceEventSeqs = decodeSeqRanges(record.sourceEventSeqs)
     }
     normalizeFeedbackClocks(record)
+    normalizeReviewScopeClocks(record)
     return JSON.stringify(record)
   }).join('\n')
 }
@@ -617,6 +619,20 @@ function normalizeFeedbackClocks(record: Record<string, unknown>): void {
   const clocks = item as Record<string, unknown>
   if ('createdAt' in clocks) clocks.createdAt = 0
   if ('updatedAt' in clocks) clocks.updatedAt = 0
+}
+
+/** Normalize only the captured scope clocks declared by RG task runs. */
+function normalizeReviewScopeClocks(record: Record<string, unknown>): void {
+  if (record.type !== 'review-gated/state' && record.type !== 'review-gated/result-prepared') return
+  const data = record.data as {
+    state?: { task?: Record<string, { scope?: Record<string, unknown> | null } | null> | null } | null
+  } | null | undefined
+  const task = data?.state?.task
+  if (task === null || task === undefined) return
+  for (const slot of ['active', 'lastWorker', 'lastReview']) {
+    const scope = task[slot]?.scope
+    if (scope !== null && scope !== undefined && typeof scope.capturedAt === 'number') scope.capturedAt = 0
+  }
 }
 
 /** Which independent model-request payloads a scrubber replaces. */

@@ -269,6 +269,8 @@ flowchart LR
   pkg_experimental_speech_to_text["experimental-speech-to-text"]
   svc_speechToText["ctx.speechToText<br/>Experimental speech recognition providers"]
   pkg_experimental_speech_to_text_sensevoice["experimental-speech-to-text-sensevoice"]
+  pkg_experimental_review_gated["experimental-review-gated"]
+  svc_reviewGated["ctx.reviewGated<br/>Review-gated role coordination"]
   pkg_experimental_agent_team["experimental-agent-team"]
   svc_agentTeams["ctx.agentTeams<br/>Agent Teams coordination domain"]
   pkg_experimental_tool_agent_team["experimental-tool-agent-team"]
@@ -376,6 +378,7 @@ flowchart LR
   pkg_experimental_forge_session --> svc_forgeSession
   pkg_experimental_liveshare --> svc_liveshareShares
   pkg_experimental_ptc_runtime_python --> svc_ptcRuntime
+  pkg_experimental_review_gated --> svc_reviewGated
   pkg_experimental_speech_to_text --> svc_speechToText
   pkg_experimental_speech_to_text_sensevoice --> svc_speechToText
   pkg_experimental_translator --> svc_translator
@@ -555,6 +558,7 @@ flowchart LR
   svc_remoteAccess --> pkg_api_gateway
   svc_remoteAccess --> pkg_api_session_controller
   svc_remoteAccess --> pkg_api_workspace_controller
+  svc_reviewGated --> pkg_experimental_review_gated
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -744,6 +748,7 @@ flowchart LR
 | `ctx.compaction` | `seam` | [`compaction`](../packages/compaction/compaction) | [`compaction-basic`](../packages/compaction/compaction-basic) | [`compaction-basic`](../packages/compaction/compaction-basic) | - | 基础后端消费步骤后的压力事件和请求错误恢复事件；不存在面向模型的压缩工具。 |
 | `ctx.subagents` | `seam` | [`subagent`](../packages/subagent/subagent) | [`subagent-spawn-in-process`](../packages/subagent/subagent-spawn-in-process), [`subagent-fork-in-process`](../packages/subagent/subagent-fork-in-process), [`subagent-acp`](../packages/subagent/subagent-acp), [`subagent-codex`](../packages/subagent/subagent-codex), [`subagent-claude-code`](../packages/subagent/subagent-claude-code), [`subagent-dsh-sdk`](../packages/subagent/subagent-dsh-sdk) | [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-subagent-control`](../packages/subagent/tool-subagent-control), [`tool-ralph`](../packages/experimental/tool-ralph) | - | 提供方准备本地子级或执行外部任务；一个 activation 管理器持有两类生命周期。委派工具选择后端，控制工具投递本地后续消息，工作流等待 activation 结果。 |
 | `ctx.speechToText` | `seam` | [`experimental-speech-to-text`](../packages/experimental/speech-to-text) | [`experimental-speech-to-text-sensevoice`](../packages/experimental/speech-to-text-sensevoice) | [`experimental-api-speech-to-text`](../packages/experimental/api-speech-to-text) | - | 路由显式选择的识别器；浏览器使用带认证的 Remote，并在提交前将转写保留在草稿中。 |
+| `ctx.reviewGated` | `service` | [`experimental-review-gated`](../packages/experimental/review-gated) | - | [`experimental-review-gated`](../packages/experimental/review-gated) | - | 根服务拥有冻结的角色授权与有界任务状态；同一包内的角色工具与 Client 控件消费该服务。 |
 | `ctx.agentTeams` | `core` | [`experimental-agent-team`](../packages/experimental/agent-team) | - | [`experimental-tool-agent-team`](../packages/experimental/tool-agent-team) | - | 负责隐式 Root roster、直接 peer inbox 投递、共享任务 DAG 与 continuable child 生命周期；tool-agent-team 提供模型控制工具。 |
 | `ctx.claudeCodeMods` | `core` | [`experimental-claude-code-mods`](../packages/experimental/claude-code-mods) | - | - | - | 加载 defineMod 插件添加的模组，从 harness 扩展点触发其钩子链，并通过其 Remote 绘制提示框上方的横幅。 |
 | `ctx.inspector` | `core` | `inspector` | - | - | - | 负责 Worker 托管的 CDP target，以及独立于传输的 Host 和 Client observation 与 Cordis tree query API。 |

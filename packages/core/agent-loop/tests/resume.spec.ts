@@ -495,7 +495,7 @@ describe('the session-persistence Agent Note: AgentLoop factory create/resume', 
     const sessionId = SessionId('live-resume-race')
     const first = (await ctx.agents.create({ sessionId })).agent
     first.session.append('turn/start', { turn: 1 })
-    await ctx.sessions.flush(first.session)
+    await expect(ctx.sessions.flush(first.session)).resolves.toBe(true)
 
     await expect(ctx.agents.resume({ resumeSessionId: sessionId }))
       .rejects.toThrow(/already owned by an active write handle/)
@@ -528,6 +528,7 @@ describe('the session-persistence Agent Note: AgentLoop factory create/resume', 
     const handle = await ctx2.agents.resume({ resumeSessionId: sessionId })
     expect(handle.agent.session.snapshotEvents().map(event => event.type))
       .toEqual(['turn/start', 'turn/end', 'session/end-seed'])
+    await expect(ctx2.sessions.flush(handle.agent.session)).resolves.toBe(true)
     await handle.dispose()
 
     const stored = await readStoredEvents(ctx2, sessionId)

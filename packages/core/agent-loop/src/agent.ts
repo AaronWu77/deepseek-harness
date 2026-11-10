@@ -10,7 +10,10 @@ import type {
   AgentEventDispatch,
   AgentOptions,
   AgentStatus,
+  AdmissionOwner,
+  ExclusiveAdmissionState,
   CancelOptions,
+  ClaimRecovery,
   ModelSelection,
   ModelSelectionProjectionState,
   InboxTarget,
@@ -19,19 +22,21 @@ import type {
   RequestErrorAction,
 } from '@deepseek-ai/dsh-agent'
 import { AgentModel, agentEvents, assembleContextFor } from '@deepseek-ai/dsh-agent'
-import type { GenerateOptions, LlmCallConfig, Message, PreparedLlmCall } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmCallConfig, Message, MessageId, PreparedLlmCall } from '@deepseek-ai/dsh-llm'
 import {
   LlmError,
   createAssistantMessage,
   createDeveloperMessage,
+  freezeMessage,
   errorChain,
   markAgentLoopRequest,
 } from '@deepseek-ai/dsh-llm'
 import { assertNever, deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { z } from 'zod'
 import type { Scope } from '@deepseek-ai/dsh-scope'
 import { createScope } from '@deepseek-ai/dsh-scope'
-import type { EpochHeader, RequestContext, Session, SessionId, SessionSeq, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
-import { canonicalHeader, headerEquals, ToolCallRecovery } from '@deepseek-ai/dsh-session'
+import type { EpochHeader, RequestContext, Session, SessionId, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
+import { canonicalHeader, headerEquals, SessionSeq, ToolCallRecovery } from '@deepseek-ai/dsh-session'
 import { joinContextSections, renderContextSections, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { ToolActivationError, ToolBatchExecutionError } from '@deepseek-ai/dsh-tools'
@@ -41,6 +46,8 @@ import { ReactLoopInbox } from './inbox.ts'
 import { RuntimeContextProjection } from './runtime-context.ts'
 import { AssistantStreamAttempt } from './assistant-stream.ts'
 import { SystemPromptProjection } from './runtime-context.ts'
+import type { AdmissionProjection } from './admission.ts'
+import type { ClaimProjection } from './claim.ts'
 
 /** Projected facts consumed by this driver; registration stays with the factory. */
 interface LoopProjections {
@@ -48,6 +55,8 @@ interface LoopProjections {
   readonly modelSelection: () => ModelSelectionProjectionState
   /** Current queued and claimed input. */
   readonly inbox: () => InboxState
+  readonly admission: () => AdmissionProjection | null
+  readonly claim: () => ClaimProjection
 }
 
 type Phase =
@@ -58,6 +67,7 @@ type Phase =
     lastTurn: number
     wakeRequested: boolean
   }
+  | { kind: 'admission'; abort: AbortController; lastTurn: number; wakeRequested: boolean }
   | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean }
 
 type StepEndReason = Extract<TurnEndReason, { kind: 'completed' | 'max-tokens' }>
@@ -66,7 +76,8 @@ type PreparedStep =
   | { kind: 'reject' }
   | {
     kind: 'enter'
-    messages: UserMessage[]
+    messages: readonly UserMessage[]
+    guards: readonly (() => undefined)[]
     startsRequestSeries?: true
     assembly: PromptAssembly
     selection: Readonly<ModelSelection>
@@ -114,6 +125,16 @@ export class ReactLoopAgent implements Agent {
   readonly inbox: ReactLoopInbox
   private phase: Phase
   private activityDone: Promise<void> = Promise.resolve()
+  private readonly readAdmission: () => AdmissionProjection | null
+  private localAdmission: ExclusiveAdmissionState | null = null
+  private firstClaimBarrier: ExclusiveAdmissionState | null = null
+  private firstClaimSignal: AbortSignal | null = null
+  private readonly readClaim: () => ClaimProjection
+  private protectedClaims = false
+  private protectedIds = new Set<MessageId>()
+  private localClaim: ClaimRecovery | null = null
+  private localClaimMessages: UserMessage[] = []
+  private claimStatus: 'saving' | 'unknown' | null = null
 
   /** The agent-scoped registration boundary; the lifecycle owner unwinds it after the driver exits. */
   readonly scope: Scope
@@ -147,14 +168,36 @@ export class ReactLoopAgent implements Agent {
     this.scope = createScope(loopCtx, this)
     this.ctx = this.scope.ctx
     this.model = new AgentModel(projections.modelSelection, session, options)
-    this.inbox = new ReactLoopInbox(projections.inbox, session, this.dispatch)
+    this.readAdmission = projections.admission
+    this.readClaim = projections.claim
+    if (this.readClaim().claim !== null) this.claimStatus = 'unknown'
+    const restoredAdmission = this.readAdmission()
+    if (restoredAdmission?.confirmed) {
+      this.localAdmission = { owner: restoredAdmission.owner, messageId: restoredAdmission.messageId, state: 'uncertain' }
+    }
+    this.inbox = new ReactLoopInbox(
+      projections.inbox, session, this.dispatch, () => this.exclusiveAdmission?.messageId, () => this.protectedIds,
+    )
     this.phase = { kind: 'idle', lastTurn }
     this.runtimeContext = new RuntimeContextProjection(this.ctx, session)
     this.systemPrompt = new SystemPromptProjection(session)
   }
 
+  get claimRecovery(): ClaimRecovery | null { return this.localClaim ?? this.readClaim().claim }
+
+  get claimProtectionStatus(): 'saving' | 'unknown' | null { return this.claimStatus }
+
+  enableClaimProtection(): void {
+    this.protectedClaims = true
+  }
+
+  private setClaimStatus(status: 'saving' | 'unknown' | null): void {
+    this.claimStatus = status
+    this.dispatch.emit('agent/claim/status', { status })
+  }
+
   get status(): AgentStatus {
-    return this.phase.kind === 'idle' || this.phase.kind === 'maintenance' ? 'idle' : 'running'
+    return this.phase.kind === 'running' ? 'running' : 'idle'
   }
 
   /** Commit a phase and publish its externally visible status transition. */
@@ -189,6 +232,11 @@ export class ReactLoopAgent implements Agent {
   }
 
   cancel(cause: AgentCancelCause, options: CancelOptions = {}): void {
+    if (this.claimStatus === 'saving') this.setClaimStatus('unknown')
+    if (this.exclusiveAdmission !== null || this.claimProtectionStatus !== null) {
+      if (this.phase.kind !== 'idle') this.phase.abort.abort(cause)
+      return
+    }
     if (!options.keepInbox) {
       this.inbox.clear()
       if (this.phase.kind !== 'idle') this.phase.wakeRequested = false
@@ -219,6 +267,81 @@ export class ReactLoopAgent implements Agent {
     })()
   }
 
+  get exclusiveAdmission(): ExclusiveAdmissionState | null {
+    if (this.localAdmission !== null) return this.localAdmission
+    const projected = this.readAdmission()
+    return projected === null ? null : {
+      owner: projected.owner,
+      messageId: projected.messageId,
+      state: projected.confirmed ? (projected.index === null ? 'uncertain' : 'confirmed') : 'open',
+    }
+  }
+
+  runExclusiveAdmission<T>(owner: AdmissionOwner, message: UserMessage, prepare: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (this.phase.kind !== 'idle' || this.exclusiveAdmission !== null
+      || this.claimProtectionStatus !== null || this.readClaim().claim !== null
+      || [...this.inbox.nextTurn, ...this.inbox.nextStep].some(item => item.id === message.id)) {
+      throw new Error(`agent "${this.id}" is not available for exclusive admission`)
+    }
+    const phase: Extract<Phase, { kind: 'admission' }> = {
+      kind: 'admission', abort: new AbortController(), lastTurn: this.phase.lastTurn, wakeRequested: false,
+    }
+    const done = Promise.withResolvers<void>()
+    this.activityDone = done.promise
+    this.localAdmission = { owner, messageId: message.id, state: 'open' }
+    this.setPhase(phase)
+    const signal = phase.abort.signal
+    const wait = async <R>(operation: () => Promise<R>): Promise<R> => {
+      signal.throwIfAborted()
+      const aborted = Promise.withResolvers<never>()
+      const listener = (): void => { aborted.reject(new Error('exclusive admission cancelled', { cause: signal.reason })) }
+      signal.addEventListener('abort', listener, { once: true })
+      try {
+        return await Promise.race([Promise.resolve().then(() => { signal.throwIfAborted(); return operation() }), aborted.promise])
+      } finally { signal.removeEventListener('abort', listener) }
+    }
+    return (async () => {
+      let durable = false
+      try {
+        this.session.append('agent/admission/opened', { owner, messageId: message.id })
+        signal.throwIfAborted()
+        const opened = await this.loopCtx.sessions.flush(this.session)
+        if (!opened) throw new Error('exclusive admission open was not acknowledged durable')
+        durable = true
+        signal.throwIfAborted()
+        const result = await wait(() => {
+          signal.throwIfAborted()
+          return prepare(signal)
+        })
+        signal.throwIfAborted()
+        this.inbox.appendReserved(message)
+        signal.throwIfAborted()
+        durable = false
+        this.session.append('agent/admission/confirmed', { owner, messageId: message.id })
+        signal.throwIfAborted()
+        const confirmed = await this.loopCtx.sessions.flush(this.session)
+        if (!confirmed) throw new Error('exclusive admission confirmation was not acknowledged durable')
+        signal.throwIfAborted()
+        this.localAdmission = null
+        this.setPhase({ kind: 'idle', lastTurn: phase.lastTurn })
+        this.wakeDriver()
+        return result
+      } catch (error: unknown) {
+        this.localAdmission = { owner, messageId: message.id, state: durable ? 'open' : 'uncertain' }
+        throw error
+      } finally {
+        if (this.phase === phase) this.setPhase({ kind: 'idle', lastTurn: phase.lastTurn })
+        done.resolve()
+      }
+    })()
+  }
+
+  isExclusiveAdmissionClaim(owner: AdmissionOwner, messageId: UserMessage['id'], signal: AbortSignal): boolean {
+    return this.phase.kind === 'running' && this.phase.abort.signal === signal && !signal.aborted
+      && this.firstClaimSignal === signal && this.firstClaimBarrier?.owner === owner
+      && this.firstClaimBarrier.messageId === messageId
+  }
+
   /**
    * Start one driver, or latch its wake behind maintenance or an aborted
    * activity. A wake sent while idle always opens its turn boundary, even
@@ -238,6 +361,8 @@ export class ReactLoopAgent implements Agent {
       }
       return
     }
+    const admission = this.exclusiveAdmission
+    if (this.claimProtectionStatus !== null || this.readClaim().claim !== null || (admission !== null && admission.state !== 'confirmed')) return
     const driver = Promise.withResolvers<void>()
     this.activityDone = driver.promise
     this.setPhase({
@@ -284,7 +409,37 @@ export class ReactLoopAgent implements Agent {
     /* v8 ignore next -- private callers establish the running phase before proposing a step */
     if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": pre-step outside running phase`)
     const signal = this.phase.abort.signal
-    const claimed = this.inbox.claim(target, position.turn)
+    const admission = this.exclusiveAdmission
+    let claimed: UserMessage[]
+    if (this.protectedClaims) {
+      const inputs = this.inbox.capture(target, target === 'next-turn' && admission?.state === 'confirmed' ? admission.messageId : undefined)
+      if (inputs.length === 0) {
+        claimed = []
+      } else {
+        this.protectedIds = new Set(inputs.map(input => input.message.id))
+        this.claimStatus = 'saving'
+        this.localClaim = {
+          intentSeq: SessionSeq(this.session.seq), target, ...position,
+          inputs: inputs.map(input => ({ target: input.target, message: z.json().parse(input.message) })),
+        }
+        this.localClaimMessages = []
+        this.session.append('agent/claim/intent', { target, ...position, inputs })
+        this.setClaimStatus('saving')
+        signal.throwIfAborted()
+        const acknowledged = await this.loopCtx.sessions.flush(this.session)
+        signal.throwIfAborted()
+        if (!acknowledged) throw new Error('claim intent was not acknowledged durable')
+        claimed = this.inbox.claimCaptured(inputs, position.turn)
+      }
+    } else {
+      claimed = target === 'next-turn' && admission?.state === 'confirmed'
+        ? this.inbox.claimReserved(admission.messageId, position.turn)
+        : this.inbox.claim(target, position.turn)
+    }
+    if (target === 'next-turn' && admission?.state === 'confirmed') {
+      this.firstClaimBarrier = { ...admission, state: 'uncertain' }
+      this.localAdmission = this.firstClaimBarrier
+    }
     const selection = this.model.current()
     if (selection === undefined) {
       throw new Error(`agent "${this.id}" has no provider/model: set AgentOptions.provider and AgentOptions.model or record a model selection`)
@@ -293,23 +448,45 @@ export class ReactLoopAgent implements Agent {
     try {
       const assembly = await this.loopCtx.systemPrompt.assemble({ ...assembleContextFor(this, signal), modelSelection: selection, toolSet })
       signal.throwIfAborted()
-      const decision = await this.dispatch.waterfall(
-        'agent/pre-step', { messages: claimed, ...position, signal, modelSelection: selection },
-        (): Promise<PreStepDecision> => {
-          const sections = renderContextSections(assembly)
-          const context = this.runtimeContext.project(joinContextSections(sections), sections)
-          return Promise.resolve<PreStepDecision>({
-            kind: 'enter',
-            messages: context === undefined ? claimed : [...claimed, context],
-          })
-        },
-      )
-      signal.throwIfAborted()
-      if (decision.kind === 'reject') {
-        toolSet.dispose()
-        return decision
+      const claimedMessages = Object.freeze(claimed.map(freezeMessage))
+      this.firstClaimSignal = this.firstClaimBarrier === null ? null : signal
+      let registrations: (() => undefined)[] | undefined = []
+      const addGuard = (guard: () => undefined): void => {
+        if (registrations === undefined) throw new Error('post-pre-step guard registration is closed')
+        registrations.push(guard)
       }
-      return { ...decision, assembly, selection, toolSet }
+      let decision: PreStepDecision
+      try {
+        decision = await this.dispatch.waterfall(
+          'agent/pre-step', { messages: claimed, ...position, signal, modelSelection: selection },
+          (): Promise<PreStepDecision> => {
+            const sections = renderContextSections(assembly)
+            const context = this.runtimeContext.project(joinContextSections(sections), sections)
+            return Promise.resolve<PreStepDecision>({
+              kind: 'enter',
+              messages: context === undefined ? claimed : [...claimed, context],
+            })
+          },
+        )
+        signal.throwIfAborted()
+        if (decision.kind === 'reject') {
+          toolSet.dispose()
+          return decision
+        }
+        const messages = Object.freeze(decision.messages.map(freezeMessage))
+        const startsRequestSeries = decision.startsRequestSeries
+        const modelSelection = deepFreeze(structuredClone(selection))
+        await this.dispatch.serial('agent/post-pre-step', {
+          claimedMessages, admittedMessages: messages, ...position, signal, modelSelection, addGuard,
+        })
+        const guards = Object.freeze(registrations)
+        registrations = undefined
+        signal.throwIfAborted()
+        return { kind: 'enter', messages, guards, ...startsRequestSeries === undefined ? {} : { startsRequestSeries }, assembly, selection: modelSelection, toolSet }
+      } finally {
+        registrations = undefined
+        this.firstClaimSignal = null
+      }
     } catch (error: unknown) {
       toolSet.dispose()
       throw error
@@ -346,14 +523,19 @@ export class ReactLoopAgent implements Agent {
         const step = phase.step + 1
         const decision = await this.preStep(target, { turn, step })
         if (decision.kind === 'reject') {
+          await this.settleClaim('rejected', signal)
           turnEnds = { kind: 'blocked' }
           return false
         }
         try {
-          if (turnEnds && decision.messages.length === 0) break
+          if (turnEnds && decision.messages.length === 0) {
+            await this.settleClaim('empty', signal)
+            break
+          }
           // A removed waking message or an enter decision rewritten to empty
           // still owns the initial turn boundary, but it spends no model call.
           if (phase.step === 0 && decision.messages.length === 0) {
+            await this.settleClaim('empty', signal)
             turnEnds = { kind: 'completed' }
             return false
           }
@@ -400,6 +582,7 @@ export class ReactLoopAgent implements Agent {
         target = 'next-step'
       }
     } catch (error: unknown) {
+      if (this.claimStatus !== 'unknown' && (this.claimStatus === 'saving' || this.readClaim().claim !== null)) this.setClaimStatus('unknown')
       // A cause is present exactly while the signal is aborted.
       const cause = abortedCancelCause(signal)
       if (cause !== undefined) {
@@ -430,6 +613,42 @@ export class ReactLoopAgent implements Agent {
     phase.wakeRequested = false
     phase.step = 0
     return true
+  }
+
+  private appendUser(message: UserMessage): void {
+    const event = this.session.append('user/message', message, { surfaceOp: 'append' })
+    if (this.localClaim !== null && !this.readClaim().claim?.settled) this.localClaimMessages.push(event.data)
+  }
+
+  private async settleClaim(outcome: 'entered' | 'rejected' | 'empty', signal: AbortSignal): Promise<void> {
+    if (this.localClaim === null) return
+    const claim = this.readClaim().claim
+    if (claim === null || claim.intentSeq !== this.localClaim.intentSeq) throw new Error('protected claim recovery state is missing')
+    if (claim.settled) return
+    const messages = [...this.localClaimMessages]
+    this.session.append('agent/claim/settled', { intentSeq: claim.intentSeq, outcome, messages })
+    this.readClaim()
+    signal.throwIfAborted()
+    const acknowledged = await this.loopCtx.sessions.flush(this.session)
+    signal.throwIfAborted()
+    if (!acknowledged) throw new Error('claim settlement was not acknowledged durable')
+    if (outcome !== 'entered') {
+      this.localClaim = null
+      this.protectedIds.clear()
+      this.setClaimStatus(null)
+    }
+  }
+
+  private async finishClaim(signal: AbortSignal): Promise<void> {
+    if (this.localClaim === null) return
+    this.readClaim()
+    signal.throwIfAborted()
+    const acknowledged = await this.loopCtx.sessions.flush(this.session)
+    signal.throwIfAborted()
+    if (!acknowledged) throw new Error('claim assistant output was not acknowledged durable')
+    this.localClaim = null
+    this.protectedIds.clear()
+    this.setClaimStatus(null)
   }
 
   private async step(decision: Extract<PreparedStep, { kind: 'enter' }>): Promise<StepEndReason | null> {
@@ -464,19 +683,28 @@ export class ReactLoopAgent implements Agent {
         for (const message of decision.messages) {
           if (message.source.kind === 'runtime-context') {
             if (context !== undefined && !contextAdmitted) {
-              this.session.append('user/message', context, { surfaceOp: 'append' })
+              this.appendUser(context)
               contextAdmitted = true
             }
           } else {
-            this.session.append('user/message', message, { surfaceOp: 'append' })
+            this.appendUser(message)
           }
         }
       }
       if (context !== undefined && !contextAdmitted) {
-        this.session.append('user/message', context, { surfaceOp: 'append' })
+        this.appendUser(context)
       }
       firstAttempt = false
       const request = this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)
+      await this.settleClaim('entered', signal)
+      if (this.firstClaimBarrier !== null) {
+        signal.throwIfAborted()
+        const acknowledged = await this.loopCtx.sessions.flush(this.session)
+        signal.throwIfAborted()
+        if (!acknowledged) throw new Error('exclusive admission claim was not acknowledged durable')
+        this.firstClaimBarrier = null
+        this.localAdmission = null
+      }
       const live = new AssistantStreamAttempt(
         this.session.id,
         ++this.assistantAttemptCounter,
@@ -487,6 +715,17 @@ export class ReactLoopAgent implements Agent {
       )
       let started = false
       try {
+        signal.throwIfAborted()
+        for (const guard of decision.guards) {
+          // oxlint-disable-next-line typescript/no-confusing-void-expression -- reject invalid JavaScript guard returns.
+          const result: unknown = guard()
+          if (result !== undefined) {
+            // Consume a mistakenly returned promise before failing closed.
+            void Promise.resolve(result).catch((_error: unknown) => {})
+            throw new TypeError('post-pre-step guard must return undefined synchronously')
+          }
+          signal.throwIfAborted()
+        }
         const stream = preparedCall?.stream(request) ?? this.loopCtx.llm.stream(request)
         signal.throwIfAborted()
         live.start()
@@ -581,6 +820,7 @@ export class ReactLoopAgent implements Agent {
             stream: live.stream,
           }, { surfaceOp: 'append' }).seq,
         )
+        await this.finishClaim(signal)
         if (finish.kind === 'max-tokens') return { kind: 'max-tokens' }
 
         const toolCalls = message.content.filter(block => block.type === 'tool-call')

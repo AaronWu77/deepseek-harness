@@ -5,7 +5,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
 import LlmRuntime, { ToolCallId, type GenerateOptions, LlmAdapter, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FLUSH_DURABLE, SessionId } from '@deepseek-ai/dsh-session'
 import SessionPersistence, { type SessionHandle, type SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH } from '@deepseek-ai/dsh-tools'
@@ -59,10 +59,11 @@ describe('session-checkpoint-policy request boundary', () => {
     session.append('turn/start', { turn: 1 })
     const gate = Promise.withResolvers<undefined>()
     const order: string[] = []
-    ctx.on('session/flush', async () => {
+    ctx.on('session/flush', async (): Promise<typeof SESSION_FLUSH_DURABLE> => {
       order.push('flush:start')
       await gate.promise
       order.push('flush:end')
+      return SESSION_FLUSH_DURABLE
     })
     ctx.llm.registerAdapter(['mock'], new RecordingAdapter(order))
 
@@ -96,6 +97,18 @@ describe('session-checkpoint-policy request boundary', () => {
     expect(order).toEqual(['adapter'])
   })
 
+  it('does not dispatch the adapter without a durable Session writer', async () => {
+    const ctx = await setup()
+    const session = ctx.sessions.create(SessionId('request-without-writer'))
+    const order: string[] = []
+    ctx.on('session/flush', () => {})
+    ctx.llm.registerAdapter(['mock'], new RecordingAdapter(order))
+    await expect(drain(ctx.llm.stream({
+      provider: 'mock', model: 'mock', messages: [], sessionId: session.id,
+    }))).rejects.toMatchObject({ code: 'SESSION_CHECKPOINT_UNAVAILABLE' })
+    expect(order).toEqual([])
+  })
+
   it('does not dispatch the adapter when the checkpoint rejects', async () => {
     const ctx = await setup()
     const session = ctx.sessions.create(SessionId('request-failure'))
@@ -118,11 +131,12 @@ describe('session-checkpoint-policy tool and step boundaries', () => {
     onTestFinished(() => { gate.resolve(undefined) })
     const entered = Promise.withResolvers<undefined>()
     const order: string[] = []
-    ctx.on('session/flush', async () => {
+    ctx.on('session/flush', async (): Promise<typeof SESSION_FLUSH_DURABLE> => {
       order.push('flush:start')
       entered.resolve(undefined)
       await gate.promise
       order.push('flush:end')
+      return SESSION_FLUSH_DURABLE
     })
     ctx.tools.register({
       name: 'write', description: 'side effect', parameters: {},
@@ -150,11 +164,12 @@ describe('session-checkpoint-policy tool and step boundaries', () => {
     onTestFinished(() => { gate.resolve(undefined) })
     const entered = Promise.withResolvers<undefined>()
     const order: string[] = []
-    ctx.on('session/flush', async () => {
+    ctx.on('session/flush', async (): Promise<typeof SESSION_FLUSH_DURABLE> => {
       order.push('flush:start')
       entered.resolve(undefined)
       await gate.promise
       order.push('flush:end')
+      return SESSION_FLUSH_DURABLE
     })
     ctx.tools.register({
       name: 'write', description: 'side effect', parameters: {},
@@ -187,7 +202,7 @@ describe('session-checkpoint-policy tool and step boundaries', () => {
     const session = ctx.sessions.create(SessionId('tool-failure'))
     const agent = { session } as Agent
     let ran = false
-    ctx.on('session/flush', () => Promise.reject(new Error('disk unavailable')))
+    const off = ctx.on('session/flush', () => Promise.reject(new Error('disk unavailable')))
     ctx.tools.register({
       name: 'write', description: 'side effect', parameters: {},
       output: { schema: { type: 'null' }, render: () => [] },
@@ -199,6 +214,15 @@ describe('session-checkpoint-policy tool and step boundaries', () => {
     })
     expect(result.isError).toBe(true)
     expect(result.content).toEqual([{ type: 'text', text: 'Error: disk unavailable' }])
+    expect(ran).toBe(false)
+    off()
+    ctx.on('session/flush', () => {})
+    const missingWriter = await executeToolFixture(ctx, {
+      callId: ToolCallId('write-no-writer'), name: 'write', arguments: {}, agent,
+      signal: new AbortController().signal,
+    })
+    expect(missingWriter.isError).toBe(true)
+    expect(missingWriter.content).toEqual([{ type: 'text', text: 'Error: Session "tool-failure" has no durable writer checkpoint. Inspect persistence before continuing.' }])
     expect(ran).toBe(false)
   })
 
@@ -226,13 +250,18 @@ describe('session-checkpoint-policy tool and step boundaries', () => {
     const session = ctx.sessions.create(SessionId('post-step'))
     const agent = { session } as Agent
     const flushed: string[] = []
-    ctx.on('session/flush', (current) => { flushed.push(current.id) })
+    const off = ctx.on('session/flush', (current) => { flushed.push(current.id); return SESSION_FLUSH_DURABLE })
     const signal = new AbortController().signal
     await agentEvents(ctx, agent).waterfall(
       'agent/pre-step', { modelSelection: { provider: 'mock', model: 'mock' }, messages: [], turn: 1, step: 1, signal },
       () => Promise.resolve({ kind: 'enter', messages: [] }),
     )
     expect(flushed).toEqual([session.id])
+    off()
+    await expect(agentEvents(ctx, agent).waterfall(
+      'agent/pre-step', { modelSelection: { provider: 'mock', model: 'mock' }, messages: [], turn: 2, step: 1, signal },
+      () => Promise.resolve({ kind: 'enter', messages: [] }),
+    )).rejects.toMatchObject({ code: 'SESSION_CHECKPOINT_UNAVAILABLE' })
   })
 })
 
@@ -248,7 +277,7 @@ describe('session-checkpoint-policy lifecycle', () => {
     await ctx.plugin(TestPersistence)
     const session = ctx.sessions.create(SessionId('disposed-policy'))
     let flushes = 0
-    ctx.on('session/flush', () => { flushes += 1 })
+    ctx.on('session/flush', () => { flushes += 1; return SESSION_FLUSH_DURABLE })
     ctx.llm.registerAdapter(['mock'], new RecordingAdapter([]))
     const fiber = await ctx.plugin(checkpointPolicy)
     await drain(ctx.llm.stream({ provider: 'mock', model: 'mock', messages: [], sessionId: session.id }))

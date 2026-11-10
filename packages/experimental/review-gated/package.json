@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-review-gated",
-  "description": "Prompt-first worker collaboration and independent review in one main conversation.",
-  "version": "0.2.1-rc.2",
+  "description": "PTC role model pools, bounded execution, and independent evidence-based review.",
+  "version": "0.2.2-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -21,24 +21,62 @@
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
     "./src/*": "./src/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./role": {
+      "types": "./lib/types/role.d.ts",
+      "default": "./lib/role.js"
+    },
+    "./types": {
+      "types": "./lib/types/types.d.ts"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./remote": {
+      "types": "./lib/typert.remote-client.d.ts",
+      "default": "./lib/typert.remote-client.js"
+    },
+    "./typert": {
+      "types": "./lib/typert.host.d.ts",
+      "default": "./lib/typert.host.js"
+    }
   },
   "files": [
     "locale/*.json",
     "lib/index.js",
+    "lib/client.js",
     "cordis.patch.yml",
-    "lib/types/**/*.d.ts"
+    "lib/role.js",
+    "lib/errors-*.js",
+    "lib/types/**/*.d.ts",
+    "lib/typert.host.js",
+    "lib/typert.host.d.ts",
+    "lib/typert.remote-client.js",
+    "lib/typert.remote-client.d.ts"
   ],
   "license": "MIT",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "external": [
+        "@deepseek-ai/dsh-api-gateway/client"
+      ]
     }
   },
   "dependencies": {
     "@deepseek-ai/dsh-agent-instructions": "workspace:*",
     "@deepseek-ai/dsh-agent-preset": "workspace:*",
-    "@deepseek-ai/dsh-agent-tool-presentation": "workspace:*",
     "@deepseek-ai/dsh-command-compact": "workspace:*",
     "@deepseek-ai/dsh-command-goal": "workspace:*",
     "@deepseek-ai/dsh-compaction-basic": "workspace:*",
@@ -59,25 +97,68 @@
     "@deepseek-ai/dsh-tool-pwsh": "workspace:*",
     "@deepseek-ai/dsh-tool-schedule": "workspace:*",
     "@deepseek-ai/dsh-tool-skill": "workspace:*",
-    "@deepseek-ai/dsh-tool-subagent": "workspace:*",
     "@deepseek-ai/dsh-tool-subagent-control": "workspace:*",
     "@deepseek-ai/dsh-tool-todo": "workspace:*",
     "@deepseek-ai/dsh-tool-web": "workspace:*",
-    "@deepseek-ai/schemastery": "workspace:~"
+    "@deepseek-ai/schemastery": "workspace:~",
+    "@deepseek-ai/dsh-brand": "workspace:*",
+    "@deepseek-ai/dsh-typert-protocol": "workspace:*",
+    "zod": "^4.4.3",
+    "@deepseek-ai/dsh-session": "workspace:*"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:~",
-    "@deepseek-ai/dsh-system-prompt": "workspace:*"
+    "@deepseek-ai/dsh-llm": "workspace:*",
+    "@deepseek-ai/dsh-fs": "workspace:*",
+    "@deepseek-ai/dsh-timeout": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:~",
     "@deepseek-ai/cordis-plugin-loader": "workspace:~",
+    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:*",
+    "@deepseek-ai/dsh-subagent-spawn-in-process": "workspace:*",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
+    "@deepseek-ai/dsh-subagent": "workspace:*",
+    "@deepseek-ai/dsh-tools": "workspace:*",
     "@deepseek-ai/dsh-scope": "workspace:*",
     "@deepseek-ai/dsh-app-boot": "workspace:*",
     "@deepseek-ai/dsh-agent-preset-registry": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
     "@deepseek-ai/dsh-loader-smoke": "workspace:*",
-    "@deepseek-ai/dsh-agent": "workspace:*"
+    "@deepseek-ai/dsh-agent": "workspace:*",
+    "@deepseek-ai/dsh-session-projection": "workspace:*",
+    "@deepseek-ai/dsh-session-query": "workspace:*",
+    "@deepseek-ai/dsh-working-directory": "workspace:*",
+    "@deepseek-ai/dsh-settings": "workspace:*",
+    "@deepseek-ai/dsh-config-editor": "workspace:*",
+    "@deepseek-ai/dsh-api-gateway": "workspace:*",
+    "@deepseek-ai/dsh-api-remotes": "workspace:*",
+    "@deepseek-ai/dsh-client-locale": "workspace:*",
+    "@deepseek-ai/dsh-client-store": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-settings": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-conversation": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-primitives": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-slots": "workspace:*",
+    "@deepseek-ai/dsh-client-test-runtime": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-renderer": "workspace:*",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@testing-library/react": "^16.3.3",
+    "@deepseek-ai/dsh-client-ui-session": "workspace:*",
+    "@deepseek-ai/dsh-api-session-controller": "workspace:*",
+    "@deepseek-ai/dsh-tool-subagent": "workspace:*",
+    "@deepseek-ai/dsh-tool-executor-ptc": "workspace:*",
+    "@deepseek-ai/dsh-subprocess": "workspace:*",
+    "@deepseek-ai/dsh-sandbox": "workspace:*",
+    "@deepseek-ai/dsh-sandbox-policy": "workspace:*",
+    "@deepseek-ai/dsh-experimental-worktree": "workspace:*",
+    "@deepseek-ai/dsh-fs": "workspace:*",
+    "@deepseek-ai/dsh-timeout": "workspace:*"
+  },
+  "scripts": {
+    "bundle": "tsdown",
+    "watch": "tsdown --watch"
   }
 }

@@ -143,6 +143,19 @@ describe('DeepSeekHarness', () => {
           },
         },
       },
+      {
+        method: 'session.event',
+        params: { sessionId: 'owned', event: { type: 'agent/claim/intent', seq: 1, time: 0, data: {
+          target: 'next-turn', turn: 1, step: 1, inputs: [{ target: 'next-turn',
+            message: { id: 'accepted-message', role: 'user', content: [], source: { kind: 'user' } } }],
+        } } },
+      },
+      {
+        method: 'session.event',
+        params: { sessionId: 'owned', event: { type: 'agent/claim/settled', seq: 2, time: 0, data: {
+          intentSeq: 1, outcome: 'entered', messages: [{ id: 'accepted-message', role: 'user', content: [], source: { kind: 'user' } }],
+        } } },
+      },
       { method: 'session.status', params: { sessionId: 'owned', status: 'idle' } },
     ] as HarnessNotification[]
     let closed = false
@@ -163,8 +176,10 @@ describe('DeepSeekHarness', () => {
     const result = await new HarnessSession(harness, 'owned').run([{ type: 'text', text: 'go' }])
 
     expect(result.notifications.map(notification => notification.method))
-      .toEqual(['session.event', 'session.status'])
-    expect(result.events.map(event => event.type)).toEqual(['agent/inbox/spliced'])
+      .toEqual(['session.event', 'session.event', 'session.event', 'session.status'])
+    expect(result.events.map(event => event.type)).toEqual(['agent/inbox/spliced', 'agent/claim/intent', 'agent/claim/settled'])
+    expect(result.events[1]?.data).toMatchObject({ target: 'next-turn', inputs: [{ message: { id: 'accepted-message' } }] })
+    expect(result.events[2]?.data).toMatchObject({ intentSeq: 1, outcome: 'entered' })
     expect(closed).toBe(true)
   })
 

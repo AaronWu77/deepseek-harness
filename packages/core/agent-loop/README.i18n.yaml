@@ -21,11 +21,11 @@
   en: d5ac4be018308358
   zh: 4c429a40f666abfb
 /deepseek-ai-dsh-agent-loop/use-this-package/create-or-resume-agents-programmatically:
-  en: 82ec792637e8e57f
-  zh: e32f8ec5ee17afcf
+  en: 76a3e587014ff181
+  zh: 8b16f9512b31cd33
 /deepseek-ai-dsh-agent-loop/use-this-package/what-a-step-does:
-  en: b789acbbfd6a3094
-  zh: 85b4d093ae23ce7d
+  en: bedaafcab691e3fb
+  zh: ef5804604089fa22
 /deepseek-ai-dsh-agent-loop/understand-the-implementation:
   en: ce7e776e9d516bdb
   zh: 59d2751743db7795
@@ -42,11 +42,11 @@
   en: eaaed8cc22640221
   zh: 557e2e67888ef7f6
 /deepseek-ai-dsh-agent-loop/understand-the-implementation/persistence-integration:
-  en: 3b48a480036bd5df
-  zh: 28cea2036b0dccee
+  en: 6faccc4ff3c57f5c
+  zh: 5ba135f46f973e4a
 /deepseek-ai-dsh-agent-loop/understand-the-implementation/turn-and-step-flow:
-  en: ad92c751515520ff
-  zh: ca6b24db5ab4e471
+  en: b8acc2868f1c92d1
+  zh: 2ea794c04aa61f12
 /deepseek-ai-dsh-agent-loop/understand-the-implementation/failure-and-cancellation:
   en: eea56903c4ff82f5
   zh: c0d5abb5767780ed
@@ -105,8 +105,8 @@
   en: 83531f2a13cc1f0e
   zh: 81a780d637dd8c5d
 /deepseek-ai-dsh-agent-loop/known-limitations-and-deferred-work:
-  en: a57822fab5e6fdfd
-  zh: 39f97b0c5040f7c8
+  en: f16e7c3cd7f5a97f
+  zh: 81b8151366b7cb97
 /deepseek-ai-dsh-agent-loop/known-limitations-and-deferred-work/dev-note:
   en: e67f633dc6fe7773
   zh: 3bb0c20c93f16f98

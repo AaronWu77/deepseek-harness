@@ -95,6 +95,7 @@ export function runLiveWritePathContract(
       const { ctx, remount } = await make()
       const session = ctx.sessions.create(SessionId('plugin-record'))
       const handle = await ctx.sessionPersistence.create(session.header)
+      handle.bindSession?.(session)
       session.append('turn/start', { turn: 1 })
       appendPluginRecord(session, 'plugin:persistence-test/state', { count: 1 })
       await expect(ctx.sessions.flush(session)).resolves.toBe(true)
@@ -118,6 +119,7 @@ export function runLiveWritePathContract(
       const { ctx } = await make()
       const session = ctx.sessions.create(SessionId('flush-surfaces'))
       const handle = await ctx.sessionPersistence.create(session.header)
+      handle.bindSession?.(session)
       const warned = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
       const failure = new Error('backend write refused')
       // Inject at the service's storage primitive: the routed drain writes
@@ -263,6 +265,7 @@ export function runLiveWritePathContract(
       const { ctx } = await make()
       const session = ctx.sessions.create(SessionId('retained-order'))
       const handle = await ctx.sessionPersistence.create(session.header)
+      handle.bindSession?.(session)
       const warned = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
       const host = ctx.sessionPersistence as unknown as { persistBatch: (...args: unknown[]) => Promise<void> }
       // Materialize under real timers first: the write lock is acquired ahead

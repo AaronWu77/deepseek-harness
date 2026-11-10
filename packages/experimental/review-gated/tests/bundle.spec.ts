@@ -26,14 +26,15 @@ function group(preset: PresetDefinition): PluginRow {
 }
 
 describe('RG optional bundle', () => {
-  it('adds only its three preset declarations without changing the shipped PTC preset', () => {
+  it('adds one settings owner and three preset declarations without changing the shipped PTC preset', () => {
     const ptc = loadOverlayPatches('rg-test', ptcPath)
     const rg = loadOverlayPatches('rg-test', patchPath)
     const warnings: string[] = []
     const before = composeEntries([ptc])
     const after = composeEntries([ptc, rg], warning => warnings.push(warning))
     expect(warnings).toEqual([])
-    expect(after.map(row => row.id)).toEqual(['preset-ptc', 'preset-rg-worker', 'preset-rg-reviewer', 'preset-rg'])
+    expect(after.map(row => row.id)).toEqual(['preset-ptc', 'rg-settings', 'preset-rg-worker', 'preset-rg-reviewer', 'preset-rg'])
+    expect(after.find(row => row.id === 'rg-settings')).toMatchObject({ name: '@deepseek-ai/dsh-experimental-review-gated' })
     expect(after[0]).toEqual(before[0])
     expect(rg).toHaveLength(1)
     expect(rg[0]).toHaveProperty('insert')
@@ -56,26 +57,22 @@ describe('RG optional bundle', () => {
     expect(leaves(group(worker).config as readonly PluginRow[])).toEqual(withoutRoles)
     for (const preset of [worker, reviewer, main]) {
       const tools = leaves(group(preset).config as readonly PluginRow[])
-      expect(tools.find(row => row.id === 'tool-presentation')).toMatchObject({ config: { mode: 'ptc' } })
+      expect(tools.filter(row => row.name === '@deepseek-ai/dsh-tool-executor-ptc')).toHaveLength(1)
+      expect(tools.some(row => row.name === '@deepseek-ai/dsh-agent-tool-presentation')).toBe(false)
       expect(tools.filter(row => row.name === '@deepseek-ai/dsh-tool-subagent')).toHaveLength(0)
       expect(tools.filter(row => row.name === '@deepseek-ai/dsh-tool-subagent-control')).toHaveLength(1)
-      expect(tools.filter(row => row.name === '@deepseek-ai/dsh-tool-subagent-control/list-agents')).toHaveLength(1)
+      expect(tools.some(row => row.name === '@deepseek-ai/dsh-tool-subagent-control/list-agents')).toBe(false)
     }
     for (const preset of [worker, reviewer]) {
       expect(preset.selectable).toBe(false)
-      expect(preset.plugins.map(row => row.id)).toEqual(['persona', 'rg-tools'])
+      expect(preset.plugins.map(row => row.id)).toEqual(['persona', 'rg-role', 'rg-tools'])
       expect(leaves(preset.plugins).some(row => row.name === '@deepseek-ai/dsh-experimental-review-gated')).toBe(false)
     }
-    expect(main.plugins.find(row => row.id === 'rg-coordination')).toMatchObject({
-      name: '@deepseek-ai/dsh-experimental-review-gated', config: { maxReviewRounds: 2 },
-    })
-    for (const [id, toolName, agentPreset] of [['rg-worker', 'rg_worker', 'rg-worker'], ['rg-reviewer', 'rg_reviewer', 'rg-reviewer']]) {
-      const tool = main.plugins.find(row => row.id === id)
-      expect(tool).toMatchObject({ name: '@deepseek-ai/dsh-tool-subagent', config: { provider: 'spawn', toolName, agentPreset } })
-      expect(tool?.config).not.toHaveProperty('modelSelectionSettings')
-      expect(tool?.config).not.toHaveProperty('maxDepth')
-      expect(tool?.config).not.toHaveProperty('persona')
-      expect(tool?.config).not.toHaveProperty('toolFilter')
+    for (const [preset, role] of [[main, 'main'], [worker, 'worker'], [reviewer, 'reviewer']] as const) {
+      expect(preset.plugins.find(row => row.id === 'rg-role')).toMatchObject({
+        name: '@deepseek-ai/dsh-experimental-review-gated/role', config: { role },
+      })
+      expect(preset.plugins.some(row => row.name === '@deepseek-ai/dsh-tool-subagent')).toBe(false)
     }
     const workerPersona = worker.plugins.find(row => row.id === 'persona')
     const reviewerPersona = reviewer.plugins.find(row => row.id === 'persona')
@@ -83,6 +80,6 @@ describe('RG optional bundle', () => {
     expect(JSON.stringify(reviewerPersona)).toContain('RG independent reviewer')
     expect(JSON.stringify(reviewerPersona)).toContain('not a restricted tool set')
     expect(workerPersona).not.toEqual(reviewerPersona)
-    expect(main.plugins.filter(row => row.name === '@deepseek-ai/dsh-tool-subagent')).toHaveLength(2)
+    expect(main.plugins.filter(row => row.name === '@deepseek-ai/dsh-experimental-review-gated/role')).toHaveLength(1)
   })
 })

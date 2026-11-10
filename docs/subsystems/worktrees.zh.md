@@ -6,15 +6,17 @@
 
 ## 创建与保留
 
-调用方 Session 的当前目录决定源仓库。创建操作在分配检出目录前，将请求的本地提交、分支或标签固定为具体提交；省略时选择 `HEAD`。每个名称必须对应新分支与未使用的检出路径。操作既不获取缺失对象，也不复制源检出目录中的暂存、未暂存、未跟踪或被忽略文件。
+调用方 Session 的当前目录决定源仓库。创建操作在分配检出目录前，将请求的本地提交、分支或标签固定为具体提交；省略时选择 `HEAD`。每个名称必须对应未使用的检出路径。分支模式还要求新分支；分离检出的准备操作不创建分支。操作既不获取缺失对象，也不复制源检出目录中的暂存、未暂存、未跟踪或被忽略文件。
 
-默认目标为 `<current checkout root>/.agents/worktrees/<name>`。`repositoryRoot` 是调用方当前检出目录的顶层目录；因此，链接检出目录会在自身内部保存工作树父目录。仅当服务的分配操作创建了配置指定的父目录时，服务才会写入内容为 `*` 加换行符的 `.gitignore`。已有文件与忽略规则保持不变。调用方 Session 的现有沙箱策略必须允许写入目标目录与共享 Git 管理目录。Git 初始化成功后才改变工作目录。
+默认目标为 `<current checkout root>/.agents/worktrees/<name>`。`repositoryRoot` 是调用方当前检出目录的顶层目录；因此，链接检出目录会在自身内部保存工作树父目录。仅当服务的分配操作创建了配置指定的父目录时，服务才会写入内容为 `*` 加换行符的 `.gitignore`。已有文件与忽略规则保持不变。调用方 Session 的现有沙箱策略必须允许写入目标目录与共享 Git 管理目录。`create` 仅在 Git 初始化成功后进入检出目录。`provision` 在整个操作中保持调用方 Session 的目录不变，也不会恢复已缺失的当前目录。
 
 通过 `working_directory({ cd: path })` 离开时，会保留检出目录与分支。取消或失败也可能留下部分产物；错误会指出它们的位置。服务销毁时会中止待完成操作并等待它们结束。[包 README](../../packages/experimental/worktree/README.zh.md)拥有配置与 Git 要求。
 
 ## 请求与结果
 
 请求只选择新名称与本地版本。结果标识创建的检出目录与确切提交；它不会改变 Session 的原始项目或写权限。可选的回调会在创建的每个阶段开始之前收到该阶段。恢复会在记录的目录重新检出已删除的检出目录：从它的分支检出；分支也已删除时，从它的基准提交检出。
+
+`ProvisionWorktreeRequest` 在创建请求上增加 `detached?: boolean`：省略或设为 false 时创建分支，设为 true 时将分离 HEAD 固定在解析出的本地提交。`ProvisionedWorktree` 报告相同的检出字段，其中 `branch: string | null` 的 null 表示分离模式。[声明类型](../../packages/experimental/worktree/src/types.ts)拥有这些定义。已有 `CreatedWorktree` 消费方保留字符串分支。
 
 ```ts type-equiv
 /** A new checkout from a locally available Git commit, branch, or tag. */
@@ -42,10 +44,9 @@ interface CreatedWorktree {
 
 ```ts type-equiv
 /**
- * Stage of one creation or restoration, reported before it begins: `prepare`
- * validates the request, allocates the checkout directory, and creates the
- * branch, which a restoration creates again only when it is gone; `checkout`
- * writes the files and, for a creation, enters the checkout.
+ * Stage reported before it begins: `prepare` validates and allocates the checkout,
+ * creating a branch unless detached or restoring an existing branch; `checkout`
+ * writes files and, only for `create`, enters the checkout.
  */
 type CreateWorktreePhase = 'prepare' | 'checkout'
 ```
@@ -103,6 +104,22 @@ Creates retained Git worktrees under the mounted filesystem and sandbox provider
  * @returns canonical checkout path, branch name, pinned commit, and source repository root.
  */
 async create( agent: Agent, request: CreateWorktreeRequest = {}, signal?: AbortSignal, onPhase?: (phase: CreateWorktreePhase) => void, ): Promise<CreatedWorktree>
+
+/**
+ * Provision a checkout at a pinned local revision without changing the calling Session directory.
+ * Omitted or false `detached` creates a new branch; true creates a detached HEAD and no branch.
+ * Names claim an unused checkout path; branch mode also requires an unused branch.
+ * Source edits are not copied, missing objects are not fetched, and existing permissions apply.
+ * Checkout disables configured filters; repository-local replacement refs still apply.
+ * Failure or cancellation may retain allocated artifacts at the path reported in the error;
+ * callers own inspection and cleanup. Disposal aborts and drains pending operations.
+ * @param agent - caller whose current directory selects the source repository and file policy.
+ * @param request - checkout name, local revision, and detached choice; defaults are generated name, HEAD, and a new branch.
+ * @param signal - cancellation of lookup and checkout creation.
+ * @param onPhase - receives each stage before it begins; it must not throw.
+ * @returns canonical checkout path, new branch name or null, pinned commit, and source repository root.
+ */
+async provision( agent: Agent, request: ProvisionWorktreeRequest = {}, signal?: AbortSignal, onPhase?: (phase: CreateWorktreePhase) => void, ): Promise<ProvisionedWorktree>
 
 /**
  * Check out a removed worktree again at its recorded directory: its branch

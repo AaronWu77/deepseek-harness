@@ -1,11 +1,12 @@
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import {
+import AgentRegistry, {
   agentEvents,
   installModelSelection,
   type Agent,
   type AgentOptions,
   type ModelSelection,
+  type SessionModelPolicy,
 } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, ReasoningEffortId, type UserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { Session, SessionId, type EpochHeader } from '@deepseek-ai/dsh-session'
@@ -19,13 +20,14 @@ const INPUT = createUserMessage({
   source: { kind: 'user' },
 })
 
-async function harness(options: AgentOptions = INITIAL) {
+async function harness(options: AgentOptions = INITIAL, restored?: Session) {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(AgentRegistry)
   const projection = await ctx.sessionProjections.register(modelSelectionProjectionDefinition)
-  const session = ctx.sessions.create(SessionId('model-selection'))
+  const session = restored ?? ctx.sessions.create(SessionId('model-selection'))
   const model = new AgentModel(() => projection.stateOf(session), session, options)
   const unused = (): never => { throw new Error('model-selection fixture does not drive the Agent') }
   const agent: Agent = {
@@ -145,6 +147,98 @@ describe('Session model selection', () => {
     expect(h.session.snapshotEvents()).toHaveLength(2)
     h.record(INITIAL)
     expect(h.session.snapshotEvents()).toHaveLength(2)
+  })
+})
+
+
+const POLICY: SessionModelPolicy = {
+  allowedSelections: [INITIAL, { provider: 'beta', model: 'b1', reasoningEffort: ReasoningEffortId('high') }],
+  defaultSelection: INITIAL,
+  rememberDefault: false,
+}
+
+describe('Session model policy', () => {
+  it('keeps ordinary Sessions unrestricted and excludes candidate lists from summaries', async () => {
+    const h = await harness()
+    expect(h.ctx.agents.modelPolicyFor(h.agent)).toBeNull()
+    expect(() =>{  h.ctx.agents.assertModelSelectionAllowed(h.agent, { provider: 'other', model: 'other' }) }).not.toThrow()
+    expect(h.ctx.sessionProjections.summaryKeys().has('modelSelectionPolicy')).toBe(false)
+  })
+
+  it('records one immutable policy without changing the selected route', async () => {
+    const h = await harness()
+    h.ctx.agents.bindModelPolicy(h.agent, POLICY)
+    h.record(POLICY.allowedSelections[1]!)
+    const before = h.session.snapshotEvents().length
+    h.ctx.agents.bindModelPolicy(h.agent, { ...POLICY, allowedSelections: POLICY.allowedSelections.map(choice => ({ ...choice })) })
+    expect(h.session.snapshotEvents()).toHaveLength(before)
+    expect(h.current()).toEqual(POLICY.allowedSelections[1])
+    expect(h.ctx.agents.modelPolicyFor(h.agent)).toEqual(POLICY)
+    expect(h.ctx.sessionProjections.snapshot(h.session).values.modelSelectionPolicy).toEqual(POLICY)
+  })
+
+  it('checks provider, model, explicit effort and absent effort separately', async () => {
+    const h = await harness()
+    h.ctx.agents.bindModelPolicy(h.agent, POLICY)
+    for (const selection of POLICY.allowedSelections) {
+      expect(() =>{  h.ctx.agents.assertModelSelectionAllowed(h.agent, selection) }).not.toThrow()
+    }
+    for (const selection of [
+      { provider: 'other', model: 'a0' },
+      { provider: 'alpha', model: 'other' },
+      { ...INITIAL, reasoningEffort: ReasoningEffortId('high') },
+      { provider: 'beta', model: 'b1' },
+      { provider: 'beta', model: 'b1', reasoningEffort: ReasoningEffortId('max') },
+    ]) {
+      expect(() =>{  h.ctx.agents.assertModelSelectionAllowed(h.agent, selection) }).toThrow(
+        expect.objectContaining({ code: 'MODEL_SELECTION_NOT_ALLOWED', selection }),
+      )
+    }
+  })
+
+  it('allows preset changes to clear a blank policy but never replaces a bound policy implicitly', async () => {
+    const h = await harness()
+    h.ctx.agents.clearModelPolicy(h.agent)
+    h.ctx.agents.bindModelPolicy(h.agent, POLICY)
+    const changed = { ...POLICY, rememberDefault: true }
+    expect(() =>{  h.ctx.agents.bindModelPolicy(h.agent, changed) }).toThrow('clear the blank Session')
+    h.ctx.agents.clearModelPolicy(h.agent)
+    expect(h.ctx.agents.modelPolicyFor(h.agent)).toBeNull()
+    h.ctx.agents.bindModelPolicy(h.agent, changed)
+    expect(h.ctx.agents.modelPolicyFor(h.agent)).toEqual(changed)
+  })
+
+  it('freezes both binding and clearing at the first recorded request', async () => {
+    const h = await harness()
+    h.ctx.agents.bindModelPolicy(h.agent, POLICY)
+    h.header(INITIAL)
+    expect(() =>{  h.ctx.agents.bindModelPolicy(h.agent, POLICY) }).not.toThrow()
+    expect(() =>{  h.ctx.agents.clearModelPolicy(h.agent) }).toThrow('after the first request')
+    const ordinary = await harness()
+    ordinary.header(INITIAL)
+    expect(() =>{  ordinary.ctx.agents.bindModelPolicy(ordinary.agent, POLICY) }).toThrow('after the first request')
+  })
+
+  it('restores policy and its freeze point without consulting current configuration', async () => {
+    const h = await harness()
+    h.ctx.agents.bindModelPolicy(h.agent, POLICY)
+    h.header(INITIAL)
+    const restored = await harness({}, Session.create(SessionId('policy-restored'), h.session.snapshotEvents()))
+    expect(restored.ctx.agents.modelPolicyFor(restored.agent)).toEqual(POLICY)
+    expect(() =>{  restored.ctx.agents.clearModelPolicy(restored.agent) }).toThrow('after the first request')
+    const before = restored.ctx.agents.modelPolicyFor(restored.agent)
+    restored.session.append('user/message', INPUT, { surfaceOp: 'append' })
+    expect(restored.ctx.agents.modelPolicyFor(restored.agent)).toBe(before)
+  })
+
+  it.each([
+    { ...POLICY, allowedSelections: [] },
+    { ...POLICY, defaultSelection: { provider: 'missing', model: 'missing' } },
+    { ...POLICY, allowedSelections: [INITIAL, { ...INITIAL, reasoningEffort: ReasoningEffortId('high') }] },
+  ])('rejects invalid policy invariants before committing an event', async (policy) => {
+    const h = await harness()
+    expect(() =>{  h.ctx.agents.bindModelPolicy(h.agent, policy) }).toThrow()
+    expect(h.session.snapshotEvents()).toHaveLength(0)
   })
 })
 

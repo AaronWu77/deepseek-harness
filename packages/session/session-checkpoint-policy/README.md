@@ -49,7 +49,7 @@ Three barriers are checkpointed. The model request is flushed before the adapter
 
 ### Observable behavior and failures
 
-After a checkpoint, the checkpointed work is durable: resume restores it from the store like any persisted session. If cancellation lands while a tool checkpoint flush is pending, the wrapper returns the canonical `ABORTED_BEFORE_DISPATCH` result and never enters the tool body. A checkpoint rejection is fail-closed at both boundaries — the adapter or top-level tool body does not run — and a step-boundary rejection fails the turn before another request starts.
+After a checkpoint, the checkpointed work is durable: resume restores it from the store like any persisted session. If cancellation lands while a tool checkpoint flush is pending, the wrapper returns the canonical `ABORTED_BEFORE_DISPATCH` result and never enters the tool body. A rejected checkpoint or a missing acknowledgement from the Session’s bound writer is fail-closed at both boundaries — the adapter or top-level tool body does not run — and a step-boundary refusal fails the turn before another request starts. A flush observer alone does not acknowledge durability.
 
 -----
 

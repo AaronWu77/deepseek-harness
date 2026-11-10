@@ -113,7 +113,7 @@ export interface Config {
 
 - `inject`: `agents` · `sessions` · `llm` · `tools` · `systemPrompt` · `sessionProjections`
 - `refs`: [`AgentOptions`](subsystems/core.zh.md) · [`SessionId`](subsystems/core.zh.md) · `Volatile` (`@deepseek-ai/cosmokit`)
-- `source`: [`packages/core/agent-loop/src/index.ts:253`](../packages/core/agent-loop/src/index.ts)
+- `source`: [`packages/core/agent-loop/src/index.ts:255`](../packages/core/agent-loop/src/index.ts)
 
 ```ts config-catalog
 /** Agent-loop plugin configuration. */
@@ -1331,14 +1331,89 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-experimental-review-gated`
 
-- `inject`: `systemPrompt`
-- `source`: [`packages/experimental/review-gated/src/index.ts:13`](../packages/experimental/review-gated/src/index.ts)
+- `inject`: `agents` · `sessions` · `sessionProjections` · `subagents` · `agentPresets` · `llm` · `fs` · `workingDirectory`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/experimental/review-gated/src/config.ts:10`](../packages/experimental/review-gated/src/config.ts)
 
 ```ts config-catalog
-/** Advisory review budget; this plugin does not intercept tools or completion. */
+/** Loader-owned volatile document, edited atomically by the RG configuration page. */
 export interface Config {
-  /** Maximum review attempts per user task before reporting unresolved issues and asking how to proceed. */
-  maxReviewRounds: number
+  /** Complete Host document saved atomically and captured by newly initialized RG Sessions. */
+  readonly settings: Volatile<RgSettings>
+  /** Local-only Git command budgets; explicit human task authorization is still required. */
+  readonly git: GitExecutorConfig
+}
+
+/** One atomically saved RG configuration document. */
+export interface RgSettings {
+  /** Whether this document authorizes model pools for newly initialized RG Sessions. */
+  readonly configured: boolean
+  /** Main role candidates and default captured when an RG Session is initialized. */
+  readonly main: RgModelPool
+  /** Worker pool frozen with the parent RG Session, not read again for each child. */
+  readonly worker: RgModelPool
+  /** Reviewer inheritance mode or custom pool, resolved once when an RG Session is initialized. */
+  readonly reviewer: RgReviewerSettings
+  /** Accepted worker and repair attempts per human task; failures and cancellations are not refunded. */
+  readonly maxWorkerAttempts: number
+  /** Accepted reviewer attempts per human task; failures, cancellations and inconclusive results consume attempts. */
+  readonly maxReviewAttempts: number
+  /** Maximum characters in a task objective or complete serialized role handoff. */
+  readonly maxHandoffChars: number
+  /** Maximum characters in a complete serialized parent result notice, including its wrapper and bounded diagnostics. */
+  readonly maxReportChars: number
+  /** Maximum filesystem entries per review-scope capture; exceeding it leaves the scope unverified. */
+  readonly maxScopeFiles: number
+  /** Maximum hashed file-content bytes per review-scope capture; exceeding it leaves the scope unverified. */
+  readonly maxScopeBytes: number
+}
+
+/** Explicit command budgets; no operation widens the Agent's permissions. */
+export interface GitExecutorConfig {
+  /** Git executable resolved in the calling Agent's execution world. */
+  readonly gitCommand: string
+  /** Deadline for each Git subprocess, in milliseconds. */
+  readonly timeoutMs: number
+  /** Termination grace period for managed Git subprocesses, in milliseconds. */
+  readonly graceMs: number
+  /** Maximum bytes per output stream, Git metadata file, and complete captured result. */
+  readonly maxOutputBytes: number
+}
+
+/** Authorized choices and a default naming one of their routes. */
+export interface RgModelPool {
+  /** Exact permitted routes and reasoning choices; may be empty before configuration. */
+  readonly candidates: readonly RgModel[]
+  /** Initial route naming one candidate, or null while unconfigured. */
+  readonly default: {
+    /** Provider of the default candidate. */
+    readonly provider: string
+    /** Model of the default candidate. */
+    readonly model: string
+  } | null
+}
+
+/** Editable reviewer choice; inheritance is resolved once per new Session. */
+export type RgReviewerSettings =
+  | {
+    /** Copy the main pool, default and reasoning into the new Session's frozen reviewer policy. */
+    readonly mode: 'inherit-main'
+  }
+  | {
+    /** Use an independent reviewer pool instead of inheriting the main configuration. */
+    readonly mode: 'custom'
+    /** Reviewer candidates and default captured for newly initialized RG Sessions. */
+    readonly pool: RgModelPool
+  }
+
+/** An exact model route and its configured reasoning choice. */
+export interface RgModel {
+  /** Registered LLM provider id. */
+  readonly provider: string
+  /** Provider-owned model id. */
+  readonly model: string
+  /** Omission uses the adapter default, never a parent role's effort. */
+  readonly reasoningEffort?: string
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-review-gated -->
@@ -1537,7 +1612,7 @@ export type PaidTranslationProvider = 'deepseek-account' | 'deepseek-official'
 ## `@deepseek-ai/dsh-experimental-worktree`
 
 - `inject`: `workingDirectory` · `fs` · `subprocess` · `sandbox` · `sandboxPolicy`
-- `source`: [`packages/experimental/worktree/src/index.ts:21`](../packages/experimental/worktree/src/index.ts)
+- `source`: [`packages/experimental/worktree/src/index.ts:22`](../packages/experimental/worktree/src/index.ts)
 
 ```ts config-catalog
 /** Worktree location, generated names, executables, and subprocess resource limits. */
@@ -3059,7 +3134,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-session-log-export`
 
 - `inject`: `commands` · `connection`
-- `source`: [`packages/session-query/session-log-export/src/index.ts:48`](../packages/session-query/session-log-export/src/index.ts)
+- `source`: [`packages/session-query/session-log-export/src/index.ts:49`](../packages/session-query/session-log-export/src/index.ts)
 
 ```ts config-catalog
 /** Session-log archive policy. */
@@ -3112,7 +3187,7 @@ export type JsonlCompression = 'zstd' | 'none'
 ## `@deepseek-ai/dsh-session-projection-cache`
 
 - `inject`: `storageDomain` · `sessionProjections` · `sessions`
-- `source`: [`packages/session/session-projection-cache/src/index.ts:76`](../packages/session/session-projection-cache/src/index.ts)
+- `source`: [`packages/session/session-projection-cache/src/index.ts:85`](../packages/session/session-projection-cache/src/index.ts)
 
 ```ts config-catalog
 /**
@@ -3591,7 +3666,7 @@ export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 
 - `inject`: `workingDirectory` · `sessionProjections`
 - `refs`: `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/subagent/subagent/src/index.ts:191`](../packages/subagent/subagent/src/index.ts)
+- `source`: [`packages/subagent/subagent/src/index.ts:193`](../packages/subagent/subagent/src/index.ts)
 
 ```ts config-catalog
 /** Host configuration for continuable subagent capacity. */
@@ -3791,7 +3866,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-subagent-spawn-in-process`
 
 - `inject`: `subagents`
-- `source`: [`packages/subagent/subagent-spawn-in-process/src/index.ts:23`](../packages/subagent/subagent-spawn-in-process/src/index.ts)
+- `source`: [`packages/subagent/subagent-spawn-in-process/src/index.ts:24`](../packages/subagent/subagent-spawn-in-process/src/index.ts)
 
 ```ts config-catalog
 /** Config: the registry name to register the provider under. */
@@ -4972,6 +5047,7 @@ export interface Config {
 | `@deepseek-ai/dsh-tool-subagent-control` | `tools` · `subagents` · `agents` | [`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts) |
 | `@deepseek-ai/dsh-tool-working-directory` | `tools` · `workingDirectory` | [`packages/session/tool-working-directory/src/index.ts`](../packages/session/tool-working-directory/src/index.ts) |
 | `@deepseek-ai/dsh-tools` | `systemPrompt` | [`packages/core/tools/src/index.ts`](../packages/core/tools/src/index.ts) |
+| `@deepseek-ai/dsh-typert-registry` | — | [`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts) |
 | `@deepseek-ai/dsh-user-questions` | — | [`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts) |
 | `@deepseek-ai/dsh-webhook` | `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry` | [`packages/experimental/webhook/src/index.ts`](../packages/experimental/webhook/src/index.ts) |
 | `@deepseek-ai/dsh-workspace` | `storageDomain` · `sessionPersistence` | [`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts) |
@@ -5077,7 +5153,6 @@ export interface Config {
 | `@deepseek-ai/dsh-tool-testkit` | — | [`packages/test-support/tool-testkit/src/index.ts`](../packages/test-support/tool-testkit/src/index.ts) |
 | `@deepseek-ai/dsh-typert-generator` | — | [`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts) |
 | `@deepseek-ai/dsh-typert-protocol` | — | [`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts) |
-| `@deepseek-ai/dsh-typert-registry` | — | [`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts) |
 | `@deepseek-ai/dsh-util-code-language` | — | [`packages/util/code-language/src/index.ts`](../packages/util/code-language/src/index.ts) |
 | `@deepseek-ai/dsh-util-crypto` | — | [`packages/util/crypto/src/index.ts`](../packages/util/crypto/src/index.ts) |
 | `@deepseek-ai/dsh-util-file-drag` | — | [`packages/util/file-drag/src/index.ts`](../packages/util/file-drag/src/index.ts) |

@@ -86,6 +86,10 @@ function selectionOf(state: ModelDirectoryState, id: string): ModelSelection | u
   for (const group of state.groups) {
     for (const model of group.models) {
       if (rowId(group.id, model.id) !== id) continue
+      if (state.policy !== undefined) {
+        const allowed = state.policy.allowedSelections.find(choice => choice.provider === group.id && choice.model === model.id)
+        return allowed === undefined ? undefined : { ...allowed }
+      }
       const sameRoute = state.current?.provider === group.id && state.current.model === model.id
       const reasoningEffort = sameRoute
         ? state.current?.reasoningEffort ?? model.reasoning?.defaultEffort
@@ -158,6 +162,7 @@ export function apply(ctx: ClientContext): void {
           const result = await directory.select(selection)
           if (!result.ok) {
             if (result.error.code === 'session/writer-held') throw new Error(t('error.sessionInUse'))
+            if (result.error.code === 'session/model-not-allowed') throw new Error(t('error.modelNotAllowed'))
             throw result.error
           }
         },

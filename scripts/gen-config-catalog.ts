@@ -123,7 +123,8 @@ function loadFile(abs: string, rel: string, cache: Map<string, FileCtx>): FileCt
     const specifier = stmt.moduleSpecifier.text
     const clause = stmt.importClause
     if (!clause) continue
-    if (clause.name) imports.set(clause.name.text, { imported: 'default', specifier })
+    if (clause.name) imports.set(clause.name.text, { imported: 'default', specifier,
+      typeOnly: clause.phaseModifier === ts.SyntaxKind.TypeKeyword })
     if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
       for (const el of clause.namedBindings.elements) {
         imports.set(el.name.text, {
@@ -652,19 +653,57 @@ function findInject(ctx: FileCtx, pluginClass: ts.ClassDeclaration | null, viola
   return []
 }
 
-/** Resolve the entry file's default export to its class/function declaration
- * (mirroring the Loader's `unwrapExports`), or null when there is none. */
-function defaultExport(ctx: FileCtx): ts.ClassDeclaration | ts.FunctionDeclaration | null {
-  for (const stmt of ctx.sf.statements) {
-    if (ts.isExportAssignment(stmt) && !stmt.isExportEquals && ts.isIdentifier(stmt.expression)) {
-      const name = stmt.expression.text
-      for (const s of ctx.sf.statements) {
-        if ((ts.isClassDeclaration(s) || ts.isFunctionDeclaration(s)) && s.name?.text === name) return s
-      }
-      return null
+/** Resolve a plugin export and retain the source file owning its declaration. */
+function defaultExport(
+  world: World,
+  ctx: FileCtx,
+  name = 'default',
+  seen = new Set<string>(),
+): { decl: ts.ClassDeclaration | ts.FunctionDeclaration; ctx: FileCtx } | null {
+  const key = `${ctx.abs}#${name}`
+  if (seen.has(key)) throw new Error(`cyclic plugin export '${name}' in ${ctx.rel}`)
+  seen.add(key)
+  const follow = (specifier: string, exported: string) => {
+    if (!specifier.startsWith('.') || !specifier.endsWith('.ts')) {
+      throw new Error(`plugin export '${exported}' from '${specifier}' must use a package-relative .ts module`)
     }
-    if ((ts.isClassDeclaration(stmt) || ts.isFunctionDeclaration(stmt))
-      && stmt.modifiers?.some(m => m.kind === ts.SyntaxKind.DefaultKeyword)) return stmt
+    const target = loadRelative(world, ctx, specifier)
+    const resolved = defaultExport(world, target, exported, seen)
+    if (resolved === null) throw new Error(`${target.rel} does not export plugin '${exported}'`)
+    return resolved
+  }
+  const binding = (local: string) => {
+    for (const stmt of ctx.sf.statements) {
+      if ((ts.isClassDeclaration(stmt) || ts.isFunctionDeclaration(stmt)) && stmt.name?.text === local) return { decl: stmt, ctx }
+    }
+    const imported = ctx.imports.get(local)
+    if (imported !== undefined) {
+      if (imported.typeOnly) throw new Error(`type-only plugin export '${local}' in ${ctx.rel}`)
+      return follow(imported.specifier, imported.imported)
+    }
+    throw new Error(`cannot resolve plugin binding '${local}' in ${ctx.rel}`)
+  }
+  for (const stmt of ctx.sf.statements) {
+    if (ts.isClassDeclaration(stmt) || ts.isFunctionDeclaration(stmt)) {
+      const isDefault = stmt.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.DefaultKeyword)
+      if (isDefault && name === 'default'
+        || !isDefault && stmt.name?.text === name && stmt.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+        return { decl: stmt, ctx }
+      }
+    }
+    if (name === 'default' && ts.isExportAssignment(stmt) && !stmt.isExportEquals) {
+      const value = unwrapExpr(stmt.expression)
+      if (ts.isIdentifier(value)) return binding(value.text)
+      throw new Error(`unsupported default plugin export in ${ctx.rel}`)
+    }
+    if (!ts.isExportDeclaration(stmt) || !stmt.exportClause || !ts.isNamedExports(stmt.exportClause)) continue
+    const exported = stmt.exportClause.elements.find(item => item.name.text === name)
+    if (exported === undefined) continue
+    if (stmt.isTypeOnly || exported.isTypeOnly) throw new Error(`type-only plugin export '${name}' in ${ctx.rel}`)
+    const original = (exported.propertyName ?? exported.name).text
+    if (stmt.moduleSpecifier === undefined) return binding(original)
+    if (!ts.isStringLiteral(stmt.moduleSpecifier)) throw new Error(`unsupported plugin export module in ${ctx.rel}`)
+    return follow(stmt.moduleSpecifier.text, original)
   }
   return null
 }
@@ -727,7 +766,13 @@ export function collectConfigCatalog(scanRoot: string = root): CatalogEntry[] {
     // Classify, mirroring the Loader's unwrapExports: the default export IS
     // the plugin when present; else an exported `apply` makes the module
     // namespace the plugin; else the package is a plain library.
-    const dflt = defaultExport(ctx)
+    let plugin: ReturnType<typeof defaultExport>
+    try { plugin = defaultExport(world, ctx) } catch (error) {
+      violations.push(`${pkg}: ${error instanceof Error ? error.message : String(error)}`)
+      continue
+    }
+    if (plugin !== null) ctx = plugin.ctx
+    const dflt = plugin?.decl
     const apply = applyExport(ctx)
     let pluginClass: ts.ClassDeclaration | null = null
     let configParam: ts.ParameterDeclaration | undefined
@@ -766,7 +811,7 @@ export function collectConfigCatalog(scanRoot: string = root): CatalogEntry[] {
 
     // Resolve the config type and paste its package-local transitive closure.
     if (!configParam.type || !ts.isTypeReferenceNode(configParam.type) || !ts.isIdentifier(configParam.type.typeName)) {
-      violations.push(`${pkg}: config parameter type (${pointer(entryRel, ctx.sf, configParam)}) is not a plain type-name reference; declare a named config type.`)
+      violations.push(`${pkg}: config parameter type (${pointer(ctx.rel, ctx.sf, configParam)}) is not a plain type-name reference; declare a named config type.`)
       continue
     }
     const typeName = configParam.type.typeName.text
@@ -830,7 +875,7 @@ export function collectConfigCatalog(scanRoot: string = root): CatalogEntry[] {
     // Statically walk the runtime schema (when one exists) for the subset check.
     const schemaExpr = findSchemaExpr(ctx, pluginClass)
     if (schemaExpr) {
-      const { keys, composes } = walkSchemaExpr(world, ctx, unwrapExpr(schemaExpr), `${pkg} (${entryRel})`, violations)
+      const { keys, composes } = walkSchemaExpr(world, ctx, unwrapExpr(schemaExpr), `${pkg} (${ctx.rel})`, violations)
       entry.schemaKeys = keys
       entry.schemaComposes = composes
     } else {

@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-rc.1/rg-model-pools/guide.md
+/:
+  en: 953491aabf1b0acd
+  zh: 93bc704d39c59cb5
+/rg-model-pools-and-managed-role-attempts:
+  en: 4eb6981669572616
+  zh: 02691775eb115500
+/rg-model-pools-and-managed-role-attempts/change:
+  en: 5142e4e43e2d2f4c
+  zh: 54b7da28c70b20d2
+/rg-model-pools-and-managed-role-attempts/migration:
+  en: 485c99d6696c93b5
+  zh: c532039bc7464f77

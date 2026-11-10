@@ -75,6 +75,8 @@ export class ReactLoopInbox implements InboxContract {
     private readonly readState: () => InboxState,
     private readonly session: Session,
     private readonly dispatch: AgentEventDispatch,
+    private readonly reservedId: () => MessageId | undefined = () => undefined,
+    private readonly claimIds: () => ReadonlySet<MessageId> = () => new Set(),
   ) {}
 
   /** Prompts awaiting individual turns. */
@@ -95,6 +97,8 @@ export class ReactLoopInbox implements InboxContract {
 
   /** Durably cancel all pending input, clearing next-step before next-turn. */
   clear(): void {
+    const id = this.reservedId()
+    if ((id !== undefined && this.locate(id) !== undefined) || this.claimIds().size > 0) throw new Error('input is reserved')
     this.splice('next-step', 0, this.nextStep.length, [])
     this.splice('next-turn', 0, this.nextTurn.length, [])
   }
@@ -108,6 +112,46 @@ export class ReactLoopInbox implements InboxContract {
   claim(target: InboxTarget, turn: number): UserMessage[] {
     const claimed = this.mutate('next-step', 0, this.nextStep.length, [], false)
     if (target === 'next-turn') claimed.push(...this.mutate('next-turn', 0, 1, [], false))
+    for (const message of claimed) this.dispatch.emit('agent/inbox/claimed', { message, turn })
+    return claimed
+  }
+
+  /** Capture the exact inputs for a step before starting its durability barrier. */
+  capture(target: InboxTarget, reserved?: MessageId): { target: InboxTarget; message: UserMessage }[] {
+    if (reserved !== undefined) {
+      const item = this.nextTurn.find(message => message.id === reserved)
+      if (item === undefined) throw new Error('exclusive admission input is missing')
+      return [{ target: 'next-turn', message: item }]
+    }
+    return [
+      ...this.nextStep.map(message => ({ target: 'next-step' as const, message })),
+      ...(target === 'next-turn' && this.nextTurn[0] !== undefined
+        ? [{ target: 'next-turn' as const, message: this.nextTurn[0] }] : []),
+    ]
+  }
+
+  /** Remove only captured identities, including after unrelated concurrent insertions. */
+  claimCaptured(inputs: readonly { target: InboxTarget; message: UserMessage }[], turn: number): UserMessage[] {
+    const claimed: UserMessage[] = []
+    for (const input of inputs) {
+      const location = this.locate(input.message.id)
+      if (location?.target !== input.target) throw new Error('protected claim input is missing')
+      claimed.push(...this.mutate(location.target, location.index, 1, [], false, true))
+    }
+    for (const message of claimed) this.dispatch.emit('agent/inbox/claimed', { message, turn })
+    return claimed
+  }
+
+  /** Insert the reserved input without waking the driver. */
+  appendReserved(message: UserMessage): void {
+    this.mutate('next-turn', this.nextTurn.length, 0, [message], false, true)
+  }
+
+  /** Claim only the exact reserved next-turn message. */
+  claimReserved(messageId: MessageId, turn: number): UserMessage[] {
+    const location = this.locate(messageId)
+    if (location?.target !== 'next-turn') throw new Error('exclusive admission input is missing')
+    const claimed = this.mutate('next-turn', location.index, 1, [], false, true)
     for (const message of claimed) this.dispatch.emit('agent/inbox/claimed', { message, turn })
     return claimed
   }
@@ -189,6 +233,7 @@ export class ReactLoopInbox implements InboxContract {
     deleteCount: number,
     inserted: UserMessage[],
     discardRemoved: boolean,
+    reservedOperation = false,
   ): UserMessage[] {
     const state = this.readState()
     const inbox = state[target]
@@ -203,6 +248,16 @@ export class ReactLoopInbox implements InboxContract {
       inbox.length - actualStart,
     )
     if (actualDeleteCount === 0 && inserted.length === 0) return []
+    const reserved = this.reservedId()
+    if (!reservedOperation && reserved !== undefined && (
+      inserted.some(message => message.id === reserved)
+      || inbox.slice(actualStart, actualStart + actualDeleteCount).some(message => message.id === reserved)
+    )) throw new Error('exclusive admission input is reserved')
+    const claimIds = this.claimIds()
+    if (!reservedOperation && (inserted.some(message => claimIds.has(message.id))
+      || inbox.slice(actualStart, actualStart + actualDeleteCount).some(message => claimIds.has(message.id)))) {
+      throw new Error('protected claim input is reserved')
+    }
     const candidate = inbox.toSpliced(actualStart, actualDeleteCount, ...inserted)
     const ids = new Set<string>()
     for (const message of target === 'next-turn'

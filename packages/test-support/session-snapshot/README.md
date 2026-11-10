@@ -84,6 +84,8 @@ Headless/ACP and SDK adapters compare raw catalog child-creation times with harv
 
 For an initial headless live recording with no Session file, temporarily set `input.task` in `snapshot.yml`; the live composition selects the model. After recording, remove that input so the selected Session owns the task. Replay and refresh require existing canonical Session files, and malformed or orphaned roles remain errors.
 
+The SDK adapter materializes `{{cwd}}` only in private replay copies, retaining native path spelling, nested JSON string escaping, and every other byte. Quoted cwd markers use JSON string-literal encoding, including runtime-context paths; arbitrary prose quotation and JavaScript string syntax are not alternate encodings. JSON decoding that introduces extra cwd markers is rejected before substitution. It validates each parent and child copy with the replay parser before launching the SDK subprocess; invalid fixtures fail in the parent.
+
 A nested `workspace.expected/<directory>/.empty` marker represents an empty directory; a marker in the actual workspace remains a regular file.
 
 ### Pinning request headers and system prompts

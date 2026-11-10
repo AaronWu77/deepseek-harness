@@ -99,6 +99,94 @@ describe('session snapshot identity redaction', () => {
     expect(redacted?.endsWith('\n')).toBe(false)
   })
 
+  it('registers RG task and run leaves before replacing cross-session references', () => {
+    const taskId = 'rg-task-' + approvalId
+    const workerRun = 'rg-run-' + runId
+    const reviewRun = 'rg-run-' + otherId
+    const unregistered = 'rg-run-' + proseUuid
+    const parent = [
+      { type: 'session', id: parentId },
+      { type: 'tool/result', data: { text: JSON.stringify({ taskId, runId: workerRun, unregistered }) } },
+      { type: 'review-gated/state', data: { state: { task: {
+        id: taskId, originMessageId: messageId,
+        active: { id: workerRun, childId }, lastWorker: { id: workerRun, childId },
+        lastReview: { id: reviewRun, childId },
+      } } } },
+      { type: 'user/message', data: { id: messageId, role: 'user', source: { kind: 'user' },
+        content: [{ type: 'text', text: 'Keep unregistered ' + unregistered }] } },
+      { type: 'tool-workflow/run-start', data: { runId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } },
+      { type: 'review-gated/state', data: { state: null } },
+      { type: 'review-gated/state', data: null },
+    ].map(record => JSON.stringify(record)).join('\n') + '\n'
+    const child = [
+      { type: 'session', id: childId, parentSession: parentId },
+      { type: 'review-gated/state', data: { state: { parentSessionId: parentId,
+        taskId, runId: workerRun, task: null } } },
+    ].map(record => JSON.stringify(record)).join('\n') + '\n'
+    const redacted = redactSessionSnapshotIds([parent, child])
+    expect(redacted[0]).toContain('"id":"{{rg-task:1}}"')
+    expect(redacted[0]?.match(/"id":"{{rg-run:1}}"/g)).toHaveLength(2)
+    expect(redacted[0]).toContain('"id":"{{rg-run:2}}"')
+    expect(redacted[0]).toContain('"originMessageId":"{{message:1}}"')
+    expect(redacted[0]).toContain('"runId":"{{workflow:1}}"')
+    expect(redacted[1]).toContain('"parentSessionId":"{{session:1}}"')
+    expect(redacted[1]).toContain('"taskId":"{{rg-task:1}}","runId":"{{rg-run:1}}"')
+    const firstResult = JSON.parse(redacted[0]!.split('\n')[1]!) as { data: { text: string } }
+    expect(JSON.parse(firstResult.data.text)).toEqual({ taskId: '{{rg-task:1}}', runId: '{{rg-run:1}}', unregistered })
+    expect(redacted[0]).toContain('Keep unregistered ' + unregistered)
+    expect(redactSessionSnapshotIds(redacted)).toEqual(redacted)
+  })
+
+  it.each(['review-gated/result-prepared', 'review-gated/result-confirmed'])('registers %s identities without another state event', (type) => {
+    const data = { taskId: 'task-key', runId: 'run-key', childId: 'child-key' }
+    const source = [
+      { type: 'session', id: parentId },
+      { type, data },
+      { type: 'tool/result', data: { taskId: 'ordinary-task', runId: 'ordinary-run', childId: 'ordinary-child' } },
+    ].map(record => JSON.stringify(record)).join('\n')
+    const [output] = redactSessionSnapshotIds([source])
+    const rows = output!.split('\n').map(line => JSON.parse(line) as { data: typeof data })
+    expect(rows[1]!.data).toEqual({ taskId: '{{rg-task:1}}', runId: '{{rg-run:1}}', childId: '{{session:2}}' })
+    expect(rows[2]!.data).toEqual({ taskId: 'ordinary-task', runId: 'ordinary-run', childId: 'ordinary-child' })
+    expect(redactSessionSnapshotIds([output!])).toEqual([output])
+  })
+
+  it('registers RG identities nested only in prepared state', () => {
+    const source = [
+      { type: 'session', id: parentId },
+      { type: 'review-gated/result-prepared', data: { state: { task: {
+        id: 'task-key', originMessageId: 'message-key', lastReview: { id: 'run-key', childId: 'child-key' },
+      } } } },
+    ].map(record => JSON.stringify(record)).join('\n')
+    const [output] = redactSessionSnapshotIds([source])
+    expect(output).toContain('"id":"{{rg-task:1}}","originMessageId":"{{message:1}}"')
+    expect(output).toContain('"id":"{{rg-run:1}}","childId":"{{session:2}}"')
+    expect(redactSessionSnapshotIds([output!])).toEqual([output])
+  })
+
+  it.each(['active', 'lastWorker', 'lastReview'])('registers an RG %s run without another copy', (slot) => {
+    const source = [
+      { type: 'session', id: parentId },
+      { type: 'review-gated/state', data: { state: { task: { id: 'task-key', [slot]: { id: 'run-key', childId } } } } },
+    ].map(record => JSON.stringify(record)).join('\n')
+    const [output] = redactSessionSnapshotIds([source])
+    expect(output).toContain('"id":"{{rg-task:1}}"')
+    expect(output).toContain('"id":"{{rg-run:1}}"')
+    expect(output).toContain('"childId":"{{session:2}}"')
+    expect(redactSessionSnapshotIds([output!])).toEqual([output])
+  })
+
+  it('registers child RG task and run references without a parent task record', () => {
+    const source = [
+      { type: 'session', id: childId },
+      { type: 'review-gated/state', data: { state: { parentSessionId: parentId, taskId: 'task-key', runId: 'run-key', task: null } } },
+    ].map(record => JSON.stringify(record)).join('\n')
+    const [output] = redactSessionSnapshotIds([source])
+    expect(output).toContain('"parentSessionId":"{{session:2}}"')
+    expect(output).toContain('"taskId":"{{rg-task:1}}","runId":"{{rg-run:1}}"')
+    expect(redactSessionSnapshotIds([output!])).toEqual([output])
+  })
+
   it('keeps a canonical token first seen through a generic id key', () => {
     const canonical = '{{message:7}}'
     const nextMessage = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'

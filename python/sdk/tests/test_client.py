@@ -235,6 +235,12 @@ for line in sys.stdin:
         print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-runtime"}}}), flush=True)
     elif method == "session/query":
         print(json.dumps({"jsonrpc": "2.0", "method": "session.event", "params": {"sessionId": "main", "event": {"type": "agent/inbox/spliced", "data": {"target": "next-turn", "start": 0, "inserted": [{"id": "message-1"}]}}}}), flush=True)
+        user = {"id": "message-1", "role": "user", "content": [], "source": {"kind": "user"}}
+        for event in (
+            {"type": "agent/claim/intent", "data": {"target": "next-turn", "turn": 1, "step": 1, "inputs": [{"target": "next-turn", "message": user}]}},
+            {"type": "agent/claim/settled", "data": {"intentSeq": 1, "outcome": "entered", "messages": [user]}},
+        ):
+            print(json.dumps({"jsonrpc": "2.0", "method": "session.event", "params": {"sessionId": "main", "event": event}}), flush=True)
         print(json.dumps({"jsonrpc": "2.0", "method": "session.status", "params": {"sessionId": "main", "status": "running"}}), flush=True)
         print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"kind": "prompt", "messageId": "message-1"}}), flush=True)
         print(json.dumps({"jsonrpc": "2.0", "method": "subagent.started", "params": {"parentSessionId": "main", "childSessionId": "child"}}), flush=True)
@@ -256,7 +262,10 @@ for line in sys.stdin:
             on_notification=lambda notification: seen.append(notification.method),
         )
 
-    assert seen == ["session.event", "session.status", "subagent.started", "session.status"]
+    assert seen == ["session.event", "session.event", "session.event", "session.status", "subagent.started", "session.status"]
+    assert [event["type"] for event in result.events] == ["agent/inbox/spliced", "agent/claim/intent", "agent/claim/settled"]
+    assert result.events[1]["data"]["inputs"][0]["message"]["id"] == "message-1"
+    assert result.events[2]["data"]["outcome"] == "entered"
     assert result.finish_reason is None
 
 

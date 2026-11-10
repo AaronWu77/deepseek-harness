@@ -46,9 +46,9 @@ profile 选择的仓外插件属于独立安装，不是官方 Host 源码改动
 <a id="review-gated-presets"></a>
 ## Review-Gated 预设
 
-可选 [Review-Gated bundle](../packages/experimental/review-gated/README.zh.md) 增加 RG、RG Worker 与 RG Reviewer 预设。RG 保持主会话，并可委派执行和审查。只有 RG 可用于新建 Session；角色预设仍可绑定到子级。这依赖本地[预设可选性扩展](../packages/preset/agent-preset-registry/README.zh.md#use-this-package)，不可选预设不能作为用户选择或部署默认值。
+可选 [Review-Gated bundle](../packages/experimental/review-gated/README.zh.md) 在同一主会话中交付，并按需使用受管一次性执行者与审查者。唯一的 Host 设置文档默认未配置；新 RG Session 冻结角色模型池、默认值、推理选项、审查者继承结果与尝试上限。每个人类任务、每个角色默认允许两次已接受尝试；失败或取消不退还次数。结构化 PTC 报告与范围复查决定记录的审查状态。
 
-审查属于提示词指导，不是运行时的完成门禁或权限门禁。三个角色共享工具组，仍受已有 Host 审批和子代理深度限制约束。已有 Session 保留启动时的预设；安装 bundle 不会把每个会话都变成 RG。
+只有 RG 可直接选择；角色预设要求预留的子级启动。本地[预设注册表扩展](../packages/preset/agent-preset-registry/README.zh.md#understand-the-implementation) 在空白会话选择提交后初始化消费方。主角色可直接工作。审查既不是交付门禁，也不授予权限，审查者只读行为属于指导。已有 Host 审批与深度限制仍生效。旧 RG Session 不会自动获得授权；参见[升级指南](upgrade-guide/v0.2.2-rc.1/rg-model-pools/guide.zh.md)。安装 bundle 不会转换普通 Session。
 
 <a id="local-one-shot-activation"></a>
 ## 本地 one-shot activation

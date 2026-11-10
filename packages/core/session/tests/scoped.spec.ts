@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope, scopeOf } from '@deepseek-ai/dsh-scope'
 import type { Scope, ScopeKey } from '@deepseek-ai/dsh-scope'
-import SessionStore from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FLUSH_DURABLE } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
 
 async function mount(): Promise<Context> {
@@ -87,15 +87,30 @@ describe('sessions.flush()', () => {
     await expect(ctx.sessions.flush(session)).resolves.toBe(false)
   })
 
-  it('reports a participating listener after it succeeds', async () => {
+  it('does not mistake a void observer for a durability acknowledgement', async () => {
     const ctx = await mount()
     const session = ctx.sessions.create()
     const flushed: Session[] = []
     ctx.on('session/flush', current => void flushed.push(current))
 
-    await expect(ctx.sessions.flush(session)).resolves.toBe(true)
+    await expect(ctx.sessions.flush(session)).resolves.toBe(false)
 
     expect(flushed).toEqual([session])
+  })
+
+  it('reports a durable acknowledgement only after every listener settles', async () => {
+    const ctx = await mount()
+    const session = ctx.sessions.create()
+    const gate = Promise.withResolvers<undefined>()
+    let settled = false
+    ctx.on('session/flush', () => SESSION_FLUSH_DURABLE)
+    ctx.on('session/flush', () => gate.promise)
+    const flushing = ctx.sessions.flush(session)
+    void flushing.then(() => { settled = true })
+    expect(settled).toBe(false)
+    gate.resolve(undefined)
+    await expect(flushing).resolves.toBe(true)
+    expect(settled).toBe(true)
   })
 
   it('dispatches session/flush with the owning carrier and awaits all listeners', async () => {
@@ -143,6 +158,7 @@ describe('sessions.flush()', () => {
     let slowStarted = false
     let settled = false
     ctx.on('session/flush', () => Promise.reject(new Error('disk full')))
+    ctx.on('session/flush', () => SESSION_FLUSH_DURABLE)
     ctx.on('session/flush', () => {
       slowStarted = true
       return gate.promise

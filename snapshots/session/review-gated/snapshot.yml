@@ -1,0 +1,13 @@
+version: 1
+scenario: review-gated
+profile: headless
+composition: review-gated
+recording: scripted
+header:
+  class: review-gated
+  pin: true
+  childSystemPrompts: [1, 2]
+permission: danger-full-access
+environment:
+  DSH_SNAPSHOT_PROVIDER: rg-scripted
+  DSH_SNAPSHOT_MODEL: rg-scripted

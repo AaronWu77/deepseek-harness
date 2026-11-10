@@ -46,9 +46,9 @@ Out-of-tree plugins selected in a profile are separate installations, not edits 
 <a id="review-gated-presets"></a>
 ## Review-Gated presets
 
-The optional [Review-Gated bundle](../packages/experimental/review-gated/README.md) adds RG, RG Worker, and RG Reviewer presets. RG keeps the main conversation and may delegate execution and review. Only RG is selectable for a new Session; the role presets remain available to child binding. This uses the local [preset selectability extension](../packages/preset/agent-preset-registry/README.md#use-this-package), which rejects non-selectable presets as user selections or deployment defaults.
+The optional [Review-Gated bundle](../packages/experimental/review-gated/README.md) keeps delivery in one main conversation with optional managed one-shot workers and reviewers. Its single Host settings document starts unconfigured; new RG Sessions freeze role model pools, defaults, reasoning choices, reviewer inheritance, and attempt limits. Each role defaults to two accepted attempts per human task; failure or cancellation does not refund them. Structured PTC reports and scope rechecks determine recorded review status.
 
-Review is prompt guidance, not a runtime completion or permission gate. The three roles share their tool group and remain subject to existing Host approvals and subagent depth limits. Existing Sessions keep their starting preset. Installing the bundle does not turn every conversation into RG.
+Only RG is selectable; role presets require reserved child starts. The local [preset registry extension](../packages/preset/agent-preset-registry/README.md#understand-the-implementation) initializes consumers after a blank-session selection commits. Main may work directly. Review is neither a delivery gate nor a permission grant, and reviewer read-only behavior is guidance. Existing Host approvals and depth limits still apply. Legacy RG Sessions gain no automatic authorization; see the [upgrade guide](upgrade-guide/v0.2.2-rc.1/rg-model-pools/guide.md). Installing the bundle does not convert ordinary Sessions.
 
 ## Local one-shot activation
 

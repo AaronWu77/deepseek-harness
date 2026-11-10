@@ -217,7 +217,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-experimental-forge-session` | yes | Binds change requests to the Session that created, pushed, or tracked them |
 | `@deepseek-ai/dsh-experimental-inspector` | yes | Experimental cross-realm CDP hub for Host debugging and Client Runtime inspection |
 | `@deepseek-ai/dsh-experimental-ptc-runtime-python` | yes | CPython subprocess implementation of the DeepSeek Harness PTC execution seam |
-| `@deepseek-ai/dsh-experimental-review-gated` | yes | Prompt-first worker collaboration and independent review in one main conversation. |
+| `@deepseek-ai/dsh-experimental-review-gated` | yes | PTC role model pools, bounded execution, and independent evidence-based review. |
 | `@deepseek-ai/dsh-experimental-session-inspector` | no | Experimental virtualized Session log and live Chat group/node inspectors |
 | `@deepseek-ai/dsh-experimental-speech-to-text` | yes | Experimental speech recognition with independently selectable providers |
 | `@deepseek-ai/dsh-experimental-speech-to-text-sensevoice` | yes | Local SenseVoice ONNX transcription with a managed sherpa-onnx process |
@@ -509,6 +509,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | Package | Config | Description |
 |---|---|---|
 | `@deepseek-ai/dsh-typert-loader` | yes | Loader integration for generated Typert package contributions |
+| `@deepseek-ai/dsh-typert-registry` | no | Runtime registry for generated package reflection and Zod schemas |
 
 ## web
 

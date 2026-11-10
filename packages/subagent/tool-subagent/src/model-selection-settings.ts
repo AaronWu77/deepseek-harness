@@ -4,7 +4,7 @@ import type { Volatile } from '@deepseek-ai/cordis'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
   subagentModelSelectionPolicy,
   subagentModelSelectionProjectionDefinition,
@@ -30,6 +30,20 @@ export interface SubagentModelSelectionSettings {
   allowedModels: AllowedModelRoute[]
 }
 
+/** A composition-owned authorization choice for a fresh top-level Session. */
+export interface SubagentModelSelectionSource {
+  /** Unique diagnostic name of the contribution. */
+  readonly name: string
+  /**
+   * Supply exact routes for a matching Agent, or abstain to use another source.
+   * @param agent - unpublished fresh top-level Agent after its preset is mounted.
+   * @returns a non-empty route list, or undefined when this source does not apply.
+   */
+  resolve(agent: Agent): readonly AllowedModelRoute[] | undefined | Promise<readonly AllowedModelRoute[] | undefined>
+}
+
+export type { AllowedModelRoute } from './model-selection.ts'
+
 /** Optional deployment base for the preference. */
 export interface Config {
   /** Initial enabled state inherited when the user document does not override it. */
@@ -46,6 +60,9 @@ export class SubagentModelSelectionConfig extends Service {
     enabled: z.boolean().default(false).volatile(),
     allowedModels: z.array(AllowedModelRouteSchema).default([]).volatile(),
   })
+
+  private readonly sources = new Map<string, SubagentModelSelectionSource>()
+  private sourcesRevision = 0
 
   constructor(ctx: Context, private config: Config) {
     super(ctx, 'subagentModelSelection')
@@ -67,12 +84,67 @@ export class SubagentModelSelectionConfig extends Service {
       } else if (target.firstLiveSeq === 0
         // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
         && target.eventAt(SessionSeq(0))?.type !== 'session/end-seed') {
-        const current = this.current()
-        allowedModels = current.enabled ? current.allowedModels : undefined
+        await this.captureFreshPolicy(agent)
+        return
       }
       if (allowedModels !== undefined) target.append('subagent/model-selection-policy', { allowedModels })
     })
     await policyReady
+  }
+
+  /**
+   * Register a composition-owned authorization source without changing global preferences.
+   * Sources are sampled only for new root Sessions. Existing, resumed, seeded and
+   * child Sessions retain their recorded or inherited decision. More than one
+   * matching source, or removal/replacement during resolution, rejects creation.
+   * @param source - named resolver returning a non-empty route list or abstaining.
+   * @returns the effect disposer that withdraws this source for later creations.
+   */
+  registerSource(source: SubagentModelSelectionSource): () => void {
+    // oxlint-disable-next-line typescript/no-misused-promises -- synchronous effect disposer
+    return this.ctx.effect(() => {
+      if (this.sources.has(source.name)) {
+        throw new Error(`subagent model selection source "${source.name}" is already registered`)
+      }
+      this.sources.set(source.name, source)
+      this.sourcesRevision += 1
+      return () => {
+        this.sources.delete(source.name)
+        this.sourcesRevision += 1
+      }
+    }, 'subagentModelSelection.registerSource()')
+  }
+
+  /** Resolve and commit one fresh Session policy without an intervening await. */
+  private async captureFreshPolicy(agent: Agent): Promise<void> {
+    const revision = this.sourcesRevision
+    const sources = [...this.sources.values()]
+    let selected: { name: string; routes: AllowedModelRoute[] } | undefined
+    for (const source of sources) {
+      const routes = await source.resolve(agent)
+      this.ctx.fiber.assertActive()
+      agent.ctx.fiber.assertActive()
+      if (revision !== this.sourcesRevision) {
+        throw new Error('subagent model selection sources changed during Agent creation; retry creation')
+      }
+      if (routes === undefined) continue
+      assertAllowedModelRoutes(routes)
+      if (routes.length === 0) {
+        throw new Error(`subagent model selection source "${source.name}" requires at least one route`)
+      }
+      if (selected !== undefined) {
+        throw new Error(`subagent model selection sources "${selected.name}" and "${source.name}" both match the Agent`)
+      }
+      selected = { name: source.name, routes: routes.map(route => ({ ...route })) }
+    }
+    this.ctx.fiber.assertActive()
+    agent.ctx.fiber.assertActive()
+    let allowedModels = selected?.routes
+    if (allowedModels === undefined) {
+      const current = this.current()
+      allowedModels = current.enabled ? current.allowedModels : undefined
+    }
+    if (allowedModels !== undefined) agent.session.append('subagent/model-selection-policy', { allowedModels })
   }
 
   /**

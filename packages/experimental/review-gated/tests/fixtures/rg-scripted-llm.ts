@@ -47,14 +47,27 @@ class RgScriptedAdapter extends LlmAdapter {
       .filter(message => message.role === 'system')
       .flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : []))
       .join('\n')
-    if (system.includes('RG execution worker')) {
-      if (system.includes(GUIDANCE)) throw new Error('worker inherited the coordinator guidance')
-      yield* text('WORKER_OK')
-      return
+    if (options.tools?.length !== 1 || options.tools[0]?.name !== 'run_code') {
+      throw new Error('RG request must expose only the PTC run_code tool')
     }
-    if (system.includes('RG independent reviewer')) {
-      if (system.includes(GUIDANCE)) throw new Error('reviewer inherited the coordinator guidance')
-      yield* text('REVIEW_OK')
+    const calls = options.messages.flatMap(message => message.content.flatMap(block =>
+      block.type === 'tool-call' ? [block.arguments] : []))
+    const history = options.messages.filter(message => message.role === 'user')
+      .flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : []))
+      .join('\n')
+    const worker = system.includes('RG execution worker')
+    const reviewer = system.includes('RG independent reviewer')
+    if (worker || reviewer) {
+      if (worker && reviewer) throw new Error('child prompt contains both role personas')
+      if (system.includes(GUIDANCE)) throw new Error('child inherited the coordinator guidance')
+      const marker = worker ? 'WORKER_OK' : 'REVIEW_OK'
+      const report = worker
+        ? { kind: 'worker', outcome: 'completed', summary: marker, changes: [], validation: ['Inspected probe.txt'], unverified: [] }
+        : { kind: 'reviewer', verdict: 'pass', summary: marker, inspectedScope: ['probe.txt'], findings: [], validation: ['Inspected probe.txt'], unverified: [] }
+      yield* toolCall(worker ? 'rg-worker-report' : 'rg-reviewer-report', 'run_code', {
+        code: `console.log(await tools.list_agents({})); await tools.read({ file_path: "probe.txt" }); return await tools.structured_output(${JSON.stringify(report)});`,
+        description: 'Submit the structured RG role report',
+      })
       return
     }
     if (!system.includes(GUIDANCE)) throw new Error('coordinator prompt lacks RG guidance')
@@ -62,22 +75,28 @@ class RgScriptedAdapter extends LlmAdapter {
       throw new Error('coordinator prompt contains a role persona')
     }
 
-    const history = JSON.stringify(options.messages)
-    if (!history.includes('WORKER_OK')) {
-      yield* toolCall('rg-worker-call', 'rg_worker', {
-        description: 'Worker probe',
-        prompt: 'Reply with exactly WORKER_OK and nothing else.',
+    if (history.includes('RG_MOUNT_ONLY')) { yield* text('MOUNT_OK'); return }
+    if (!calls.some(args => args.includes('tools.rg_worker'))) {
+      yield* toolCall('rg-worker-call', 'run_code', {
+        code: `console.log(await tools.list_agents({})); return await tools.rg_worker(${JSON.stringify({
+          handoff: { objective: 'Worker probe', acceptance: ['Inspect the probe'], scope: ['probe.txt'], constraints: ['Do not change files'], facts: [], validation: ['Inspect probe.txt'] },
+        })});`,
+        description: 'Run the RG worker probe',
       })
       return
     }
-    if (!history.includes('REVIEW_OK')) {
-      yield* toolCall('rg-reviewer-call', 'rg_reviewer', {
-        description: 'Reviewer probe',
-        prompt: 'Reply with exactly REVIEW_OK and nothing else.',
+    if (history.includes('WORKER_OK') && !calls.some(args => args.includes('tools.rg_reviewer'))) {
+      yield* toolCall('rg-reviewer-call', 'run_code', {
+        code: `return await tools.rg_reviewer(${JSON.stringify({
+          handoff: { objective: 'Reviewer probe', acceptance: ['Independently inspect the probe'], scope: ['probe.txt'], constraints: ['Do not change files'], facts: ['Worker inspected probe.txt'], validation: ['Inspect probe.txt'] },
+        })});`,
+        description: 'Run the RG reviewer probe',
       })
       return
     }
-    yield* text('PARENT_DONE WORKER_OK REVIEW_OK')
+    yield* text(history.includes('WORKER_OK') && history.includes('REVIEW_OK')
+      ? 'PARENT_DONE WORKER_OK REVIEW_OK'
+      : 'Waiting for the RG child report.')
   }
 }
 

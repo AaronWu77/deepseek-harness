@@ -72,6 +72,9 @@ export function ModelSelect(
     fn => directory.subscribe(fn),
     () => directory.getSnapshot(),
   )
+  const actionError = state.errorCode === 'session/model-not-allowed'
+    ? t('error.modelNotAllowed')
+    : t('error.action', { message: state.error ?? '' })
   const [open, setOpen] = useState(false)
   const [pane, setPane] = useState<Pane>('root')
   const [query, setQuery] = useState('')
@@ -364,7 +367,9 @@ export function ModelSelect(
       seq: toastSeq.current,
       text: error.code === 'session/writer-held'
         ? t('error.sessionInUse')
-        : t('error.action', { message: `${error.code}: ${error.message}` }),
+        : error.code === 'session/model-not-allowed'
+          ? t('error.modelNotAllowed')
+          : t('error.action', { message: `${error.code}: ${error.message}` }),
     })
   }
 
@@ -379,6 +384,12 @@ export function ModelSelect(
   const choose = (selection: ModelSelection): void => {
     if (state.current?.provider === selection.provider && state.current.model === selection.model) {
       closeAfterSelection()
+      return
+    }
+    if (state.policy !== undefined) {
+      const allowed = state.policy.allowedSelections.find(choice =>
+        choice.provider === selection.provider && choice.model === selection.model)
+      if (allowed !== undefined) submit({ ...allowed })
       return
     }
     submit(selection)
@@ -500,7 +511,7 @@ export function ModelSelect(
                 </span>
                 <IconChevronRightOutlineRegular className={css.cellChevron} />
               </button>
-              {reasoning !== undefined && (
+              {reasoning !== undefined && state.policy === undefined && (
                 <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { drill('effort') }}>
                   <span className={css.cellLabel}>{t('menu.effort')}</span>
                   <span className={css.cellValue}>{effortLabel}</span>
@@ -546,7 +557,7 @@ export function ModelSelect(
               )}
               {state.error !== null && lastActionRef.current === 'load' && (
                 <div className={css.error}>
-                  <span>{t('error.action', { message: state.error })}</span>
+                  <span>{actionError}</span>
                   <button type="button" className={css.retry} onClick={reload}>{t('retry')}</button>
                 </div>
               )}
@@ -617,7 +628,7 @@ export function ModelSelect(
             <>
               {state.error !== null && lastActionRef.current === 'load' && (
                 <div className={css.error}>
-                  <span>{t('error.action', { message: state.error })}</span>
+                  <span>{actionError}</span>
                   <button type="button" className={css.retry} onClick={reload}>{t('action.reload')}</button>
                 </div>
               )}

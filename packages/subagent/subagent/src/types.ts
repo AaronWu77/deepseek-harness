@@ -48,6 +48,14 @@ export interface SubagentActivationSpec {
   readonly delivery: 'parent' | 'caller'
 }
 
+/**
+ * A synchronous admission check before any child resources are acquired.
+ * Guards inspect borrowed immutable specifications and throw to reject; they
+ * neither rewrite requests nor authorize a request another guard rejects.
+ * @param spec - complete activation request at the actual start operation.
+ */
+export type SubagentStartGuard = (spec: Readonly<SubagentActivationSpec>) => void
+
 /** A managed execution; disposal addresses this exact activation, never a later resume. */
 export interface SubagentActivation {
   /** Stable identity of the child. */
@@ -153,7 +161,7 @@ export interface SubagentStartRequest {
   readonly prompt: ContentBlock[]
   /**
    * The spawning agent. Its effective directory supplies the default cwd;
-   * continuable children retain its project origin; all local children retain lineage and delegation depth.
+   * all local children retain its project origin, lineage, and delegation depth.
    */
   readonly parent: Agent
   /**

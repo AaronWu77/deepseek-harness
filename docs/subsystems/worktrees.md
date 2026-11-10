@@ -6,15 +6,17 @@ The experimental [`dsh-experimental-worktree`](../../packages/experimental/workt
 
 ## Creation and retention
 
-The calling Session's current directory selects the source repository. Creation pins the requested local commit, branch, or tag before allocating the checkout; omission selects `HEAD`. Each name must identify a new branch and an unused checkout path. The operation neither fetches missing objects nor copies staged, unstaged, untracked, or ignored files from the source checkout.
+The calling Session's current directory selects the source repository. Creation pins the requested local commit, branch, or tag before allocating the checkout; omission selects `HEAD`. Each name must identify an unused checkout path. Branch mode also requires a new branch; detached provisioning creates no branch. The operation neither fetches missing objects nor copies staged, unstaged, untracked, or ignored files from the source checkout.
 
-The default destination is `<current checkout root>/.agents/worktrees/<name>`. `repositoryRoot` is the top-level directory of the caller’s current checkout; a linked checkout therefore contains its own pool. The service writes a `.gitignore` containing `*` and a trailing newline only when its allocation creates the configured pool directory. Existing files and ignore rules are preserved. The calling Session’s existing sandbox policy must permit writes to the destination and shared Git administration directory. Successful Git setup precedes the working-directory change.
+The default destination is `<current checkout root>/.agents/worktrees/<name>`. `repositoryRoot` is the top-level directory of the caller’s current checkout; a linked checkout therefore contains its own pool. The service writes a `.gitignore` containing `*` and a trailing newline only when its allocation creates the configured pool directory. Existing files and ignore rules are preserved. The calling Session’s existing sandbox policy must permit writes to the destination and shared Git administration directory. `create` enters the checkout only after Git setup succeeds. `provision` leaves the calling Session directory unchanged throughout the operation and does not recover a missing current directory.
 
 Leaving through `working_directory({ cd: path })` retains the checkout and branch. Cancellation or failure can also retain partial artifacts; the error identifies their location. The service aborts and drains pending operations on disposal. The [package README](../../packages/experimental/worktree/README.md) owns configuration and Git requirements.
 
 ## Request and result
 
 The request selects only the new name and local revision. The result identifies the created checkout and exact commit; it does not change the Session's original project or write permissions. An optional callback receives each stage of the creation before it begins. A restoration checks a removed checkout out again at its recorded directory, from its branch or, when the branch is gone, from its base commit.
+
+`ProvisionWorktreeRequest` extends the creation request with `detached?: boolean`: omission or false creates a branch, while true pins a detached HEAD at the resolved local commit. `ProvisionedWorktree` reports the same checkout fields, with `branch: string | null`; null identifies detached mode. The [declaring types](../../packages/experimental/worktree/src/types.ts) own these definitions. Existing `CreatedWorktree` consumers retain a string branch.
 
 ```ts type-equiv
 /** A new checkout from a locally available Git commit, branch, or tag. */
@@ -42,10 +44,9 @@ interface CreatedWorktree {
 
 ```ts type-equiv
 /**
- * Stage of one creation or restoration, reported before it begins: `prepare`
- * validates the request, allocates the checkout directory, and creates the
- * branch, which a restoration creates again only when it is gone; `checkout`
- * writes the files and, for a creation, enters the checkout.
+ * Stage reported before it begins: `prepare` validates and allocates the checkout,
+ * creating a branch unless detached or restoring an existing branch; `checkout`
+ * writes files and, only for `create`, enters the checkout.
  */
 type CreateWorktreePhase = 'prepare' | 'checkout'
 ```
@@ -103,6 +104,22 @@ Creates retained Git worktrees under the mounted filesystem and sandbox provider
  * @returns canonical checkout path, branch name, pinned commit, and source repository root.
  */
 async create( agent: Agent, request: CreateWorktreeRequest = {}, signal?: AbortSignal, onPhase?: (phase: CreateWorktreePhase) => void, ): Promise<CreatedWorktree>
+
+/**
+ * Provision a checkout at a pinned local revision without changing the calling Session directory.
+ * Omitted or false `detached` creates a new branch; true creates a detached HEAD and no branch.
+ * Names claim an unused checkout path; branch mode also requires an unused branch.
+ * Source edits are not copied, missing objects are not fetched, and existing permissions apply.
+ * Checkout disables configured filters; repository-local replacement refs still apply.
+ * Failure or cancellation may retain allocated artifacts at the path reported in the error;
+ * callers own inspection and cleanup. Disposal aborts and drains pending operations.
+ * @param agent - caller whose current directory selects the source repository and file policy.
+ * @param request - checkout name, local revision, and detached choice; defaults are generated name, HEAD, and a new branch.
+ * @param signal - cancellation of lookup and checkout creation.
+ * @param onPhase - receives each stage before it begins; it must not throw.
+ * @returns canonical checkout path, new branch name or null, pinned commit, and source repository root.
+ */
+async provision( agent: Agent, request: ProvisionWorktreeRequest = {}, signal?: AbortSignal, onPhase?: (phase: CreateWorktreePhase) => void, ): Promise<ProvisionedWorktree>
 
 /**
  * Check out a removed worktree again at its recorded directory: its branch

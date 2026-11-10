@@ -12,7 +12,7 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import type { AgentCancelCause, Session, SessionSeq, UserMessage } from '@deepseek-ai/dsh-session'
 export type { AgentCancelCause } from '@deepseek-ai/dsh-session'
-import type { Agent, InboxTarget, ModelSelection } from './types.ts'
+import type { AdmissionOwner, Agent, InboxTarget, ModelSelection } from './types.ts'
 export type { Agent } from './types.ts'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 declare module '@deepseek-ai/dsh-system-prompt' {
@@ -69,6 +69,16 @@ export interface Model {
    * @param selection - complete provider, model, and optional explicit effort.
    */
   select(selection: Readonly<ModelSelection>): void
+}
+
+/** Current exclusive admission and its local durability state. */
+export interface ExclusiveAdmissionState {
+  /** Attribution only, not an authorization credential. */
+  readonly owner: AdmissionOwner
+  /** Identity of the exclusively reserved message. */
+  readonly messageId: MessageId
+  /** Unknown durability remains uncertain until the Session is restored. */
+  readonly state: 'open' | 'confirmed' | 'uncertain'
 }
 
 /** Agent-owned access to pending work; concrete storage belongs to the driver. */
@@ -197,6 +207,43 @@ declare module './types.ts' {
     readonly model: Model
     /** Agent-owned access to durable pending work. */
     readonly inbox: Inbox
+    /** Original JSON input while a claim is being saved or has an unknown outcome. Never automatically replay recovered input. */
+    readonly claimRecovery?: ClaimRecovery | null
+    /** Saving lasts until rejection or matching assistant output is flushed; unknown holds the instance. */
+    readonly claimProtectionStatus?: 'saving' | 'unknown' | null
+    /**
+     * Enable durable protection for subsequent input claims. Calling this during a step does not protect its already-claimed input.
+     * The driver flushes the original batch before pre-step and the actual user messages before model dispatch.
+     * A failed checkpoint or interrupted preparation remains unknown; pre-step model or tool side effects are not rolled back.
+     * Restored unresolved claims stay parked, with raw input available for inspection and explicit recovery in a new Session.
+     */
+    enableClaimProtection?(): void
+    /** Exclusive input admission, including process-local uncertain outcomes; absent when this driver lacks the capability. */
+    readonly exclusiveAdmission?: ExclusiveAdmissionState | null
+
+    /**
+     * Optional capability: reserve true idle, durably open admission, prepare, and commit one isolated first input.
+     * Missing capability must not be treated as admission. The callback must honor cancellation; it may continue
+     * after the returned promise rejects.
+     * Failure or cancellation holds the instance and can leave a durable open or uncertain confirmation; no rollback is promised.
+     * A confirmed first claim is flushed before model dispatch. Every restored outstanding admission remains uncertain and parked.
+     * @param owner - application attribution, not authorization.
+     * @param message - unique next-turn message reserved for the first claim.
+     * @param prepare - work run only after the open is acknowledged durable.
+     * @returns the preparation result after confirmation is acknowledged durable.
+     * @throws synchronously if the agent is not truly idle, already holds an admission, or the message identity is pending.
+     */
+    runExclusiveAdmission?<T>(owner: AdmissionOwner, message: UserMessage, prepare: (signal: AbortSignal) => Promise<T>): Promise<T>
+
+    /**
+     * Check the exact in-flight first claim during pre-step and post-pre-step dispatch. This is attribution, not authorization.
+     * The capability is absent on drivers that do not implement exclusive admission; false also covers abort and restored uncertainty.
+     * @param owner - expected admission attribution.
+     * @param messageId - expected reserved input identity.
+     * @param signal - exact signal supplied to the current pre-step.
+     * @returns whether this call observes that active first claim.
+     */
+    isExclusiveAdmissionClaim?(owner: AdmissionOwner, messageId: MessageId, signal: AbortSignal): boolean
     /** The current lifecycle state, mirrored on every `agent/status` transition. */
     readonly status: AgentStatus
     /** Agent-scoped context; its contributions are agent-local, unwind on disposal, and reject registration afterward. */
@@ -204,8 +251,9 @@ declare module './types.ts' {
 
     /**
    * Clear queued and steering work — unless `keepInbox` — and abort the active
-   * turn or between-turn task. The first cause wins for that activity. With no
-   * active activity, cancellation is a no-op and does not arm later work.
+   * turn or between-turn task. During exclusive admission or protected claim saving or uncertainty,
+   * cancellation aborts the activity but preserves the entire inbox; inspect the uncertain input before recovery.
+   * The first cause wins for that activity. With no active activity, cancellation does not arm later work.
    * @param cause - the stable caller intent carried by the active operation signal.
    * @param options - cancellation options; `keepInbox` preserves pending work.
    */
@@ -214,7 +262,8 @@ declare module './types.ts' {
     /**
    * Resolve after the current whole-agent activity reaches quiescence. This
    * follows replacement work started before the observed driver retires,
-   * but does not identify the settlement of any particular message.
+   * but does not identify the settlement of any particular message. A non-settling durability flush can
+   * delay this promise and teardown indefinitely, including after cancellation.
    * @returns fulfillment after no active driver or maintenance task remains.
    */
     whenIdle(): Promise<void>
@@ -308,6 +357,13 @@ declare module '@deepseek-ai/cordis' {
      */
     'agent/status'(this: Scoped<Agent>, payload: { agent: Agent; status: AgentStatus }): void
     /**
+     * Protected claim durability status changed.
+     * @param payload.agent - Agent owning the claim.
+     * @param payload.status - current durability status.
+     * @mode emit
+     */
+    'agent/claim/status'(this: Scoped<Agent>, payload: { agent: Agent; status: 'saving' | 'unknown' | null }): void
+    /**
      * One message entered the live inbox.
      * @param payload.agent - the agent whose inbox changed.
      * @param payload.message - the inserted message.
@@ -348,6 +404,26 @@ declare module '@deepseek-ai/cordis' {
      * @mode waterfall
      */
     'agent/pre-step'(this: Scoped<Agent>, payload: { agent: Agent; messages: UserMessage[]; turn: number; step: number; signal: AbortSignal; modelSelection: Readonly<ModelSelection> }, next: () => Promise<PreStepDecision>): Promise<PreStepDecision>
+    /**
+     * Observe or commit the final enter decision after all pre-step middleware, before step admission.
+     * Listeners run in order and must not return a bail value. A throw or cancellation stops the step;
+     * a protected claim remains unknown and requires recovery. Registered guards run in order, synchronously
+     * before each AgentLoop stream entry, after preparation and flushes. They must only read state, return
+     * undefined, and must not schedule asynchronous work. A guard failure stops that entry; prior requests
+     * and committed Session events are not rolled back. Downstream middleware and adapters are trusted to
+     * honor cancellation; this check does not guarantee authorization at network send time.
+     * @param payload.addGuard - register a step-local guard during this dispatch only; late registration throws.
+     * @param payload.agent - the agent proposing the step.
+     * @param payload.claimedMessages - immutable snapshot of the original claimed messages.
+     * @param payload.admittedMessages - immutable snapshot of the final enter messages.
+     * @param payload.turn - the turn that will own the step.
+     * @param payload.step - the step proposed by the loop.
+     * @param payload.signal - the active turn's cancellation signal.
+     * @param payload.modelSelection - frozen selection for the step.
+     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
+     * @mode serial
+     */
+    'agent/post-pre-step'(this: Scoped<Agent>, payload: { agent: Agent; claimedMessages: readonly UserMessage[]; admittedMessages: readonly UserMessage[]; turn: number; step: number; signal: AbortSignal; modelSelection: Readonly<ModelSelection>; addGuard: (guard: () => undefined) => void }): void | Promise<void>
     /**
      * Replace the frozen call configuration. `await next()` yields the config
      * the machine would use (the step's model selection with agent options on

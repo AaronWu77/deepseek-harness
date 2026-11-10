@@ -1,0 +1,25 @@
+# Bilingual-pair consistency record for 2026-11-08-review-gated-role-authorization.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-11-08-review-gated-role-authorization.md
+/agent-note-frozen-role-authorization-and-bounded-rg-attempts:
+  en: 98bd40c621da8223
+  zh: 687923eefa428216
+/agent-note-frozen-role-authorization-and-bounded-rg-attempts/problem:
+  en: 649828ea2393b5bb
+  zh: 362ffa40aab2d12d
+/agent-note-frozen-role-authorization-and-bounded-rg-attempts/decision:
+  en: cfe9764f3e157c11
+  zh: 0fb0a6beaf916f34
+/agent-note-frozen-role-authorization-and-bounded-rg-attempts/alternatives-considered:
+  en: 8963c964ec0b4ca8
+  zh: 23b3d8e85b7cc8c6
+/agent-note-frozen-role-authorization-and-bounded-rg-attempts/consequences:
+  en: 4c1acdb922f0e82b
+  zh: a5cd51f0f56805ef
+/agent-note-frozen-role-authorization-and-bounded-rg-attempts/verification:
+  en: 30bea486ecafd3d8
+  zh: 7eb5fb720d1fa216
+/agent-note-frozen-role-authorization-and-bounded-rg-attempts/related-decisions:
+  en: 6e3cb22e34cb2a7b
+  zh: cf5d1d26848669c4

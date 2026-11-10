@@ -15,12 +15,14 @@ import { expect, it } from 'vitest'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { HarnessSdkJsonRpcServer } from '../src/server.ts'
 import { modelInput } from './command-model-input.ts'
+import { mountSnapshotPersistence } from './fake-persistence.ts'
 
 async function scenario(path: 'sdk' | 'native', cwd: string) {
   const ctx = new Context()
   let server: HarnessSdkJsonRpcServer | undefined
   try {
     await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
+    mountSnapshotPersistence(ctx)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(CommandRuntime)
     await ctx.plugin(GoalService, { defaultMaxGoalRounds: 2 })

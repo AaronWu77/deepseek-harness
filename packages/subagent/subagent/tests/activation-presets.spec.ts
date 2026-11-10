@@ -89,7 +89,9 @@ describe('a child agent composed in-process', () => {
           signal.throwIfAborted()
           expect(adapter.requests).toEqual([])
           expect(ctx.tools.schemas(child).map(tool => tool.name)).toEqual(['reviewing_only'])
-          expect(ctx.workingDirectory.get(child.session)).toBe(child.session.header.cwd)
+          // A local child inherits the parent's effective directory; its project origin stays the parent's header cwd.
+          expect(ctx.workingDirectory.get(child.session)).toBe(ctx.workingDirectory.get(parent.session))
+          expect(child.session.header.cwd).toBe(parent.session.header.cwd)
           order.push('preflight')
         },
       }),

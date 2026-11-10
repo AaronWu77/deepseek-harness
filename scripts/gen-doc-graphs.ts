@@ -844,6 +844,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Routes explicit recognizers; the browser uses the authenticated Remote and keeps transcripts in the draft until submission.',
   },
   {
+    key: 'reviewGated',
+    pkg: 'experimental-review-gated',
+    title: 'Review-gated role coordination',
+    mode: 'service',
+    consumers: ['experimental-review-gated'],
+    note: 'The root service owns frozen role authorization and bounded task state; role tools and Client controls in the same package consume it.',
+  },
+  {
     key: 'agentTeams',
     pkg: 'experimental-agent-team',
     title: 'Agent Teams coordination domain',

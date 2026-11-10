@@ -1,61 +1,101 @@
 import { Context } from '@deepseek-ai/cordis'
+import AgentRegistry from '@deepseek-ai/dsh-agent'
+import SessionStore from '@deepseek-ai/dsh-session'
+import SessionProjections from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import * as Persona from '@deepseek-ai/dsh-persona'
 import { describe, expect, it, onTestFinished } from 'vitest'
-import * as ReviewGated from '../src/index.ts'
+import * as Role from '../src/role.ts'
 
-describe('RG coordination guidance', () => {
-  it('adds scoped guidance without replacing Persona or first-party instructions', async () => {
-    const ctx = new Context()
-    onTestFinished(() => ctx.fiber.dispose())
-    await ctx.plugin(SystemPrompt, { personaPrefix: 'Deployment identity.' })
-    ctx.systemPrompt.section({ name: 'fixture:guidance', order: 100, text: 'Existing tool guidance.' })
-    const key = { agent: 'rg-guidance' }
+async function harness() {
+  const ctx = new Context()
+  onTestFinished(() => ctx.fiber.dispose())
+  await ctx.plugin(SessionStore)
+  await ctx.plugin(SessionProjections)
+  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(SystemPrompt, { personaPrefix: 'Deployment identity.' })
+  await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
+  ctx.systemPrompt.section({ name: 'fixture:guidance', order: 100, text: 'Existing tool guidance.' })
+  return ctx
+}
+
+describe('RG scoped role contribution', () => {
+  it('adds main guidance and four owned tools without replacing Persona or global instructions', async () => {
+    expect(Role.inject).toContain('sessions')
+    const ctx = await harness()
+    const key = { agent: 'rg-main-guidance' }
     const scope = createScope(ctx, key)
     await scope.ctx.plugin(Persona, { prefix: 'Selected PTC persona.' })
-    await scope.ctx.plugin(ReviewGated, { maxReviewRounds: 3 })
-
+    await scope.ctx.plugin(Role, { role: 'main' })
     const assembly = await ctx.systemPrompt.assemble({ scope: key })
     const prompt = renderPrompt(assembly)
     expect(prompt).toContain('Selected PTC persona.')
     expect(prompt).toContain('Existing tool guidance.')
     expect(prompt).toContain('# RG: work and independent review')
-    expect(prompt).toContain('Use at most 3 independent review attempts')
-    expect(prompt).toContain('not a permission system or an enforced completion check')
-    expect(assembly.sections.filter(section => section.name === 'review-gated:coordination')).toHaveLength(1)
+    expect(prompt).toContain('machine-counted')
+    expect(prompt).toContain('one-shot children')
+    expect(assembly.sections.filter(section => section.name === 'review-gated:main')).toHaveLength(1)
+    expect(ctx.tools.definitions(key).map(tool => tool.name)).toEqual(['rg_worker', 'rg_reviewer', 'rg_models', 'rg_status'])
+    expect(ctx.tools.definitions()).toEqual([])
     expect(renderPrompt(await ctx.systemPrompt.assemble())).toContain('Deployment identity.')
     expect(renderPrompt(await ctx.systemPrompt.assemble())).not.toContain('# RG:')
-    const otherKey = { agent: 'rg-other' }
+    const otherKey = { agent: 'other-session' }
     createScope(ctx, otherKey)
     expect(renderPrompt(await ctx.systemPrompt.assemble({ scope: otherKey }))).not.toContain('# RG:')
   })
 
-  it('removes guidance on fiber disposal and permits a fresh mount with a new budget', async () => {
-    const ctx = new Context()
-    onTestFinished(() => ctx.fiber.dispose())
-    await ctx.plugin(SystemPrompt, { personaPrefix: 'Selected persona.' })
+  it.each(['worker', 'reviewer'] as const)('keeps %s scoped and does not provide delegation tools to that role', async (role) => {
+    const ctx = await harness()
+    const key = { agent: role }
+    const scope = createScope(ctx, key)
+    await scope.ctx.plugin(Role, { role })
+    const prompt = renderPrompt(await ctx.systemPrompt.assemble({ scope: key }))
+    expect(prompt).toContain('one-shot and PTC-only')
+    expect(prompt).toContain('tools.structured_output inside run_code')
+    expect(prompt).not.toContain('# RG: work and independent review')
+    expect(ctx.tools.definitions(key)).toEqual([])
+  })
+
+  it('removes all scoped guidance and tools on disposal and supports a fresh mount', async () => {
+    const ctx = await harness()
     const key = { agent: 'rg-disposal' }
     const scope = createScope(ctx, key)
-    const fiber = await scope.ctx.plugin(ReviewGated, { maxReviewRounds: 2 })
+    await scope.ctx.plugin(Persona, { prefix: 'Selected persona.' })
+    const fiber = await scope.ctx.plugin(Role, { role: 'main' })
     const prompt = async () => renderPrompt(await ctx.systemPrompt.assemble({ scope: key }))
-    expect(await prompt()).toContain('Use at most 2 independent review attempts')
+    expect(ctx.tools.definitions(key)).toHaveLength(4)
     await fiber.dispose()
     expect(await prompt()).toContain('Selected persona.')
     expect(await prompt()).not.toContain('# RG:')
-    await scope.ctx.plugin(ReviewGated, { maxReviewRounds: 5 })
-    expect(await prompt()).toContain('Use at most 5 independent review attempts')
-    expect(await prompt()).not.toContain('Use at most 2 independent review attempts')
+    expect(ctx.tools.definitions(key)).toEqual([])
+    await scope.ctx.plugin(Role, { role: 'main' })
+    expect(ctx.tools.definitions(key)).toHaveLength(4)
     await scope.dispose()
     expect(await prompt()).not.toContain('# RG:')
+    expect(ctx.tools.definitions(key)).toEqual([])
   })
 
-  it.each([1, 2, Number.MAX_SAFE_INTEGER])('accepts a positive safe integer budget: %s', (maxReviewRounds) => {
-    expect(ReviewGated.Config({ maxReviewRounds })).toEqual({ maxReviewRounds })
+  it.each(['rg_worker', 'rg_reviewer', 'rg_models', 'rg_status'])('refuses standalone %s execution without an Agent', async (name) => {
+    const ctx = await harness()
+    await ctx.plugin(Role, { role: 'main' })
+    const input = name === 'rg_models' ? { role: 'worker' } : name === 'rg_status' ? {} : { handoff: {
+      objective: 'Inspect a file', acceptance: ['Read the file'], scope: ['file.txt'], constraints: [], facts: [], validation: [],
+    } }
+    const batch = await ctx.tools.execute({ calls: [{ type: 'tool-call', id: ToolCallId(name), name, arguments: JSON.stringify(input) }], signal: new AbortController().signal })
+    expect(batch.results[0]?.result).toMatchObject({ isError: true, error: { info: { code: 'RG_NOT_READY' } } })
   })
 
-  it.each<unknown>([undefined, null, 0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, '2'])('rejects an invalid review budget: %s', (maxReviewRounds) => {
-    // @ts-expect-error -- runtime validation boundary under test
-    expect(() => ReviewGated.Config({ maxReviewRounds })).toThrow()
+  it.each(['main', 'worker', 'reviewer'] as const)('accepts fixed role %s', (role) => {
+    expect(Role.Config({ role })).toEqual({ role })
+  })
+
+  it.each<unknown>([undefined, null, '', 'coordinator', 2])('rejects an unrecognized role: %s', (role) => {
+    // @ts-expect-error -- a Loader config can contain untyped JSON.
+    expect(() => Role.Config({ role })).toThrow()
   })
 })

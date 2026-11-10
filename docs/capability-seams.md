@@ -267,6 +267,8 @@ flowchart LR
   pkg_experimental_speech_to_text["experimental-speech-to-text"]
   svc_speechToText["ctx.speechToText<br/>Experimental speech recognition providers"]
   pkg_experimental_speech_to_text_sensevoice["experimental-speech-to-text-sensevoice"]
+  pkg_experimental_review_gated["experimental-review-gated"]
+  svc_reviewGated["ctx.reviewGated<br/>Review-gated role coordination"]
   pkg_experimental_agent_team["experimental-agent-team"]
   svc_agentTeams["ctx.agentTeams<br/>Agent Teams coordination domain"]
   pkg_experimental_tool_agent_team["experimental-tool-agent-team"]
@@ -374,6 +376,7 @@ flowchart LR
   pkg_experimental_forge_session --> svc_forgeSession
   pkg_experimental_liveshare --> svc_liveshareShares
   pkg_experimental_ptc_runtime_python --> svc_ptcRuntime
+  pkg_experimental_review_gated --> svc_reviewGated
   pkg_experimental_speech_to_text --> svc_speechToText
   pkg_experimental_speech_to_text_sensevoice --> svc_speechToText
   pkg_experimental_translator --> svc_translator
@@ -553,6 +556,7 @@ flowchart LR
   svc_remoteAccess --> pkg_api_gateway
   svc_remoteAccess --> pkg_api_session_controller
   svc_remoteAccess --> pkg_api_workspace_controller
+  svc_reviewGated --> pkg_experimental_review_gated
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -742,6 +746,7 @@ flowchart LR
 | `ctx.compaction` | `seam` | [`compaction`](../packages/compaction/compaction) | [`compaction-basic`](../packages/compaction/compaction-basic) | [`compaction-basic`](../packages/compaction/compaction-basic) | - | The basic backend consumes post-step pressure and request-error recovery events; there is no model-facing compact tool. |
 | `ctx.subagents` | `seam` | [`subagent`](../packages/subagent/subagent) | [`subagent-spawn-in-process`](../packages/subagent/subagent-spawn-in-process), [`subagent-fork-in-process`](../packages/subagent/subagent-fork-in-process), [`subagent-acp`](../packages/subagent/subagent-acp), [`subagent-codex`](../packages/subagent/subagent-codex), [`subagent-claude-code`](../packages/subagent/subagent-claude-code), [`subagent-dsh-sdk`](../packages/subagent/subagent-dsh-sdk) | [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-subagent-control`](../packages/subagent/tool-subagent-control), [`tool-ralph`](../packages/experimental/tool-ralph) | - | Providers prepare local children or execute external tasks; one activation manager owns both lifecycles. The delegation tool selects a backend, control tools deliver local follow-ups, and workflows await activation results. |
 | `ctx.speechToText` | `seam` | [`experimental-speech-to-text`](../packages/experimental/speech-to-text) | [`experimental-speech-to-text-sensevoice`](../packages/experimental/speech-to-text-sensevoice) | [`experimental-api-speech-to-text`](../packages/experimental/api-speech-to-text) | - | Routes explicit recognizers; the browser uses the authenticated Remote and keeps transcripts in the draft until submission. |
+| `ctx.reviewGated` | `service` | [`experimental-review-gated`](../packages/experimental/review-gated) | - | [`experimental-review-gated`](../packages/experimental/review-gated) | - | The root service owns frozen role authorization and bounded task state; role tools and Client controls in the same package consume it. |
 | `ctx.agentTeams` | `core` | [`experimental-agent-team`](../packages/experimental/agent-team) | - | [`experimental-tool-agent-team`](../packages/experimental/tool-agent-team) | - | Owns the implicit-root roster, direct peer inbox delivery, shared task DAG, and continuable-child lifecycle; tool-agent-team contributes model controls. |
 | `ctx.claudeCodeMods` | `core` | [`experimental-claude-code-mods`](../packages/experimental/claude-code-mods) | - | - | - | Loads mods that defineMod plugins add, raises their hook chains from harness extension points, and draws the band above the prompt over its Remote. |
 | `ctx.inspector` | `core` | `inspector` | - | - | - | Owns the Worker-hosted CDP target and the transport-independent Host and Client observation and Cordis-tree query API. |

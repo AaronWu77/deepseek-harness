@@ -82,6 +82,17 @@ async function reconstructPersistedInbox(
 }
 
 describe('ReactLoopInbox', () => {
+  it('rejects missing or moved captured identities', async () => {
+    const { inbox } = await inboxAgent('inbox-captured-missing')
+    const pending = createUserMessage({ content: [{ type: 'text', text: 'pending' }], source: { kind: 'user' } })
+    expect(() => inbox.capture('next-turn', pending.id)).toThrow('exclusive admission input is missing')
+    expect(() => inbox.claimCaptured([{ target: 'next-step', message: pending }], 1))
+      .toThrow('protected claim input is missing')
+    inbox.append('next-turn', pending)
+    expect(() => inbox.claimCaptured([{ target: 'next-step', message: pending }], 1))
+      .toThrow('protected claim input is missing')
+  })
+
   it('retains inbox reads after the shared registration is released', async () => {
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())

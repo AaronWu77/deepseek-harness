@@ -1,24 +1,11 @@
 {
-  "extends": "../../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "lib/types"
-  },
-  "include": [
-    "src"
-  ],
+  "files": [],
   "references": [
     {
-      "path": "../../../vendor/cosmokit"
+      "path": "./tsconfig.host.json"
     },
     {
-      "path": "../../../vendor/cordis"
-    },
-    {
-      "path": "../../../vendor/schemastery"
-    },
-    {
-      "path": "../../core/system-prompt"
+      "path": "./tsconfig.client.json"
     }
   ]
 }

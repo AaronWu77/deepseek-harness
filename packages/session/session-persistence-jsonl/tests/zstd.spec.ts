@@ -5,7 +5,7 @@ import type { FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -592,6 +592,34 @@ describe('JsonlSessionPersistence: default Zstandard encoding', () => {
       expect(read).toHaveBeenCalledTimes(1)
     },
   )
+
+  it('refuses a flush acknowledgement for an unrepaired recovered tail', async () => {
+    const root = await freshRoot()
+    const ctx = await mount(root)
+    await ctx.plugin(SessionStore)
+    const header = meta('flush-torn', '/proj')
+    await writeLog(ctx.sessionPersistence, header, oneTurnLog())
+    const path = logPath(root, header.cwd, header.id, 'zstd')
+    const recovered: SessionEvent = { type: 'session/end-seed', seq: SessionSeq(6), time: 7, data: {} }
+    const filler = JSON.stringify({ type: 'turn/start', seq: 7, time: 8, data: { turn: 2, filler: deterministicNoise(300_000) } })
+    await appendFile(path, await tornFrame(JSON.stringify(recovered) + '\n' + filler + '\n',
+      decoded => decoded.includes('\n') && !decoded.endsWith('\n')))
+    const writer = await ctx.sessionPersistence.open(header.id, 'write')
+    const loaded = await writer.read()
+    expect(loaded.events.at(-1)).toEqual(recovered)
+    const session = Session.fromRestore(header.id, loaded.events, writer.header, SessionLogOffset(0), loaded.eventState)
+    writer.bindSession!(session)
+    const detach = ctx.sessions.enter(session)
+    ctx.sessions.announce(session)
+    try {
+      await expect(ctx.sessions.flush(session)).rejects.toThrow(/durable prefix ends at 6, before flush watermark 7/)
+      expect((await readAll(ctx.sessionPersistence, header.id)).events).toEqual(loaded.events)
+      expect(scanZstdFrames(await readFile(path)).tornStart).toBeDefined()
+    } finally {
+      detach()
+      await writer.close()
+    }
+  })
 
   it('recovers complete records from a torn final frame and rewrites them on the next append', async () => {
     const root = await freshRoot()

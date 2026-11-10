@@ -5,7 +5,7 @@ import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, sym
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { scheduler } from 'node:timers/promises'
-import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, Session, SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -372,6 +372,292 @@ runLiveWritePathContract('jsonl', LIVE_WRITE_BATCH_MAX_DELAY_MS, async () => {
     return ctx
   }
   return { ctx: await mount(), remount: mount }
+})
+
+describe('JsonlSessionPersistence: flush acknowledgement', () => {
+  it('flushes the event committed before an earlier synchronous observer calls flush', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-jsonl-ack-'))
+    dirs.push(dir)
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    const observed = Promise.withResolvers<Promise<boolean>>()
+    const prefix: SessionEvent[] = []
+    ctx.on('session/event', (session, event) => { prefix.push(event); observed.resolve(ctx.sessions.flush(session)) })
+    await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+    const session = ctx.sessions.prepare()
+    const writer = await ctx.sessionPersistence.create(session.header)
+    writer.bindSession!(session)
+    const detach = ctx.sessions.enter(session)
+    ctx.sessions.announce(session)
+    try {
+      session.append('turn/start', { turn: 1 })
+      await expect(observed.promise).resolves.toBe(true)
+      expect((await readAll(ctx.sessionPersistence, session.id)).events).toEqual(prefix)
+    } finally {
+      detach()
+      await writer.close()
+    }
+  })
+
+  it('flushes an event enqueued before a completed drain clears its single-flight', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-jsonl-ack-'))
+    dirs.push(dir)
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    const prefix: SessionEvent[] = []
+    ctx.on('session/event', (_session, event) => { prefix.push(event) })
+    await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+    const session = ctx.sessions.prepare()
+    const writer = await ctx.sessionPersistence.create(session.header) as JsonlSessionHandle
+    writer.bindSession(session)
+    const detach = ctx.sessions.enter(session)
+    ctx.sessions.announce(session)
+    try {
+      session.append('turn/start', { turn: 1 })
+      await expect(ctx.sessions.flush(session)).resolves.toBe(true)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const flushing = Promise.withResolvers<Promise<boolean>>()
+      const drainBuffered = writer['drainBuffered'].bind(writer)
+      writer['drainBuffered'] = () => {
+        writer['drainBuffered'] = drainBuffered
+        const drained = drainBuffered()
+        void drained.then(() => {
+          session.append('turn/end', { turn: 1, reason: { kind: 'interrupted' } })
+          flushing.resolve(ctx.sessions.flush(session))
+        })
+        return drained
+      }
+      const firstDrain = writer.drainLive()
+      await expect(flushing.promise).resolves.toBe(true)
+      await firstDrain
+      expect((await readAll(ctx.sessionPersistence, session.id)).events).toEqual(prefix)
+    } finally {
+      detach()
+      await writer.close()
+    }
+  })
+
+  it('joins an empty in-flight drain again when its captured watermark remains buffered', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-jsonl-ack-'))
+    dirs.push(dir)
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    const prefix: SessionEvent[] = []
+    ctx.on('session/event', (_session, event) => { prefix.push(event) })
+    await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+    const session = ctx.sessions.prepare()
+    const writer = await ctx.sessionPersistence.create(session.header) as JsonlSessionHandle
+    writer.bindSession(session)
+    const detach = ctx.sessions.enter(session)
+    ctx.sessions.announce(session)
+    const ready = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const joined = Promise.withResolvers<undefined>()
+    const drainBuffered = writer['drainBuffered'].bind(writer)
+    writer['drainBuffered'] = async () => {
+      writer['drainBuffered'] = drainBuffered
+      await drainBuffered()
+      ready.resolve(undefined)
+      await release.promise
+    }
+    const drainLive = writer.drainLive.bind(writer)
+    let calls = 0
+    vi.spyOn(writer, 'drainLive').mockImplementation(() => {
+      const result = drainLive()
+      if (++calls === 2) joined.resolve(undefined)
+      return result
+    })
+    const firstDrain = writer.drainLive()
+    try {
+      await ready.promise
+      session.append('turn/start', { turn: 1 })
+      const flushing = ctx.sessions.flush(session)
+      await joined.promise
+      release.resolve(undefined)
+      await expect(flushing).resolves.toBe(true)
+      await firstDrain
+      expect(calls).toBeGreaterThanOrEqual(3)
+      expect((await readAll(ctx.sessionPersistence, session.id)).events).toEqual(prefix)
+    } finally {
+      release.resolve(undefined)
+      await firstDrain
+      detach()
+      await writer.close()
+    }
+  })
+
+  it('rejects a bound writer missing the committed prefix', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-jsonl-ack-'))
+    dirs.push(dir)
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+    const session = ctx.sessions.create()
+    session.append('turn/start', { turn: 1 })
+    const writer = await ctx.sessionPersistence.create(session.header)
+    try {
+      writer.bindSession!(session)
+      await expect(ctx.sessions.flush(session)).rejects.toThrow(/durable prefix ends at 0, before flush watermark 1/)
+      expect((await writer.read()).events).toEqual([])
+    } finally {
+      await writer.close()
+    }
+  })
+
+  it('does not acknowledge a live session without a writer', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-jsonl-ack-'))
+    dirs.push(dir)
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+    const session = ctx.sessions.create()
+    session.append('turn/start', { turn: 1 })
+
+    await expect(ctx.sessions.flush(session)).resolves.toBe(false)
+    await expect(ctx.sessionPersistence.stat(session.id)).resolves.toBeUndefined()
+  })
+
+  it('acknowledges the exact bound writer after persisting live events', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-jsonl-ack-'))
+    dirs.push(dir)
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+    const session = ctx.sessions.prepare()
+    const writer = await ctx.sessionPersistence.create(session.header)
+    try {
+      writer.bindSession!(session)
+      writer.bindSession!(session)
+      expect(() => { writer.bindSession!(Session.create(session.id)) }).toThrow()
+      expect(() => { writer.bindSession!(Session.create(SessionId('other-id'))) }).toThrow()
+      const detach = ctx.sessions.enter(session)
+      ctx.sessions.announce(session)
+      session.append('turn/start', { turn: 1 })
+      await expect(ctx.sessions.flush(session)).resolves.toBe(true)
+      expect((await writer.read()).events.map(event => event.type)).toEqual(['turn/start'])
+      const reader = await ctx.sessionPersistence.open(session.id, 'read')
+      try {
+        expect(() => { reader.bindSession!(session) }).toThrow('not available on a read handle')
+      } finally {
+        await reader.close()
+      }
+      detach()
+    } finally {
+      await writer.close()
+    }
+  })
+
+  it('does not route or acknowledge a different Session with the same id', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-jsonl-ack-'))
+    dirs.push(dir)
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+    const owner = ctx.sessions.prepare()
+    const writer = await ctx.sessionPersistence.create(owner.header)
+    try {
+      writer.bindSession!(owner)
+      const other = ctx.sessions.create(owner.id)
+      other.append('turn/start', { turn: 1 })
+      await expect(ctx.sessions.flush(other)).resolves.toBe(false)
+      expect((await writer.read()).events).toEqual([])
+    } finally {
+      await writer.close()
+    }
+  })
+
+  it('does not acknowledge a writer bound after its flush starts', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-jsonl-ack-'))
+    dirs.push(dir)
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+    const session = ctx.sessions.create()
+    const writer = await ctx.sessionPersistence.create(session.header)
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const flush = writer.flush.bind(writer)
+    vi.spyOn(writer, 'flush').mockImplementation(async () => {
+      await flush()
+      entered.resolve(undefined)
+      await release.promise
+    })
+    const flushing = ctx.sessions.flush(session)
+    try {
+      await entered.promise
+      writer.bindSession!(session)
+      release.resolve(undefined)
+      await expect(flushing).resolves.toBe(false)
+    } finally {
+      release.resolve(undefined)
+      await flushing
+      await writer.close()
+    }
+  })
+
+  it('does not acknowledge a writer replaced while its flush settles', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-jsonl-ack-'))
+    dirs.push(dir)
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+    const session = ctx.sessions.prepare()
+    const writer = await ctx.sessionPersistence.create(session.header)
+    writer.bindSession!(session)
+    const detach = ctx.sessions.enter(session)
+    ctx.sessions.announce(session)
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const flush = writer.flush.bind(writer)
+    vi.spyOn(writer, 'flush').mockImplementation(async () => {
+      await flush()
+      entered.resolve(undefined)
+      await release.promise
+    })
+    const flushing = ctx.sessions.flush(session)
+    try {
+      await entered.promise
+      await writer.close()
+      const replacement = await ctx.sessionPersistence.open(session.id, 'write')
+      try {
+        release.resolve(undefined)
+        await expect(flushing).resolves.toBe(false)
+      } finally {
+        await replacement.close()
+      }
+    } finally {
+      release.resolve(undefined)
+      await flushing
+      detach()
+      await writer.close()
+    }
+  })
+
+  it('does not acknowledge a writer acquired after a live event was missed', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-jsonl-ack-'))
+    dirs.push(dir)
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+    const session = ctx.sessions.create()
+    session.append('turn/start', { turn: 1 })
+    const writer = await ctx.sessionPersistence.create(session.header)
+    try {
+      await expect(ctx.sessions.flush(session)).resolves.toBe(false)
+    } finally {
+      await writer.close()
+    }
+  })
 })
 
 describe('JsonlSessionPersistence: format helpers', () => {

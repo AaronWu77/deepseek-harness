@@ -73,6 +73,43 @@ interface Agent {
   readonly model: Model
   /** Agent-owned access to durable pending work. */
   readonly inbox: Inbox
+  /** Original JSON input while a claim is being saved or has an unknown outcome. Never automatically replay recovered input. */
+  readonly claimRecovery?: ClaimRecovery | null
+  /** Saving lasts until rejection or matching assistant output is flushed; unknown holds the instance. */
+  readonly claimProtectionStatus?: 'saving' | 'unknown' | null
+  /**
+   * Enable durable protection for subsequent input claims. Calling this during a step does not protect its already-claimed input.
+   * The driver flushes the original batch before pre-step and the actual user messages before model dispatch.
+   * A failed checkpoint or interrupted preparation remains unknown; pre-step model or tool side effects are not rolled back.
+   * Restored unresolved claims stay parked, with raw input available for inspection and explicit recovery in a new Session.
+   */
+  enableClaimProtection?(): void
+  /** Exclusive input admission, including process-local uncertain outcomes; absent when this driver lacks the capability. */
+  readonly exclusiveAdmission?: ExclusiveAdmissionState | null
+
+  /**
+   * Optional capability: reserve true idle, durably open admission, prepare, and commit one isolated first input.
+   * Missing capability must not be treated as admission. The callback must honor cancellation; it may continue
+   * after the returned promise rejects.
+   * Failure or cancellation holds the instance and can leave a durable open or uncertain confirmation; no rollback is promised.
+   * A confirmed first claim is flushed before model dispatch. Every restored outstanding admission remains uncertain and parked.
+   * @param owner - application attribution, not authorization.
+   * @param message - unique next-turn message reserved for the first claim.
+   * @param prepare - work run only after the open is acknowledged durable.
+   * @returns the preparation result after confirmation is acknowledged durable.
+   * @throws synchronously if the agent is not truly idle, already holds an admission, or the message identity is pending.
+   */
+  runExclusiveAdmission?<T>(owner: AdmissionOwner, message: UserMessage, prepare: (signal: AbortSignal) => Promise<T>): Promise<T>
+
+  /**
+   * Check the exact in-flight first claim during pre-step and post-pre-step dispatch. This is attribution, not authorization.
+   * The capability is absent on drivers that do not implement exclusive admission; false also covers abort and restored uncertainty.
+   * @param owner - expected admission attribution.
+   * @param messageId - expected reserved input identity.
+   * @param signal - exact signal supplied to the current pre-step.
+   * @returns whether this call observes that active first claim.
+   */
+  isExclusiveAdmissionClaim?(owner: AdmissionOwner, messageId: MessageId, signal: AbortSignal): boolean
   /** The current lifecycle state, mirrored on every `agent/status` transition. */
   readonly status: AgentStatus
   /** Agent-scoped context; its contributions are agent-local, unwind on disposal, and reject registration afterward. */
@@ -80,8 +117,9 @@ interface Agent {
 
   /**
    * Clear queued and steering work — unless `keepInbox` — and abort the active
-   * turn or between-turn task. The first cause wins for that activity. With no
-   * active activity, cancellation is a no-op and does not arm later work.
+   * turn or between-turn task. During exclusive admission or protected claim saving or uncertainty,
+   * cancellation aborts the activity but preserves the entire inbox; inspect the uncertain input before recovery.
+   * The first cause wins for that activity. With no active activity, cancellation does not arm later work.
    * @param cause - the stable caller intent carried by the active operation signal.
    * @param options - cancellation options; `keepInbox` preserves pending work.
    */
@@ -90,7 +128,8 @@ interface Agent {
   /**
    * Resolve after the current whole-agent activity reaches quiescence. This
    * follows replacement work started before the observed driver retires,
-   * but does not identify the settlement of any particular message.
+   * but does not identify the settlement of any particular message. A non-settling durability flush can
+   * delay this promise and teardown indefinitely, including after cancellation.
    * @returns fulfillment after no active driver or maintenance task remains.
    */
   whenIdle(): Promise<void>
@@ -196,6 +235,8 @@ type AssistantStreamFrame =
   }
 ```
 
+`ClaimRecovery` 保留有序的原始 JSON 输入及其认领标识，供检查使用。`ClaimWireState` 增加恢复阶段，且不进入 Session 摘要。`AdmissionOwner` 标识独占准入的归属，但不是授权凭证。
+
 `running` 描述整个驱动器的排空区间，可能跨越连续的排队轮次；它不能证明某个轮次仍然打开。dispose 会把 agent 从注册表移除并发出 `agent/disposed`；它不是一个终态 status 值。`followup()` 不返回句柄：其 `MessageId` 标识的是持久的 inbox 插入、认领与丢弃事实，而非之后的助手输出或轮次结束。`whenIdle()` 观察的是整个 agent，因此只有当调用方明确拥有从回执到空闲的这段区间时，才能把它称为一次 run（[决策](../../.agents/notes/implemented/architecture/2026-07-30-followup-enqueue-and-owned-runs.zh.md)）。
 
 ```ts type-equiv
@@ -219,6 +260,10 @@ interface AgentOptions {
 步骤准备在提示词组装前要求 `provider` 与 `model` 都存在。已弃用的 `agent/request` hook 可以更改请求控制参数，但必须保留该路由。显式 `reasoningEffort` 会为该路由的首次请求提供初始值；确切模型解析会校验该值，省略时则允许填入适配器默认值。提供 `maxTokens` 时，它必须是正安全整数，并限制每次对话模型请求的输出；省略时，系统会在写入请求 header 前填入确切模型的适配器默认值，否则提供方行为保持不变。agent 作用域的 `deployment:persona-prefix` 提示词段落可以遮蔽全局默认 persona。
 
 `AgentLoop` 在 `ctx.sessionProjections` 上注册 `modelSelection`，并通过每个 `agent.model` 实例提供选择操作。`model/selection` 记录完整选择，但不进入模型历史。匹配的请求头会清除 `pending`，最近请求仍保留为 `lastUsed`。适配器默认的推理强度会被省略，使后续请求重新解析默认值。只有尚未记录选择或请求时，`next` 才为 null，此时由 `AgentOptions` 提供路由。[Agent 模型 API](../../packages/core/agent/README.zh.md)说明选择优先级与恢复策略。
+
+`SessionModelPolicy` 记录精确的 `allowedSelections`（provider/model/可选 effort）、属于该列表的 `defaultSelection`，以及人类选择是否可更新部署默认值（`rememberDefault`）。`ctx.agents.bindModelPolicy()` 在首次模型请求前记录策略，但不选择初始模型。相同绑定具有幂等性，并保留后续选择。只有尚未启动请求的 Session 可先清除策略再重新绑定。
+
+`model/selection-policy` 事件携带 `{ policy }`；null 保留普通模型选择。恢复与 fork 从已记录历史重建授权。模型选择和请求准备会拒绝记录列表之外的选项；省略 effort 时保留适配器默认行为。首次请求后，授权不可更改。[Agent 模型 API](../../packages/core/agent/README.zh.md)负责选择与部署默认值行为。
 
 ```ts type-equiv
 /** Agent-owned access to the model choice for future steps. */
@@ -700,6 +745,38 @@ Initiator methods provide same-process causal attribution only. Ambient presence
 
 ```ts cordis-catalog
 /**
+ * Bind complete model authorization before a Session records its first request.
+ * Identical bindings are idempotent and preserve later user selections.
+ * @param agent - Agent whose Session receives the policy; this does not select its initial model.
+ * @param policy - exact allowed choices and the Session's default-persistence behavior.
+ * @throws when policy invariants fail, a different policy is already bound, or requests already exist.
+ */
+bindModelPolicy(agent: Agent, policy: SessionModelPolicy): void
+
+/**
+ * Clear authorization while a user can still change an unstarted Session's preset.
+ * @param agent - Agent whose blank Session returns to ordinary model selection.
+ * @throws when the Session has already recorded any request.
+ */
+clearModelPolicy(agent: Agent): void
+
+/**
+ * Read authorization reconstructed from the Session, including resumed or forked history.
+ * @param agent - Agent whose recorded policy is read.
+ * @returns the immutable recorded value; null preserves ordinary model selection.
+ */
+modelPolicyFor(agent: Agent): SessionModelPolicy | null
+
+/**
+ * Validate the complete final route against recorded Session authorization.
+ * Availability remains the caller's LLM-adapter check.
+ * @param agent - Agent whose Session owns authorization.
+ * @param selection - final provider/model/effort choice, including omitted effort.
+ * @throws ModelPolicyViolationError when the choice is not allowed.
+ */
+assertModelSelectionAllowed(agent: Agent, selection: Readonly<ModelSelection>): void
+
+/**
  * Read the turn and step positions recorded in a Session.
  * @param session - Session whose committed events are read.
  * @returns the current turn and step positions; do not mutate the returned value.
@@ -903,6 +980,26 @@ Types: [Scoped](scope.zh.md)
 
 Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
 
+<a id="agentclaimstatus--emit"></a>
+
+#### `agent/claim/status` — emit
+
+Protected claim durability status changed.
+
+```ts cordis-catalog
+/**
+ * Protected claim durability status changed.
+ * @param payload.agent - Agent owning the claim.
+ * @param payload.status - current durability status.
+ * @mode emit
+ */
+'agent/claim/status'(this: Scoped<Agent>, payload: { agent: Agent; status: 'saving' | 'unknown' | null }): void
+```
+
+Types: [Scoped](scope.zh.md)
+
+Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
+
 <a id="agentcreated--serial"></a>
 
 #### `agent/created` — serial
@@ -1036,6 +1133,39 @@ One message entered the live inbox.
  * @mode emit
  */
 'agent/inbox/inserted'(this: Scoped<Agent>, payload: { agent: Agent; message: UserMessage }): void
+```
+
+Types: [Scoped](scope.zh.md) · [UserMessage](session.zh.md)
+
+Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
+
+<a id="agentpost-pre-step--serial"></a>
+
+#### `agent/post-pre-step` — serial
+
+Observe or commit the final enter decision after all pre-step middleware, before step admission. Listeners run in order and must not return a bail value. A throw or cancellation stops the step; a protected claim remains unknown and requires recovery. Registered guards run in order, synchronously before each AgentLoop stream entry, after preparation and flushes. They must only read state, return undefined, and must not schedule asynchronous work. A guard failure stops that entry; prior requests and committed Session events are not rolled back. Downstream middleware and adapters are trusted to honor cancellation; this check does not guarantee authorization at network send time.
+
+```ts cordis-catalog
+/**
+ * Observe or commit the final enter decision after all pre-step middleware, before step admission.
+ * Listeners run in order and must not return a bail value. A throw or cancellation stops the step;
+ * a protected claim remains unknown and requires recovery. Registered guards run in order, synchronously
+ * before each AgentLoop stream entry, after preparation and flushes. They must only read state, return
+ * undefined, and must not schedule asynchronous work. A guard failure stops that entry; prior requests
+ * and committed Session events are not rolled back. Downstream middleware and adapters are trusted to
+ * honor cancellation; this check does not guarantee authorization at network send time.
+ * @param payload.addGuard - register a step-local guard during this dispatch only; late registration throws.
+ * @param payload.agent - the agent proposing the step.
+ * @param payload.claimedMessages - immutable snapshot of the original claimed messages.
+ * @param payload.admittedMessages - immutable snapshot of the final enter messages.
+ * @param payload.turn - the turn that will own the step.
+ * @param payload.step - the step proposed by the loop.
+ * @param payload.signal - the active turn's cancellation signal.
+ * @param payload.modelSelection - frozen selection for the step.
+ * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
+ * @mode serial
+ */
+'agent/post-pre-step'(this: Scoped<Agent>, payload: { agent: Agent; claimedMessages: readonly UserMessage[]; admittedMessages: readonly UserMessage[]; turn: number; step: number; signal: AbortSignal; modelSelection: Readonly<ModelSelection>; addGuard: (guard: () => undefined) => void }): void | Promise<void>
 ```
 
 Types: [Scoped](scope.zh.md) · [UserMessage](session.zh.md)
@@ -1179,6 +1309,24 @@ Source: [`packages/core/agent-loop/src/index.ts`](../../packages/core/agent-loop
 <a id="agent-preset-events"></a>
 
 ### `agent-preset/*` events
+
+<a id="agent-presetrecomposed--serial"></a>
+
+#### `agent-preset/recomposed` — serial
+
+Initialize consumers after a blank Agent commits its new preset, outside Session publication. A listener failure leaves the selected composition committed and rejects the selection operation.
+
+```ts cordis-catalog
+/**
+ * Initialize consumers after a blank Agent commits its new preset, outside Session publication.
+ * A listener failure leaves the selected composition committed and rejects the selection operation.
+ * @param payload - live Agent and the committed preset id.
+ * @mode serial
+ */
+'agent-preset/recomposed'(payload: { agent: Agent; agentPreset: string }): void | Promise<void>
+```
+
+Source: [`packages/preset/agent-preset-registry/src/index.ts`](../../packages/preset/agent-preset-registry/src/index.ts)
 
 <a id="agent-presetselected--emit"></a>
 

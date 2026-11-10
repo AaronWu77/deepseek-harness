@@ -17,6 +17,8 @@
  * @module @deepseek-ai/dsh-session-snapshot
  */
 
+export { materializeSdkReplayFixtureCwd } from './sdk-fixture.ts'
+
 export {
   redactSessionSnapshotIds,
 } from './identity.ts'

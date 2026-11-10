@@ -187,6 +187,8 @@ export function readWorkspaceManifests(repositoryRoot: string): WorkspaceManifes
 const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   // Tools entry points share error classes and invocation stages through runtime chunks.
   '@deepseek-ai/dsh-tools': ['lib/pipeline.js', 'lib/shared-*.js'],
+  // RG settings and role entries share their error and handoff validation module.
+  '@deepseek-ai/dsh-experimental-review-gated': ['lib/role.js', 'lib/errors-*.js'],
   // The embedded OAR implementation retains its upstream license.
   '@deepseek-ai/dsh-experimental-subagent-oar': ['LICENSE-OAR'],
   // CUA publishes its client API and attributed native source for local macOS builds.

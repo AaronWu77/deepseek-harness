@@ -892,7 +892,7 @@ resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult>
 @Remote('create') create(request: SessionCreateRequest): Promise<SessionCreateValue>
 
 /**
- * Select one Session-local model after explicitly resuming the Session; save the default in the background.
+ * Select one Session-local model after explicitly resuming it; remember the default only when its policy permits.
  * @param request - Session identity and requested model selection.
  * @returns the normalized selection installed for the Session, without waiting for default persistence.
  */
@@ -1189,8 +1189,8 @@ announce(session: Session): void
  * rather than dispatch a raw `ctx.parallel('session/flush', …)` — one owner
  * and one spelling.
  * @param session - the session whose buffered events must reach durable storage.
- * @returns whether at least one durability listener participated, after every
- *   listener has settled successfully.
+ * @returns whether at least one listener acknowledged durability, after every
+ *   listener has settled successfully. A void observer does not acknowledge it.
  * @throws the first registered listener failure after every listener settles.
  */
 async flush(session: Session): Promise<boolean>
@@ -1412,20 +1412,22 @@ Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/i
 
 #### `session/flush` — parallel
 
-Awaited parallel durability checkpoint: every listener runs and the caller awaits all of them, with no waterfall veto. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`) reuses the session's owner scope.
+Awaited parallel durability checkpoint: every listener runs and the caller awaits all of them, with no waterfall veto. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`) reuses the session's owner scope. A persistence listener returns `SESSION_FLUSH_DURABLE` only after durably storing this Session; observers return void.
 
 ```ts cordis-catalog
 /**
  * Awaited parallel durability checkpoint: every listener runs and the
  * caller awaits all of them, with no waterfall veto. Scope-filtered dispatch
- * (`@deepseek-ai/dsh-scope`) reuses the session's owner scope.
+ * (`@deepseek-ai/dsh-scope`) reuses the session's owner scope. A persistence
+ * listener returns `SESSION_FLUSH_DURABLE` only after durably storing this
+ * Session; observers return void.
  * @param session - the session whose buffered events must reach durable storage.
  * @mode parallel
  */
-'session/flush'(this: Scoped<Session>, session: Session): Promise<void> | void
+'session/flush'(this: Scoped<Session>, session: Session): Promise<void | typeof SESSION_FLUSH_DURABLE> | void | typeof SESSION_FLUSH_DURABLE
 ```
 
-Types: [Scoped](scope.zh.md)
+Types: [SESSION_FLUSH_DURABLE](persistence.zh.md) · [Scoped](scope.zh.md)
 
 Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/index.ts)
 <!-- END GENERATED cordis-surface -->

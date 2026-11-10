@@ -46,6 +46,7 @@ import {
   tokenizeSessionFixtureCwd,
   writesCurrentSessionFixtures,
   materializeProfilePatch,
+  materializeSdkReplayFixtureCwd,
   formatSystemPromptSnapshot,
   formatToolSchemasSnapshot,
   latestPersistedSessionPaths,
@@ -438,7 +439,8 @@ async function hydrateReplayFixtures(scenario: CorpusScenario, cwd: string): Pro
   await mkdir(root, { recursive: true })
   return Promise.all((await fixtureFiles(scenario)).map(async (source) => {
     const destination = join(root, basename(source))
-    await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', cwd))
+    const fixture = materializeSdkReplayFixtureCwd(await readFile(source, 'utf8'), cwd)
+    await writeFile(destination, fixture)
     return destination
   }))
 }

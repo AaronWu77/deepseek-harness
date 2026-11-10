@@ -85,7 +85,7 @@ session.deriveMessages()         // the derived model history
 
 ### 刷新持久状态
 
-`ctx.sessions.flush(session)` 分发需等待完成的持久性检查点：每个持久化监听器都会刷新，调用在所有监听器结算后完成。需要立即持久性屏障的生产方应等待它，而不是假定延后写入已经排空。
+`ctx.sessions.flush(session)` 等待全部作用域内的 flush 监听器，只有监听器通过 `SESSION_FLUSH_DURABLE` 明确确认该精确 Session 已持久化时才返回 `true`。观察者不返回确认；`false` 表示没有写入器确认检查点。需要持久化的生产方必须检查返回值并处理拒绝。
 
 -----
 

@@ -6,8 +6,11 @@
   en: 9d48a27a49585a3d
   zh: 89da32c8a16c290a
 /subagents/capabilities-and-activation-requests:
-  en: 8c92b131f67997f6
-  zh: c2dc606a0859420c
+  en: e8e62a124e180b7c
+  zh: 07ccab43d1c30bed
+/subagents/admission-and-model-authorization:
+  en: f6290c8147a10757
+  zh: 8002f4503478dfd1
 /subagents/local-children-and-activations:
   en: 6f87231d18d82916
   zh: 9f064b23058f8766

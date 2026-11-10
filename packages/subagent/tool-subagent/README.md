@@ -92,6 +92,10 @@ This section explains how the tool mirrors provider lifecycle and settles runs; 
 
 One instance is one provider plus one tool name. The plugin registers its definition in the owning composition while the provider is present and disposes it when the provider leaves. Each preset revision owns one shared registration, including tools with preset selection. Agents inherit its definitions; switching presets changes scope ancestry without reinstalling tools. Discovery belongs to the instance configured with `modelDiscovery` and reads the same durable Session policy as the delegation executor. A numeric `maxDepth` or configured LLM selection unsupported by the provider fails the mount. Multiple distinctly named delegation tools may expose model selection in one scope.
 
+### Composition-owned authorization
+
+A composition can call `ctx.subagentModelSelection.registerSource({ name, resolve })` on the Host settings service. `resolve(agent)` supplies a non-empty exact route list for a matching fresh root Agent or returns `undefined` to abstain; it may await composition preparation. One matching source replaces the global preference for that new Session only, without editing the preference. Multiple matching sources, empty route lists, or source changes during resolution reject Agent creation. Registration is effect-owned and returns its disposer. Child Sessions inherit the parent's recorded policy, and restored or seeded Sessions never sample sources again. Selecting another preset on an already created blank Session does not resample authorization.
+
 ### Activation ownership
 
 The tool calls `ctx.subagents.startActivation()` with parent delivery selected. The runtime owns startup cancellation, execution, outcome reporting, and cleanup. A startup failure is an errored tool result; failures after publication arrive through the completion notice, with diagnostics and partial output preserved by the runtime.

@@ -51,6 +51,8 @@ kind: "package-reference"
 
 ### 一次委派会做什么
 
+程序调用方可在 `startActivation()` 中选择 `lifecycle: 'one-shot'`，创建拒绝后续输入与冷恢复的全新本地子级。省略生命周期时保留可续接的 spawn 行为。两种生命周期均支持独立 preset、子级模型选项与结构化输出；one-shot 调用方取消信号在发布后持续绑定，直到清理完成。所选 preset 保留自己的工具执行器，包括 PTC。
+
 一次工具调用创建后台子 agent 并立即返回子会话 ID。子级在自己的会话中工作，父级通过完成通知收到其最终答案。子级也可以通过 `send_message` 发送消息。被拒绝的启动不会留下已发布的子 agent；工作流等程序调用方可以直接等待 activation 的结果。
 
 显式 `agentPreset` 独立选择当前注册的 preset；省略时加入父方的活跃代际。只有 spawn 支持此选择。persona 与工具放在 [preset 定义](../../preset/agent-preset-registry/README.zh.md)中。冷恢复遵守共享的[子级组装规则](../subagent/README.zh.md#restoring-child-composition)。
@@ -67,17 +69,17 @@ kind: "package-reference"
 
 ### 设计理念
 
-本后端注册提供方并准备全新子会话。`dsh-subagent` 拥有 activation 的深度检查、子 agent 创建、preset 组装、结构化输出、结果收集及资源释放；发布前的调用方信号取消创建，发布后的句柄通过 `dispose()` 取消并等待完全停稳。
+本后端注册提供方并准备全新子会话。`dsh-subagent` 拥有 activation 的深度检查、子 agent 创建、preset 组装、结构化输出、结果收集及资源释放；调用方信号取消发布前的创建，并持续绑定显式 one-shot 执行；`dispose()` 取消任一生命周期并等待完全停稳。
 
 ### 源码地图
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | 提供方注册：`Config` schema、能力声明、`prepareContinuable()` |
+| [`src/index.ts`](src/index.ts) | 提供方注册：`Config` schema、能力声明、全新本地准备 |
 
 ### 运行流程
 
-`startActivation()` 解析提供方并调用 `prepareContinuable()`，随后创建并发布子 agent。每次 activation 单独安装结构化输出。调用方可以等待 `result`，并通过 `dispose()` 等待整个子树完全停稳。
+`startActivation()` 解析提供方，选择可续接或显式 one-shot 准备，随后创建并发布子 agent。每次 activation 单独安装结构化输出。调用方可以等待 `result`，并通过 `dispose()` 等待整个子树完全停稳。
 
 ### 所有权与作用域
 

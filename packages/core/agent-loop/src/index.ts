@@ -34,6 +34,8 @@ import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persis
 import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { ReactLoopAgent } from './agent.ts'
 import { inboxProjectionDefinition } from './inbox.ts'
+import { admissionProjectionDefinition, type AdmissionProjection } from './admission.ts'
+import { claimProjectionDefinition, type ClaimProjection } from './claim.ts'
 import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'
 import type {} from './runtime-context.ts'
 
@@ -313,6 +315,8 @@ export class AgentLoop extends Service implements AgentFactory {
   private readonly runtime: { ctx: Context }
   private modelProjectionHandle!: ProjectionHandle<ModelSelectionProjectionState>
   private inboxProjectionHandle!: ProjectionHandle<InboxState>
+  private admissionProjectionHandle!: ProjectionHandle<AdmissionProjection | null>
+  private claimProjectionHandle!: ProjectionHandle<ClaimProjection>
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'agentLoop')
@@ -333,6 +337,8 @@ export class AgentLoop extends Service implements AgentFactory {
     ctx.effect(() => () => ownership.dispose(), 'agentLoop.transactions()')
     this.modelProjectionHandle = await ctx.sessionProjections.register(modelSelectionProjectionDefinition)
     this.inboxProjectionHandle = await ctx.sessionProjections.register(inboxProjectionDefinition)
+    this.admissionProjectionHandle = await ctx.sessionProjections.register(admissionProjectionDefinition)
+    this.claimProjectionHandle = await ctx.sessionProjections.register<'agentClaim', ClaimProjection>(claimProjectionDefinition)
     ctx.effect(() => ctx.agents.setFactory(this), 'agentLoop.setFactory()')
     ctx.systemPrompt.variable('provider', context => context.modelSelection?.provider ?? context.agent?.options.provider)
     ctx.systemPrompt.variable('model', context => context.modelSelection?.model ?? context.agent?.options.model)
@@ -568,6 +574,8 @@ export class AgentLoop extends Service implements AgentFactory {
       const projections = {
         modelSelection: this.modelProjectionHandle.readerFor(session),
         inbox: this.inboxProjectionHandle.readerFor(session),
+        admission: this.admissionProjectionHandle.readerFor(session),
+        claim: this.claimProjectionHandle.readerFor(session),
       }
       unfollowOwner = ownerCtx.effect(function* () {
         const created = machine = new ReactLoopAgent(
@@ -618,12 +626,13 @@ export class AgentLoop extends Service implements AgentFactory {
       const agent = machine
       assertLive()
 
-      return await agent.runMaintenance(async () => {
+      const handle = await agent.runMaintenance(async () => {
         publication = Promise.withResolvers<void>()
         try {
           assertLive()
           await this.appendUnstoredSuffix(stored, session)
           assertLive()
+          stored?.handle.bindSession?.(session)
           detachSession = agent.ctx.sessions.enter(session)
           agent.ctx.sessions.announce(session)
           assertLive()
@@ -647,6 +656,7 @@ export class AgentLoop extends Service implements AgentFactory {
           publication = undefined
         }
       })
+      return handle
     } catch (error: unknown) {
       await dispose().catch((_disposeError: unknown) => {
         // Initialization failure remains primary after cleanup reaches quiescence.
@@ -722,6 +732,9 @@ export class AgentLoop extends Service implements AgentFactory {
     }))
     const published = (async () => {
       using ownedPreparation = preparation
+      // Validate the inherited cut before creating a durable child.
+      this.admissionProjectionHandle.stateOf(ownedPreparation.session)
+      this.claimProjectionHandle.stateOf(ownedPreparation.session)
       // raceAbortCall closes a handle that finishes creating after cancellation.
       const stored = options.signal === undefined
         ? await this.createStoredSession(ownedPreparation.session)

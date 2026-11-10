@@ -1,5 +1,7 @@
 # RG is opt-in. Existing presets and Host permission policy remain unchanged.
 - insert:
+    - id: rg-settings
+      name: '@deepseek-ai/dsh-experimental-review-gated'
     - id: preset-rg-worker
       name: '@deepseek-ai/dsh-agent-preset'
       config:
@@ -17,7 +19,11 @@
                 Complete the parent's bounded implementation or investigation task. Follow the original user requirements, acceptance criteria, assigned scope, and existing safety and plan-mode instructions. Ask the parent about missing requirements; do not invent approval or silently expand the task.
                 You share the workspace with the parent and other agents. Coordinate changes through the parent, preserve unrelated work, and do not overwrite another agent's changes. Do not delegate further by default; report missing capacity or expertise to the parent.
                 Inspect the actual implementation, make focused changes when authorized, and run relevant validation. A failed command may have partial effects: report them and inspect state before retrying. Never claim tests or changes you did not perform.
-                Return a concise report with Outcome (completed, partial, or blocked), Scope and actual changes, Validation commands and observed results, and Remaining issues or unverified areas. Completion is a worker report, not independent review or authorization to deliver.
+                Return the formal structured worker report through the PTC SDK. Completion is a worker report, not independent review or authorization to deliver.
+          - id: rg-role
+            name: '@deepseek-ai/dsh-experimental-review-gated/role'
+            config:
+              role: worker
           - id: rg-tools
             name: cordis:group
             group: true
@@ -36,6 +42,8 @@
                 disabled: !!js process.platform !== 'win32'
               - id: tool-fs
                 name: '@deepseek-ai/dsh-tool-fs'
+                config:
+                  applyPatch: false
               - id: tool-fs-search
                 name: '@deepseek-ai/dsh-tool-fs-search'
                 config:
@@ -98,8 +106,6 @@
                 config:
                   - id: tool-subagent-control
                     name: '@deepseek-ai/dsh-tool-subagent-control'
-                  - id: tool-subagent-list-agents
-                    name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
               - id: tool-ask-user
                 name: '@deepseek-ai/dsh-tool-ask-user'
               - id: tool-todo
@@ -111,10 +117,8 @@
                 config:
                   fetch: true
                   searchTimeoutMs: 60000
-              - id: tool-presentation
-                name: '@deepseek-ai/dsh-agent-tool-presentation'
-                config:
-                  mode: ptc
+              - id: tool-executor-ptc
+                name: '@deepseek-ai/dsh-tool-executor-ptc'
               - id: present
                 name: '@deepseek-ai/dsh-tool-present'
               - id: tool-plugin-manager
@@ -140,7 +144,11 @@
                 Review the actual result against the original user requirements and acceptance criteria. Inspect relevant files and changes independently; a worker summary is a starting point, not evidence that the work is correct. Identify your inspected scope and state, validation evidence, and unverified areas.
                 Default to inspection, not editing. Do not modify files, fix findings, or run commands expected to alter the workspace unless the parent explicitly authorizes that work. This is a behavioral instruction, not a restricted tool set. Existing safety, permission, approval, and plan-mode rules still apply. If an inspection unexpectedly changes files, immediately report the actual changes and do not treat them as already reviewed.
                 Do not delegate further by default. Report concrete defects, missing requirements, regressions, and meaningful validation gaps. Each blocking finding needs a location, impact, and evidence; do not block on personal style preferences or speculative concerns without evidence. Do not manufacture findings to justify the review.
-                Return a concise report with Verdict (pass, changes requested, or inconclusive), Inspected scope and state, Blocking findings with evidence, Non-blocking suggestions, and Validation evidence and unverified areas. Missing essential context or evidence requires an inconclusive verdict, not a pass. A pass applies only to the inspected work; later changes require reassessment.
+                Return the formal structured reviewer report through the PTC SDK. Missing evidence requires an inconclusive verdict, not a pass. A pass applies only to the inspected work; later changes require reassessment.
+          - id: rg-role
+            name: '@deepseek-ai/dsh-experimental-review-gated/role'
+            config:
+              role: reviewer
           - id: rg-tools
             name: cordis:group
             group: true
@@ -159,6 +167,8 @@
                 disabled: !!js process.platform !== 'win32'
               - id: tool-fs
                 name: '@deepseek-ai/dsh-tool-fs'
+                config:
+                  applyPatch: false
               - id: tool-fs-search
                 name: '@deepseek-ai/dsh-tool-fs-search'
                 config:
@@ -221,8 +231,6 @@
                 config:
                   - id: tool-subagent-control
                     name: '@deepseek-ai/dsh-tool-subagent-control'
-                  - id: tool-subagent-list-agents
-                    name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
               - id: tool-ask-user
                 name: '@deepseek-ai/dsh-tool-ask-user'
               - id: tool-todo
@@ -234,10 +242,8 @@
                 config:
                   fetch: true
                   searchTimeoutMs: 60000
-              - id: tool-presentation
-                name: '@deepseek-ai/dsh-agent-tool-presentation'
-                config:
-                  mode: ptc
+              - id: tool-executor-ptc
+                name: '@deepseek-ai/dsh-tool-executor-ptc'
               - id: present
                 name: '@deepseek-ai/dsh-tool-present'
               - id: tool-plugin-manager
@@ -277,6 +283,8 @@
                 disabled: !!js process.platform !== 'win32'
               - id: tool-fs
                 name: '@deepseek-ai/dsh-tool-fs'
+                config:
+                  applyPatch: false
               - id: tool-fs-search
                 name: '@deepseek-ai/dsh-tool-fs-search'
                 config:
@@ -339,8 +347,6 @@
                 config:
                   - id: tool-subagent-control
                     name: '@deepseek-ai/dsh-tool-subagent-control'
-                  - id: tool-subagent-list-agents
-                    name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
               - id: tool-ask-user
                 name: '@deepseek-ai/dsh-tool-ask-user'
               - id: tool-todo
@@ -352,10 +358,8 @@
                 config:
                   fetch: true
                   searchTimeoutMs: 60000
-              - id: tool-presentation
-                name: '@deepseek-ai/dsh-agent-tool-presentation'
-                config:
-                  mode: ptc
+              - id: tool-executor-ptc
+                name: '@deepseek-ai/dsh-tool-executor-ptc'
               - id: present
                 name: '@deepseek-ai/dsh-tool-present'
               - id: tool-plugin-manager
@@ -364,19 +368,7 @@
               - id: tool-plugin-market
                 name: '@deepseek-ai/dsh-plugin-market/tools'
                 disabled: true
-          - id: rg-coordination
-            name: '@deepseek-ai/dsh-experimental-review-gated'
+          - id: rg-role
+            name: '@deepseek-ai/dsh-experimental-review-gated/role'
             config:
-              maxReviewRounds: 2
-          - id: rg-worker
-            name: '@deepseek-ai/dsh-tool-subagent'
-            config:
-              provider: spawn
-              toolName: rg_worker
-              agentPreset: rg-worker
-          - id: rg-reviewer
-            name: '@deepseek-ai/dsh-tool-subagent'
-            config:
-              provider: spawn
-              toolName: rg_reviewer
-              agentPreset: rg-reviewer
+              role: main

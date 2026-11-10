@@ -92,6 +92,10 @@ kind: "package-reference"
 
 一个实例对应一个提供方和一个工具名。插件在提供方存在时向所属组合注册定义，并在提供方离开时释放它。每个 preset 代际拥有一份共享注册，配置了 preset 选择的工具也相同。Agent 继承其定义；切换 preset 只改变作用域的继承关系，不重新安装工具。发现工具属于配置了 `modelDiscovery` 的实例，与委派执行器读取同一份持久 Session 策略。提供方不支持的数字 `maxDepth` 或配置的 LLM 选择会使挂载失败。同一作用域中可以有多个名称不同的委派工具公开模型选择。
 
+### 组合拥有的授权
+
+组合可在 Host 设置服务上调用 `ctx.subagentModelSelection.registerSource({ name, resolve })`。`resolve(agent)` 为匹配的全新根 Agent 提供非空的精确路由列表，或返回 `undefined` 表示不适用；它可以等待组合准备完成。唯一匹配的来源仅为该新 Session 取代全局偏好，不修改偏好本身。多个来源同时匹配、路由列表为空或解析期间来源变更，都会使 Agent 创建失败。注册由 effect 持有，并返回其 disposer。子 Session 继承父级已记录策略，恢复或带种子的 Session 不会重新读取来源。在已经创建的空白 Session 上切换 preset 不会重新读取授权。
+
 ### Activation 所有权
 
 工具调用 `ctx.subagents.startActivation()`，并选择向父任务交付。运行时拥有启动取消、执行、结果汇报与清理。启动失败产生出错的工具结果；发布后的失败通过完成通知到达，运行时保留诊断和部分输出。

@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "roots": [
+    {"key":"event:review-gated/git-state","kind":"event","event":"review-gated/git-state","surface":false,"digest":"e46a4172a641805a1709cdb2eefcd3abd86b05d95126f04b485bcb8eb1927c97"}
+  ],
+  "types": [],
+  "nodes": {
+    "05a2796621b1ee6c": {"kind":"literal","value":"unknown"},
+    "0657d3ca5ac4e7bf": {"kind":"primitive","type":"number"},
+    "0e49f935b3894d4b": {"kind":"literal","value":"review-gated/git-state"},
+    "132dacf1315972bd": {"kind":"object","properties":[{"name":"state","type":"393c59f52d20a919","optional":false},{"name":"version","type":"f88f1b7b6bb733f6","optional":false}],"indices":[]},
+    "1c41d41537f51a2e": {"kind":"literal","value":"authorized"},
+    "1d2474478f1ba85e": {"kind":"object","properties":[{"name":"branch","type":"799231ac91869a66","optional":false},{"name":"commonDir","type":"4cd48f3e5108bd6e","optional":false},{"name":"gitDir","type":"4cd48f3e5108bd6e","optional":false},{"name":"headOid","type":"4cd48f3e5108bd6e","optional":false},{"name":"linkedWorktree","type":"aa93010d0e521ad7","optional":false},{"name":"root","type":"4cd48f3e5108bd6e","optional":false},{"name":"treeOid","type":"4cd48f3e5108bd6e","optional":false}],"indices":[]},
+    "21dbbe7d4980883f": {"kind":"literal","value":"preparing"},
+    "26ffd81e8faa3d87": {"kind":"literal","value":"reviewing"},
+    "393c59f52d20a919": {"kind":"union","types":["71d8e8989fa0b729","938f7c7357bc403e"]},
+    "3eb3d73317d1d29a": {"kind":"object","properties":[{"name":"candidateId","type":"799231ac91869a66","optional":false},{"name":"checkout","type":"46ac6032ac8f0b83","optional":false},{"name":"checkoutName","type":"4cd48f3e5108bd6e","optional":false},{"name":"role","type":"c07d783519ca10cc","optional":false},{"name":"runId","type":"4cd48f3e5108bd6e","optional":false}],"indices":[]},
+    "42af5a862017cc7c": {"kind":"union","types":["938f7c7357bc403e","963a6260503fffa3"]},
+    "46ac6032ac8f0b83": {"kind":"union","types":["1d2474478f1ba85e","938f7c7357bc403e"]},
+    "49526cd5a365c280": {"kind":"union","types":["3eb3d73317d1d29a","938f7c7357bc403e"]},
+    "4cd48f3e5108bd6e": {"kind":"primitive","type":"string"},
+    "59274ed0638cfcd5": {"kind":"literal","value":"worker"},
+    "69d238a6e9b08d67": {"kind":"literal","value":"interrupted"},
+    "71d8e8989fa0b729": {"kind":"object","properties":[{"name":"binding","type":"49526cd5a365c280","optional":false},{"name":"candidate","type":"42af5a862017cc7c","optional":false},{"name":"configurationHash","type":"4cd48f3e5108bd6e","optional":false},{"name":"diagnostic","type":"799231ac91869a66","optional":false},{"name":"scope","type":"93c33d9687613293","optional":false},{"name":"source","type":"1d2474478f1ba85e","optional":false},{"name":"status","type":"92c90d3ade4e9bd4","optional":false},{"name":"taskId","type":"4cd48f3e5108bd6e","optional":false},{"name":"workspace","type":"46ac6032ac8f0b83","optional":false},{"name":"worktreeName","type":"4cd48f3e5108bd6e","optional":false}],"indices":[]},
+    "799231ac91869a66": {"kind":"union","types":["4cd48f3e5108bd6e","938f7c7357bc403e"]},
+    "8b3ba8e5d4ad5966": {"kind":"literal","value":"candidate"},
+    "8d0cc4a8fd38b61c": {"kind":"literal","value":"reviewer"},
+    "92c90d3ade4e9bd4": {"kind":"union","types":["05a2796621b1ee6c","1c41d41537f51a2e","21dbbe7d4980883f","26ffd81e8faa3d87","69d238a6e9b08d67","8b3ba8e5d4ad5966","977e13685c6ff1e3","9ba02f71d18b7d57","b57a2889408de36e"]},
+    "938f7c7357bc403e": {"kind":"primitive","type":"null"},
+    "93c33d9687613293": {"kind":"array","element":"4cd48f3e5108bd6e"},
+    "963a6260503fffa3": {"kind":"object","properties":[{"name":"baseOid","type":"4cd48f3e5108bd6e","optional":false},{"name":"headOid","type":"4cd48f3e5108bd6e","optional":false},{"name":"id","type":"4cd48f3e5108bd6e","optional":false},{"name":"inspection","type":"1d2474478f1ba85e","optional":false},{"name":"scope","type":"93c33d9687613293","optional":false},{"name":"scopeIdentity","type":"4cd48f3e5108bd6e","optional":false},{"name":"treeOid","type":"4cd48f3e5108bd6e","optional":false},{"name":"validation","type":"93c33d9687613293","optional":false},{"name":"workerRunId","type":"4cd48f3e5108bd6e","optional":false}],"indices":[]},
+    "977e13685c6ff1e3": {"kind":"literal","value":"finalizing"},
+    "9ba02f71d18b7d57": {"kind":"literal","value":"working"},
+    "aa93010d0e521ad7": {"kind":"primitive","type":"boolean"},
+    "b57a2889408de36e": {"kind":"literal","value":"failed"},
+    "c07d783519ca10cc": {"kind":"union","types":["59274ed0638cfcd5","8d0cc4a8fd38b61c"]},
+    "dacf3d5f3e4ff619": {"kind":"literal","value":true},
+    "e46a4172a641805a": {"kind":"object","properties":[{"name":"data","type":"132dacf1315972bd","optional":false},{"name":"ignorable","type":"dacf3d5f3e4ff619","optional":true},{"name":"seq","type":"0657d3ca5ac4e7bf","optional":false},{"name":"time","type":"0657d3ca5ac4e7bf","optional":false},{"name":"type","type":"0e49f935b3894d4b","optional":false}],"indices":[]},
+    "f88f1b7b6bb733f6": {"kind":"literal","value":1}
+  }
+}

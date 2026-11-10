@@ -37,6 +37,7 @@ import {
 import SessionProjectionCache from '../src/index.ts'
 import { checkpointRecord, projectionCacheDomainSpec } from '../src/spec.ts'
 import type { CheckpointRecord } from '../src/spec.ts'
+import { installTestPersistence } from './fake-persistence.ts'
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
@@ -135,6 +136,7 @@ interface HarnessOptions {
   root?: string
   config?: { writeEveryEvents: number; writeIntervalMs: number }
   stateVersion?: number
+  acknowledgeLive?: boolean
 }
 
 const contexts: Context[] = []
@@ -151,6 +153,7 @@ async function harness(options: HarnessOptions = {}) {
   await ctx.plugin({ name: storageJsonName, inject: storageJsonInject, apply: storageJsonApply, Config: storageJsonConfig }, { root })
   await ctx.plugin({ name: storageDomainName, inject: storageDomainInject, apply: storageDomainApply, Config: storageDomainConfig }, { backend: 'json' })
   await ctx.plugin(SessionStore)
+  if (options.acknowledgeLive !== false) installTestPersistence(ctx)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.sessionProjections.register(marksUnit(options.stateVersion))
   const fiber = await ctx.plugin(SessionProjectionCache, options.config ?? { writeEveryEvents: 100, writeIntervalMs: 60_000 })
@@ -231,6 +234,15 @@ afterEach(async () => {
 })
 
 describe('SessionProjectionCache write policy', () => {
+  it('refuses to publish a live cache cut without a durable Session writer', async () => {
+    const { ctx, root, cache } = await harness({ acknowledgeLive: false })
+    ctx.on('session/flush', () => {})
+    const session = ctx.sessions.create(SessionId('cache-no-writer'))
+    mark(session, ['unsaved'])
+    await expect(cache.write(session)).rejects.toMatchObject({ code: 'SESSION_CHECKPOINT_UNAVAILABLE' })
+    expect(await storedRecord(root, session.id)).toBeUndefined()
+  })
+
   it('writes a durable checkpoint at turn/end (mandatory point)', async () => {
     const { ctx, root } = await harness()
     // The interval cannot substitute for the mandatory turn/end trigger.
@@ -444,6 +456,7 @@ describe('SessionProjectionCache write policy', () => {
     await ctx.plugin({ name: storageJsonName, inject: storageJsonInject, apply: storageJsonApply, Config: storageJsonConfig }, { root })
     await ctx.plugin({ name: storageDomainName, inject: storageDomainInject, apply: storageDomainApply, Config: storageDomainConfig }, { backend: 'json' })
     await ctx.plugin(SessionStore)
+    installTestPersistence(ctx)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.sessionProjections.register(marksUnit())
     await ctx.plugin(SessionProjectionCache, { writeEveryEvents: 100, writeIntervalMs: 60_000 })
@@ -902,6 +915,7 @@ describe('SessionProjectionCache cold-read seeding', () => {
     await ctx.plugin({ name: storageJsonName, inject: storageJsonInject, apply: storageJsonApply, Config: storageJsonConfig }, { root })
     await ctx.plugin({ name: storageDomainName, inject: storageDomainInject, apply: storageDomainApply, Config: storageDomainConfig }, { backend: 'json' })
     await ctx.plugin(SessionStore)
+    installTestPersistence(ctx)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.sessionProjections.register(marksUnit())
     await ctx.plugin(SessionProjectionCache, { writeEveryEvents: 100, writeIntervalMs: 60_000 })

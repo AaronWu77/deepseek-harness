@@ -4,7 +4,7 @@
  * Session's durable selection projection, then submit through the same
  * selectModel call. A switch made in either entry updates this shared state.
  */
-import type { ModelSelectionProjection } from '@deepseek-ai/dsh-agent/types'
+import type { ModelSelectionProjection, SessionModelPolicy } from '@deepseek-ai/dsh-agent/types'
 import type { TrackProductEvent } from '@deepseek-ai/dsh-client-product-analytics/client'
 import type {
   ModelCatalogFailure, ModelProviderGroup, ModelSelection,
@@ -19,6 +19,8 @@ import type { ModelCatalogDirectory } from './catalog.ts'
 export interface ModelDirectoryState {
   /** Saved selection, retained even when its provider or model leaves the catalog. */
   current: ModelSelection | null
+  /** Frozen Session choices; absence retains ordinary model and effort selection. */
+  policy?: SessionModelPolicy
   /** Saved effort caption retained when the selected model is unavailable. */
   retainedEffort?: string
   /** Whether the current selection is present in the available catalog; null while unresolved. */
@@ -33,6 +35,8 @@ export interface ModelDirectoryState {
   pending: ModelSelection | null
   /** Whole-request or selection failure text; null when none. */
   error: string | null
+  /** Structured selection refusal, when the failure came from the Host. */
+  errorCode?: string
 }
 
 /** One session's shared directory controller; disposed with the session scope. */
@@ -47,6 +51,7 @@ export class ModelDirectory {
   private disposed = false
   private readonly unsubscribeCatalog: () => void
   private readonly unsubscribeSelection: () => void
+  private readonly unsubscribePolicy: (() => void) | undefined
 
   /**
    * @param sessions - the session wire face (captured from the plugin's root connection).
@@ -65,9 +70,11 @@ export class ModelDirectory {
     private readonly projected: ObservableSnapshot<unknown>,
     private readonly isBlank: () => boolean,
     private readonly track?: TrackProductEvent,
+    private readonly policy?: ObservableSnapshot<unknown>,
   ) {
     this.unsubscribeCatalog = catalog.store.subscribe(() => { this.syncInputs() })
     this.unsubscribeSelection = projected.subscribe(() => { this.syncInputs() })
+    this.unsubscribePolicy = policy?.subscribe(() => { this.syncInputs() })
     this.syncInputs()
   }
 
@@ -95,7 +102,7 @@ export class ModelDirectory {
     const previousEffort = previous?.reasoningEffort ?? (previous === null ? undefined : this.catalog.reasoningFor(previous)?.defaultEffort)
     const nextEffort = selection.reasoningEffort ?? this.catalog.reasoningFor(selection)?.defaultEffort
     const generation = ++this.generation
-    this.store.update((s) => { s.status = 'selecting'; s.pending = selection; s.error = null })
+    this.store.update((s) => { s.status = 'selecting'; s.pending = selection; s.error = null; delete s.errorCode })
     const result = await this.sessions.selectModel({
       sessionId: this.sessionId,
       provider: selection.provider,
@@ -112,6 +119,7 @@ export class ModelDirectory {
         s.status = 'error'
         s.pending = null
         s.error = `${result.error.code}: ${result.error.message}`
+        s.errorCode = result.error.code
       })
       return result
     }
@@ -123,7 +131,7 @@ export class ModelDirectory {
         ...this.isBlank() ? {} : { session_id: this.sessionId }, model_name: to, switch_from: previousEffort ?? 'default', switch_to: nextEffort ?? 'default',
       })
     }
-    this.store.update((s) => { s.status = 'ready'; s.pending = null; s.error = null })
+    this.store.update((s) => { s.status = 'ready'; s.pending = null; s.error = null; delete s.errorCode })
     this.syncInputs()
     return { ok: true, value: undefined }
   }
@@ -138,6 +146,7 @@ export class ModelDirectory {
       if (state.status === 'selecting') state.status = 'idle'
       state.pending = null
       state.error = null
+      delete state.errorCode
     })
     this.syncInputs()
   }
@@ -147,6 +156,7 @@ export class ModelDirectory {
     this.disposed = true
     this.unsubscribeSelection()
     this.unsubscribeCatalog()
+    this.unsubscribePolicy?.()
   }
 
   private assertAvailable(): void {
@@ -159,7 +169,15 @@ export class ModelDirectory {
     if (this.disposed) return
     const catalog = this.catalog.store.getSnapshot()
     const projected = modelSelectionProjection(this.projected.getSnapshot())
-    const intended = projected?.next ?? catalog.value?.default
+    const policy = this.policy?.getSnapshot() as SessionModelPolicy | null | undefined
+    const groups = policy == null ? catalog.value?.groups ?? [] : (catalog.value?.groups ?? []).flatMap((group) => {
+      const models = group.models.filter(model => policy.allowedSelections.some(choice =>
+        choice.provider === group.id && choice.model === model.id))
+      return models.length === 0 ? [] : [{ ...group, models }]
+    })
+    const failures = policy == null ? catalog.value?.failures ?? [] : (catalog.value?.failures ?? [])
+      .filter(failure => policy.allowedSelections.some(choice => choice.provider === failure.id))
+    const intended = projected?.next ?? policy?.defaultSelection ?? catalog.value?.default
     const reasoning = intended === undefined ? undefined : this.catalog.reasoningFor(intended)
     const effort = intended?.reasoningEffort ?? reasoning?.defaultEffort
     const retainedEffort = effort === undefined ? undefined
@@ -167,25 +185,27 @@ export class ModelDirectory {
     if (catalog.status !== 'ready' || catalog.value === null || projected === undefined) {
       this.store.set({
         current: catalog.value === null ? null : this.store.getSnapshot().current,
+        ...policy == null ? {} : { policy },
         ...retainedEffort === undefined ? {} : { retainedEffort },
         routable: null,
-        groups: catalog.value?.groups ?? [],
-        failures: catalog.value?.failures ?? [],
+        groups,
+        failures,
         status: catalog.status === 'error' ? 'error' : 'loading',
         pending: this.store.getSnapshot().pending,
         error: catalog.error,
       })
       return
     }
-    const selection = projected.next ?? catalog.value.default
-    const routable = catalog.value.groups.some(group => group.id === selection.provider
+    const selection = projected.next ?? policy?.defaultSelection ?? catalog.value.default
+    const routable = groups.some(group => group.id === selection.provider
       && group.models.some(model => model.id === selection.model))
     this.store.set({
       current: selection,
+      ...policy == null ? {} : { policy },
       ...retainedEffort === undefined ? {} : { retainedEffort },
       routable,
-      groups: catalog.value.groups,
-      failures: catalog.value.failures,
+      groups,
+      failures,
       status: this.store.getSnapshot().status === 'selecting'
         ? 'selecting'
         : 'ready',

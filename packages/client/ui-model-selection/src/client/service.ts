@@ -81,6 +81,7 @@ export class ModelDirectoryResolver extends Service {
       binding.session.projections.faceOf('modelSelection'),
       () => binding.session.getSnapshot().blank,
       (name, attributes) => this.ctx.get('productAnalytics')?.track(name, attributes),
+      binding.session.projections.faceOf('modelSelectionPolicy'),
     )
     live.directories.set(binding, directory)
     actx.effect(() => () => {

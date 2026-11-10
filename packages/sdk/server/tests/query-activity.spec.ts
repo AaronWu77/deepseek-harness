@@ -13,6 +13,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { HarnessSdkJsonRpcServer } from '../src/server.ts'
+import { mountSnapshotPersistence } from './fake-persistence.ts'
 
 class GatedModel extends MockAdapter {
   readonly entered = Promise.withResolvers<undefined>()
@@ -43,6 +44,7 @@ async function setup(model = new MockAdapter([]), goal = false) {
   await ctx.plugin(CommandRuntime)
   let goals: { dispose(): Promise<void> } | undefined
   if (goal) {
+    mountSnapshotPersistence(ctx)
     goals = await ctx.plugin(GoalService, { defaultMaxGoalRounds: 2 })
     await ctx.plugin(GoalCommand)
     await ctx.plugin(GoalDriver)

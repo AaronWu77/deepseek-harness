@@ -12,7 +12,7 @@ Status: implemented
 
 `startActivation()` 是所有提供方的消费者入口。已发布句柄暴露子级身份、结果 promise 和对应 activation 的资源释放。调用方信号仅取消未发布的创建。本地结果等待待处理输入与所拥有的后代结束后才关闭准入，使后代回复能够进入最终答案。本地与外部结果 promise 都在清理和通知结束后完成。父级使用同一个完成 promise 等待；清理失败不覆盖已捕获的执行结果，由 disposal 单独报告。工作流消费者本就等待清理后再继续，因此 activation 所有权不需要独立的结果就绪与释放信号。
 
-本地 spawn 和 fork 提供方只贡献 `prepareContinuable()` 数据，由 subagent 服务拥有 Agent 创建与驻留。独立进程内驱动器包被移除。结构化工具、校验、指令与终止保护附着于一次 activation，并随其关闭。捕获后该 activation 拒绝继续输入；冷恢复重建普通对话，不携带此前的 schema。
+本地 spawn 和 fork 提供方贡献 `prepareContinuable()` 数据；spawn 还支持供全新角色使用的显式 `prepareLocalOneShot()`。同一个 subagent 服务拥有 Agent 创建与驻留，不引入独立进程内驱动器。结构化工具、校验、指令与终止保护附着于一次 activation，并随其关闭。捕获后该 activation 拒绝继续输入。可续接 Session 的冷恢复重建普通对话，不携带此前的 schema；[RG 角色授权](../architecture/2026-11-08-review-gated-role-authorization.zh.md)另行要求每次角色请求具备有效任务预留，因此重新打开已完成角色的历史不会授予新的执行权限。
 
 ACP、DSH SDK、Codex 和 Claude Code 保留单次执行适配器，共享 activation 容量与所有权，不接受后续消息，也不伪造本地子 Session。父级拥有的 catalog 登记所有本地子级，以及 parent 交付的外部叶子项。本地成员关系独立于结果交付，让已完成的工作流 Session 及其后代仍可被发现。caller 交付由消费方跟踪外部成员关系。外部条目携带 `mode: 'external'`，因为没有可打开的本地 Session。创建时记录一次成员关系；执行与清理不更新目录。执行状态没有必需的消费者，不属于成员记录。caller 交付返回完整结果，parent 交付将完整完成通知加入父级队列。
 

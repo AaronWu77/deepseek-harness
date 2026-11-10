@@ -53,9 +53,11 @@ Ordinary resume keeps the recorded choice. An entry point explicitly overriding 
 
 For scoped switch notices, call `installModelSelection(agentCtx)` from `dsh-agent` during Agent setup. The scope owns the listener and removes it on disposal.
 
+`ctx.agents.bindModelPolicy(agent, policy)` records exact allowed provider/model/effort choices, an initial default, and whether human selections may update the deployment default. It does not select the initial model. `modelPolicyFor(agent)` reads the recorded value, and `assertModelSelectionAllowed(agent, selection)` rejects a final choice outside it. A blank Session can clear its policy with `clearModelPolicy(agent)` before switching presets; the first recorded request freezes authorization, including after resume or fork. Direct `agent.model.select()` callers and request owners must apply the same assertion; binding alone does not add a request guard.
+
 ### Drive an agent's conversation
 
-The handle's methods route identified user-role messages into the agent's inbox. `followup()` queues an ordinary next-turn prompt and wakes the driver; `steer()` submits next-step input and wakes it; `inject()` adds model-facing context without waking the driver, so it lands in the next admitted step. `cancel(cause)` aborts the active activity and, unless `keepInbox` is set, clears pending work; `whenIdle()` resolves after the whole agent reaches quiescence.
+The handle's methods route identified user-role messages into the agent's inbox. `followup()` queues an ordinary next-turn prompt and wakes the driver; `steer()` submits next-step input and wakes it; `inject()` adds model-facing context without waking the driver, so it lands in the next admitted step. `cancel(cause)` aborts the active activity and, unless `keepInbox` is set, clears pending work. An outstanding protected claim or exclusive admission preserves the inbox for inspection. `whenIdle()` resolves after the whole agent reaches quiescence.
 
 ```text
 handle.agent.followup({
@@ -102,6 +104,8 @@ The package is built on one separation: the public `Agent` surface and registry 
 `Agent.inbox` exposes only the structural `Inbox` interface and the projection vocabulary stays in this package. dsh-agent-loop owns the package-internal `ReactLoopInbox` and the standard `inbox` projection; the loop service acquires one registration for the durable `agent/inbox/spliced` fold and gives each inbox a state-reading callback. The registry remains the sole owner of the live `{ 'next-turn', 'next-step' }` state. Reconstruction rejects unsafe or out-of-range splice coordinates and duplicate `MessageId` values across both pending lists and reports the offending event seq.
 
 `Inbox` exposes pending `nextTurn` and `nextStep` messages and mutates them through `append`, `prepend`, `replace`, `remove`, `clear`, and `splice`. Ordinary removals and `clear()` are durable cancellations. At a step boundary, the loop's internal implementation claims pending input through pure deletion splices. Live notifications are deliberately per-message and minimal: `agent/inbox/inserted { message }`, `agent/inbox/claimed { message, turn }`, and `agent/inbox/discarded { message }`.
+
+Agents may expose `runExclusiveAdmission`, `isExclusiveAdmissionClaim`, and `enableClaimProtection`; consumers must check these optional capabilities before depending on them. An outstanding admission or protected claim can remain uncertain after cancellation or a failed flush. Inspect `exclusiveAdmission`, `claimProtectionStatus`, `claimRecovery`, and the Session before retrying; an admission owner identifies the caller but does not grant authorization. The [Agent loop](../agent-loop/README.md) describes its implementation.
 
 ### Durable model selection
 
@@ -205,7 +209,7 @@ These limits define when this package needs special care. They are current packa
 - **Initiator scope is process-local** — workers, child processes, HTTP, durable queues, and restarts must materialize any required identity explicitly.
 - **Ambient identity may outlive liveness** — consumers still check `agent.status`, cancellation, and the owning capability contract before lifecycle-sensitive work.
 - **Creation listeners share the initialization lifetime.** An `agent/created` listener must not await `agent.whenIdle()` or its own owner's disposal: those operations wait for creation to finish. Return only after required asynchronous tool and prompt installation completes.
-- **`cancel()` clears the inbox by default** — it aborts the in-flight turn plus queued and steering work; `cancel(cause, { keepInbox: true })` aborts only the turn and preserves pending items, and there is no step-only abort that keeps the turn running.
+- **`cancel()` normally clears the inbox** — it aborts the in-flight turn and queued work unless `keepInbox` is set. An outstanding protected claim or exclusive admission preserves pending input; there is no step-only abort that keeps the turn running.
 - **Each additional `UserMessage` carries exactly one `MessageSource`** — contributions from several plugins merged onto one message collapse under one source, so the message cannot name several producers.
 
 <a id="dev-note"></a>

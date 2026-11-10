@@ -346,6 +346,20 @@ describe('package payload constraints', () => {
     } })).toContainEqual(expect.stringContaining('exports["./pipeline"] must expose'))
   })
 
+  it('publishes RG role entry and its shared validation chunk without a broad runtime glob', () => {
+    const dir = 'packages/experimental/review-gated'
+    const manifest = JSON.parse(readFileSync(new URL(`../${dir}/package.json`, import.meta.url), 'utf8')) as WorkspaceManifest['manifest']
+    expect(checkWorkspaceManifest({ dir, manifest })).toEqual([])
+    for (const omitted of ['lib/role.js', 'lib/errors-*.js']) {
+      const errors = checkWorkspaceManifest({ dir, manifest: { ...manifest,
+        files: expectedDshPackageFiles(manifest).filter(file => file !== omitted),
+      } })
+      expect(errors.some(error => error.includes('package.json files must be'))).toBe(true)
+    }
+    const errors = checkWorkspaceManifest({ dir, manifest: { ...manifest, files: ['lib/*.js'] } })
+    expect(errors.some(error => error.includes('package.json files must be'))).toBe(true)
+  })
+
   it('publishes the directory of each locale detail document after the locale resources', () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-detail-files-'))
     onTestFinished(() => { rmSync(dir, { recursive: true, force: true }) })

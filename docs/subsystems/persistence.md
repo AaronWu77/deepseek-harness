@@ -53,6 +53,16 @@ interface SessionHandle extends AsyncDisposable {
   readonly access: SessionAccess
 
   /**
+   * Bind live event routing to this exact Session until close. The owner must
+   * first append the complete Session prefix through this handle and must bind
+   * immediately before publishing it, without intervening Session appends.
+   * Backends without this optional capability cannot acknowledge live flushes.
+   * @param session - the Session owned by this write handle.
+   * @throws when the handle cannot bind this Session.
+   */
+  bindSession?(session: Session): void
+
+  /**
    * Read a slice of the valid contiguous logical log. The slice is a legal log
    * prefix segment: a torn physical tail is never returned, and repeated reads
    * on this handle never observe an older state than a prior read.
@@ -103,7 +113,7 @@ A created session is observable in this process from the moment `create` resolve
 
 ## The flush checkpoint
 
-`session/event` is a *synchronous* notification; the mounted backend routes it by session id into the active write handle's bounded write-behind window without blocking the producer (the backend installs these listeners once, because persistence already enforces one active write handle per id). The first pending event starts a fixed internal batching window, and later events join without resetting its deadline. Expiry starts one durable `append` through the session's write handle; events admitted during that write receive their own deadline and form a follow-up batch. `session/flush` cancels the wait and drains through quiescence, so the loop still uses it as the ordering and error-observation checkpoint before claiming the next ordinary turn. A rejected background write retains its events in order, pauses the automatic path, and is reported through the logger; the next explicit flush retries and rejects loudly to its caller. `session/disposed` performs the same final drain and closes the handle, and `close()` itself drains the routed buffer through the still-open storage, so backend teardown's close sweep loses nothing. The window bounds only intentional batching wait, not event-loop scheduling or backend durability latency.
+`session/event` is a *synchronous* notification; the mounted backend routes it into the active write handle's bounded write-behind window without blocking the producer. A bound writer accepts only its exact Session; JSONL preserves id-based routing for unbound legacy writers, which cannot acknowledge durability. The first pending event starts a fixed internal batching window, and later events join without resetting its deadline. Expiry starts one durable `append` through the session's write handle; events admitted during that write receive their own deadline and form a follow-up batch. `session/flush` cancels the wait and drains through quiescence. `ctx.sessions.flush(session)` returns `true` only when a listener confirms that the exact bound Session was durably flushed with `SESSION_FLUSH_DURABLE`; observers and unbound writers do not acknowledge. A rejected background write retains its events in order, pauses the automatic path, and is reported through the logger; the next explicit flush retries and rejects loudly to its caller. `session/disposed` performs the same final drain and closes the handle, and `close()` itself drains the routed buffer through the still-open storage, so backend teardown's close sweep loses nothing. The window bounds only intentional batching wait, not event-loop scheduling or backend durability latency.
 
 ## Crash recovery preserves an interrupted turn
 

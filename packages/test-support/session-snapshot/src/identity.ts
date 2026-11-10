@@ -3,10 +3,10 @@
 const UUID_FRAGMENT_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 const SHORT_JOB_ID_RE = /-[0-9a-f]{16}$/i
 const LEGACY_TOKEN_RE = /^\{\{(?:sessionId|messageId)\}\}$/
-const CANONICAL_TOKEN_RE = /^\{\{(session|message|approval|workflow|command|rpc|retry|id):([1-9]\d*)\}\}$/
+const CANONICAL_TOKEN_RE = /^\{\{(session|message|approval|workflow|command|rpc|retry|rg-task|rg-run|id):([1-9]\d*)\}\}$/
 const ID_KEY_RE = /(?:^id$|Id$|Ids$)/
 
-type IdentityKind = 'session' | 'message' | 'approval' | 'workflow' | 'command' | 'rpc' | 'retry' | 'id'
+type IdentityKind = 'session' | 'message' | 'approval' | 'workflow' | 'command' | 'rpc' | 'retry' | 'rg-task' | 'rg-run' | 'id'
 
 interface ParsedLog {
   readonly records: Record<string, unknown>[]
@@ -69,6 +69,34 @@ export function redactSessionSnapshotIds(logs: readonly string[]): string[] {
   for (const log of parsed) {
     const header = log.records[0]
     if (header?.type === 'session') claim(header.id, 'session', true)
+  }
+
+  // Register RG identities from durable semantic fields before generic id-key collection.
+  for (const log of parsed) {
+    for (const record of log.records) {
+      if (record.type !== 'review-gated/state' && record.type !== 'review-gated/result-prepared'
+        && record.type !== 'review-gated/result-confirmed') continue
+      if (!isRecord(record.data)) continue
+      if (record.type !== 'review-gated/state') {
+        claim(record.data.taskId, 'rg-task', true)
+        claim(record.data.runId, 'rg-run', true)
+        claim(record.data.childId, 'session', true)
+      }
+      if (!isRecord(record.data.state)) continue
+      const state = record.data.state
+      claim(state.parentSessionId, 'session', true)
+      claim(state.taskId, 'rg-task', true)
+      claim(state.runId, 'rg-run', true)
+      if (!isRecord(state.task)) continue
+      claim(state.task.id, 'rg-task', true)
+      claim(state.task.originMessageId, 'message', true)
+      for (const slot of ['active', 'lastWorker', 'lastReview']) {
+        const run = state.task[slot]
+        if (!isRecord(run)) continue
+        claim(run.id, 'rg-run', true)
+        claim(run.childId, 'session', true)
+      }
+    }
   }
 
   const collect = (value: unknown, recordType?: unknown): void => {

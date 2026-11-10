@@ -71,6 +71,8 @@ const SAFE_HOST_DEPENDENCY_EXPORTS = {
 
 /** Runtime exports that require every consumer to resolve the provider's shared peer instance. */
 const PEER_REQUIRED_HOST_EXPORTS = {
+  // Tool failure metadata recognizes HarnessError through the provider's shared class instance.
+  '@deepseek-ai/dsh-llm': ['HarnessError'],
   // Profile settings must match the installed Node provider's configuration schema.
   '@deepseek-ai/dsh-ptc-runtime-node/configuration': ['resolvePersistentExecution'],
   // CUA checks UserQuestionError and preserves AttachmentError from image admission.

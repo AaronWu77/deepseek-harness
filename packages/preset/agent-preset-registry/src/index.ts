@@ -28,6 +28,15 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     agentPresets: AgentPresetRegistry
   }
+  interface Events {
+    /**
+     * Initialize consumers after a blank Agent commits its new preset, outside Session publication.
+     * A listener failure leaves the selected composition committed and rejects the selection operation.
+     * @param payload - live Agent and the committed preset id.
+     * @mode serial
+     */
+    'agent-preset/recomposed'(payload: { agent: Agent; agentPreset: string }): void | Promise<void>
+  }
 }
 
 interface Generation {
@@ -381,6 +390,7 @@ export class AgentPresetRegistry extends TypertRemoteService {
         && this.agentPresetProjectionHandle.stateOf(agent.session) === agentPreset) return agentPreset
       const preset = await this.recompose(agent.ctx, agentPreset)
       agent.session.append('agent-preset/selected', { agentPreset: preset.id })
+      await this.owner.serial('agent-preset/recomposed', { agent, agentPreset: preset.id })
       return preset.id
     })
     const guard = turn.catch(() => undefined)

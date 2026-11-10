@@ -1202,6 +1202,59 @@ describe('scrubModelRequestBulk', () => {
   })
 })
 
+describe('RG scope-clock normalization', () => {
+  const normalizers = [
+    { name: 'log comparison', normalize: (input: string) => normalizeSessionLog(input, ctx, { identityMode: 'preserve' }) },
+    { name: 'fixture write-back', normalize: scrubSessionSnapshot },
+  ]
+
+  it.each(normalizers)('normalizes prepared RG state clocks without changing other events for $name', ({ normalize }) => {
+    const task = { active: { scope: { capturedAt: 42, fingerprint: 'keep' } } }
+    const data = { state: { task }, scopeMatches: true, capturedAt: 43 }
+    const input = [
+      { type: 'session', id: '{{session:1}}', createdAt: 0, cwd: '{{cwd}}' },
+      { type: 'review-gated/result-prepared', data },
+      { type: 'review-gated/result-confirmed', data },
+      { type: 'tool/result', data },
+    ].map(record => JSON.stringify(record)).join('\n') + '\n'
+    const output = normalize(input)
+    const rows = output.trimEnd().split('\n').map(line => JSON.parse(line) as { data: typeof data })
+    expect(rows[1]!.data).toEqual({ ...data, state: { task: { active: { scope: { capturedAt: 0, fingerprint: 'keep' } } } } })
+    expect(rows[2]!.data).toEqual(data)
+    expect(rows[3]!.data).toEqual(data)
+    expect(normalize(output)).toBe(output)
+  })
+
+  it.each(normalizers)('normalizes only declared RG run scope clocks for $name', ({ normalize }) => {
+    const scope = { root: '{{cwd}}', paths: ['probe.txt'], fingerprint: 'content-identity', diagnostic: null, capturedAt: 789 }
+    const task = { active: { scope }, lastWorker: { scope: { ...scope, capturedAt: 456 } },
+      lastReview: { scope: { ...scope, capturedAt: 123 } }, capturedAt: 987 }
+    const input = [
+      { type: 'session', id: '{{session:1}}', createdAt: 0, cwd: '{{cwd}}' },
+      { type: 'review-gated/state', data: { state: { task }, capturedAt: 654 } },
+      { type: 'tool/result', data: { state: { task } } },
+      { type: 'user/message', data: { text: 'Keep "capturedAt":789 and content-identity' } },
+      { type: 'review-gated/state' },
+      { type: 'review-gated/state', data: null },
+      { type: 'review-gated/state', data: { state: null } },
+      { type: 'review-gated/state', data: { state: { task: null } } },
+      { type: 'review-gated/state', data: { state: { task: { active: null, lastWorker: {},
+        lastReview: { scope: { capturedAt: 'retain non-clock' } } } } } },
+    ].map(record => JSON.stringify(record)).join('\n') + '\n'
+    const output = normalize(input)
+    const rows = output.trimEnd().split('\n').map(line => JSON.parse(line) as { data: { state: { task: typeof task }; capturedAt: number } })
+    const expectedTask = { ...task, active: { scope: { ...scope, capturedAt: 0 } },
+      lastWorker: { scope: { ...scope, capturedAt: 0 } }, lastReview: { scope: { ...scope, capturedAt: 0 } } }
+    expect(rows[1]!.data).toEqual({ state: { task: expectedTask }, capturedAt: 654 })
+    expect(rows[2]!.data.state.task).toEqual(task)
+    const user = JSON.parse(output.trimEnd().split('\n')[3]!) as { data: { text: string } }
+    expect(user.data.text).toBe('Keep "capturedAt":789 and content-identity')
+    expect(output).toContain('"capturedAt":"retain non-clock"')
+    expect(normalize(output)).toBe(output)
+    expect(normalize(input.replace('"fingerprint":"content-identity"', '"fingerprint":"changed-content"'))).not.toBe(output)
+  })
+})
+
 describe('scrubSessionSnapshot', () => {
   it('writes expanded source-event references and remains idempotent', () => {
     const input = [

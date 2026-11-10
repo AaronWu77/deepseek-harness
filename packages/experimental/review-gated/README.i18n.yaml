@@ -3,50 +3,56 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/review-gated/README.md
 /:
-  en: 1d8920f264d8a9aa
-  zh: 0c2c61a86c682c60
+  en: 5d58b5e4f79aeb79
+  zh: 7baaecc13cd41eba
 /deepseek-ai-dsh-experimental-review-gated:
   en: 2aa647fc733eb899
   zh: ec9bf6c9ef26e298
 /deepseek-ai-dsh-experimental-review-gated/summary:
-  en: 0f5b7c03938b9571
-  zh: 98f4f52a1660f4e5
+  en: 0d76f812b4777acf
+  zh: ec544d7f9350fdb1
 /deepseek-ai-dsh-experimental-review-gated/table-of-contents:
-  en: d152484eb41ac6b4
-  zh: 09388d293f9be9cb
+  en: 23b74c300207c7e7
+  zh: 4770cb26861ae711
 /deepseek-ai-dsh-experimental-review-gated/use-this-package:
   en: bbff250eba0f1b89
   zh: 0a618f05cc88ee2b
-/deepseek-ai-dsh-experimental-review-gated/use-this-package/select-the-presets:
-  en: e6ec9dca7d7ad5bc
-  zh: f5cf2b7f5eae6e01
-/deepseek-ai-dsh-experimental-review-gated/use-this-package/what-you-get:
-  en: 50cac3d0d162eb50
-  zh: fd39591701a1bcee
+/deepseek-ai-dsh-experimental-review-gated/use-this-package/configure-before-starting:
+  en: 45e436cf9d69805b
+  zh: a3b546c3540f8de8
+/deepseek-ai-dsh-experimental-review-gated/use-this-package/local-git-delivery:
+  en: 9278c7fe3e824a30
+  zh: 57f99a59c4555028
+/deepseek-ai-dsh-experimental-review-gated/use-this-package/work-and-review:
+  en: f9e7c75a905deb2e
+  zh: 892921fed7fe89c4
+/deepseek-ai-dsh-experimental-review-gated/source-and-attribution:
+  en: 64cec4953c871605
+  zh: 2b734c7898c259c8
 /deepseek-ai-dsh-experimental-review-gated/understand-the-implementation:
-  en: 6faeaf66da4e54b7
-  zh: 520692c9aa887f3e
+  en: 5f87a9ed1195cf6f
+  zh: 721643908d1e7507
 /deepseek-ai-dsh-experimental-review-gated/further-exploration:
-  en: e1ae590c8bd71c45
-  zh: c9f6feede476892e
+  en: 0bd4a03c00120cb6
+  zh: c87ee25d8c3b09c4
 /deepseek-ai-dsh-experimental-review-gated/model-experience:
   en: 215e7ba838619b7b
   zh: a311da3843709f90
-/deepseek-ai-dsh-experimental-review-gated/model-experience/coordinator-guidance:
-  en: 5ae8d6e563c40b14
-  zh: 86c738820722754d
-/deepseek-ai-dsh-experimental-review-gated/model-experience/coordinator-guidance/what-the-model-sees:
-  en: f31fa624bec4f790
-  zh: 1e5f55c0bec9efd0
-/deepseek-ai-dsh-experimental-review-gated/model-experience/coordinator-guidance/token-effect:
-  en: ebef9a8f51e68565
-  zh: 815b025515990ed2
-/deepseek-ai-dsh-experimental-review-gated/model-experience/coordinator-guidance/kv-cache-effect:
-  en: df39f157349888dd
-  zh: 7a5bc112d2cd9c79
+/deepseek-ai-dsh-experimental-review-gated/model-experience/role-guidance-and-managed-reports:
+  en: e9dddef148ec0773
+  zh: 95bf536929fcaee2
+/deepseek-ai-dsh-experimental-review-gated/model-experience/role-guidance-and-managed-reports/what-the-model-sees:
+  en: e681908632d5c3e9
+  zh: ce9eb52f0c0f56b1
+/deepseek-ai-dsh-experimental-review-gated/model-experience/role-guidance-and-managed-reports/token-effect:
+  en: 42759477c3b3a6aa
+  zh: 2059245c56eda426
+/deepseek-ai-dsh-experimental-review-gated/model-experience/role-guidance-and-managed-reports/kv-cache-effect:
+  en: 2324edf65ab72f48
+  zh: df32a895e8b99cef
 /deepseek-ai-dsh-experimental-review-gated/known-limitations-and-deferred-work:
-  en: ad441548a465e7e5
-  zh: 3ad45b1ace2f2da4
+  en: 20bddb4021b090ea
+  zh: fa7ca173a8fbdd99
 /deepseek-ai-dsh-experimental-review-gated/known-limitations-and-deferred-work/dev-note:
-  en: a6adf5c89e1ee098
-  zh: d850907015c53900
+  en: f7e4e09453e30b12
+  zh: 84e2579cc4cbb9d8

@@ -35,6 +35,9 @@ export { deriveEventMessage, foldSurface, isAppendSurfaceEvent, isReplacementSur
 export { canonicalHeader, foldRequestHeader, headerEquals } from './request-header.ts'
 export { KNOWN_SESSION_EVENT_TYPES } from './known-event-types.ts'
 
+/** A persistence listener's acknowledgement that this Session reached durable storage. */
+export const SESSION_FLUSH_DURABLE: unique symbol = Symbol('session flush durable')
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     sessions: SessionStore
@@ -77,11 +80,13 @@ declare module '@deepseek-ai/cordis' {
     /**
      * Awaited parallel durability checkpoint: every listener runs and the
      * caller awaits all of them, with no waterfall veto. Scope-filtered dispatch
-     * (`@deepseek-ai/dsh-scope`) reuses the session's owner scope.
+     * (`@deepseek-ai/dsh-scope`) reuses the session's owner scope. A persistence
+     * listener returns `SESSION_FLUSH_DURABLE` only after durably storing this
+     * Session; observers return void.
      * @param session - the session whose buffered events must reach durable storage.
      * @mode parallel
      */
-    'session/flush'(this: Scoped<Session>, session: Session): Promise<void> | void
+    'session/flush'(this: Scoped<Session>, session: Session): Promise<void | typeof SESSION_FLUSH_DURABLE> | void | typeof SESSION_FLUSH_DURABLE
   }
 }
 
@@ -1335,8 +1340,8 @@ export class SessionStore extends Service {
    * rather than dispatch a raw `ctx.parallel('session/flush', …)` — one owner
    * and one spelling.
    * @param session - the session whose buffered events must reach durable storage.
-   * @returns whether at least one durability listener participated, after every
-   *   listener has settled successfully.
+   * @returns whether at least one listener acknowledged durability, after every
+   *   listener has settled successfully. A void observer does not acknowledge it.
    * @throws the first registered listener failure after every listener settles.
    */
   async flush(session: Session): Promise<boolean> {
@@ -1355,7 +1360,7 @@ export class SessionStore extends Service {
     }))
     const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (failure !== undefined) throw failure.reason
-    return callbacks.length > 0
+    return results.some(result => result.status === 'fulfilled' && result.value === SESSION_FLUSH_DURABLE)
   }
 
   /** Return the exact live entry; detached/prepared objects reject. */

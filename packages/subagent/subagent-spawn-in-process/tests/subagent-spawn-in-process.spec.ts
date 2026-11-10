@@ -262,6 +262,58 @@ describe('dsh-subagent-spawn-in-process', () => {
     await parentHandle.dispose()
   })
 
+  it('runs an explicit one-shot spawn with structured output and durable one-shot membership', async () => {
+    const { ctx, parent } = await setup([
+      toolCallResponse('once-report', STRUCTURED_OUTPUT_TOOL, { verdict: 'pass' }),
+    ])
+    const childId = SessionId('explicit-spawn-one-shot')
+    const run = await ctx.subagents.startActivation({
+      provider: 'spawn', lifecycle: 'one-shot', childId, label: 'independent review', delivery: 'caller',
+      signal: new AbortController().signal,
+      request: {
+        parent, prompt: [{ type: 'text', text: 'review once' }],
+        agentOptions: { provider: 'mock', model: 'mock' },
+        outputSchema: { type: 'object', properties: { verdict: { type: 'string', enum: ['pass'] } }, required: ['verdict'] },
+      },
+    })
+    expect(run.messageId).toBeDefined()
+    await expect(run.result).resolves.toMatchObject({ stopReason: 'completed', structured: { verdict: 'pass' } })
+    expect(ctx.agents.get(childId)).toBeUndefined()
+    expect(parent.session.snapshotEvents().filter(event => event.type === 'subagent/catalog'))
+      .toMatchObject([{ data: { childId, mode: 'one-shot' } }])
+    const stored = await ctx.sessionPersistence.open(childId, 'read')
+    try {
+      const log = await stored.read()
+      expect(log.events.filter(event => event.type === 'subagent/descriptor'))
+        .toMatchObject([{ data: { mode: 'one-shot', provider: 'spawn' } }])
+    } finally { await stored.close() }
+    await run.dispose()
+  })
+
+  it('refuses follow-up input to a live one-shot spawn and drains cancellation', async () => {
+    const { ctx, parent } = await setup(['hang'])
+    const controller = new AbortController()
+    const run = await ctx.subagents.startActivation({
+      provider: 'spawn', lifecycle: 'one-shot', label: 'one task', delivery: 'caller', signal: controller.signal,
+      request: { parent, prompt: [{ type: 'text', text: 'wait for cancellation' }] },
+    })
+    await expect(ctx.subagents.sendMessage(parent, run.childId, [], { signal: new AbortController().signal }))
+      .rejects.toMatchObject({ code: 'NOT_CONTINUABLE' })
+    controller.abort(new Error('cancel explicit one-shot'))
+    await expect(run.result).resolves.toMatchObject({ stopReason: 'aborted' })
+    expect(ctx.agents.get(run.childId)).toBeUndefined()
+    await run.dispose()
+  })
+
+  it('keeps implicit spawn lifecycle continuable when one-shot preparation is also present', async () => {
+    const { ctx, parent } = await setup([textResponse('ordinary spawn')])
+    const run = await start(ctx, 'spawn', { parent, prompt: [{ type: 'text', text: 'ordinary task' }] })
+    await run.result
+    expect(parent.session.snapshotEvents().filter(event => event.type === 'subagent/catalog'))
+      .toMatchObject([{ data: { childId: run.id, mode: 'continuable' } }])
+    await run.dispose()
+  })
+
   it('advertises every start-time capability', async () => {
     const { ctx } = await setup([])
     const provider = ctx.subagents.getProvider('spawn')!

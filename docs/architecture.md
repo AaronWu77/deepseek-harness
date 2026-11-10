@@ -85,6 +85,7 @@ turn/start
   claim next-step input plus one queued message
   snapshot Session model selection; assemble prompt sections + step-admitted tool schemas
   -> agent/pre-step; project runtime context at fallback
+  -> agent/post-pre-step
                                      reject | enter(messages, startsRequestSeries?)
      reject, or a first enter rewritten empty -> close the turn with no step
      step/start
@@ -103,11 +104,11 @@ turn/start
 turn/end
 ```
 
-`turn/*`, `step/*`, `system/message`, `user/message`, `assistant/message`, `assistant/attempt`, and `tool/*` are durable session events; the rest are live extension points across three domains. `agent/assistant-stream` publishes process-local start, transient chunk, and end frames. The loop commits the complete compact stream as one message or log-only attempt before a committed end frame, and the Web Session-follow adapter is the live event's only remote consumer. `agent/pre-step`, `agent/request`, `llm/stream`, and the three `tools/*` events are waterfalls, whose listeners must call `next()` to delegate; `agent/turn-stopping` is serial and has no `next()`.
+`turn/*`, `step/*`, `system/message`, `user/message`, `assistant/message`, `assistant/attempt`, and `tool/*` are durable session events; the rest are live extension points across three domains. `agent/assistant-stream` publishes process-local start, transient chunk, and end frames. The loop commits the complete compact stream as one message or log-only attempt before a committed end frame, and the Web Session-follow adapter is the live event's only remote consumer. `agent/pre-step`, `agent/request`, `llm/stream`, and the three `tools/*` events are waterfalls, whose listeners must call `next()` to delegate; `agent/post-pre-step` and `agent/turn-stopping` are serial.
 
-Factory setup follows SessionStore entry and `session/created`, preceding `agent/created`; closing events commit before removal.
+Before SessionStore entry, the factory binds an owned writer to the exact Session when supported. Factory setup follows `session/created`, preceding `agent/created`; closing events commit before removal.
 
-One inbox feeds the driver; injected context waits for a waking message. AgentLoop’s durable `inbox` projection exposes pending input without live Agents.
+One inbox feeds the driver; injected context waits for a waking message. AgentLoop’s durable `inbox` projection exposes pending input without live Agents. Protected claims and task admission are opt-in; see [loop recovery](../packages/core/agent-loop/README.md).
 
 Before assembly, the loop snapshots Session model selection in `AssembleContext.modelSelection` and `agent/pre-step.modelSelection`; retries retain it; omitted reasoning effort uses adapter defaults. `agent/pre-step` listeners accept, rewrite, or reject claimed messages; a rejected or empty first claim closes a durable turn without a step. An enter decision may set `startsRequestSeries`: the loop logs a fresh `request/header` (reason `series`, or `change` with `startsSeries: true` when the envelope also changed). Wrapping listeners preserve that declaration with `{ ...decision, messages }`. After assembly and `step/start`, the deprecated `agent/request` hook adjusts controls without changing the provider, model, or effort selection, and `prepareCall()` binds the adapter before the system prompt and accepted users are committed; cancellation during either async phase commits neither. Prepared call capabilities govern prompt admission, not preceding `request/context`. Each attempt refreshes registered runtime facts, reconciles the bound prompt, admits users once, and restores removed runtime context, logs header/context as needed, and freezes the request before streaming the bound call. Retries do not repeat assembly or `agent/pre-step`. Surface replacements and image-offload decisions after attachment start a new request series, including during the first resumed pre-step; unchanged resume continues the series. The system prompt travels as `system/message` history: empty text clears it, capable routes append updates, and other routes consolidate it at the first system node. [Agent-loop](../packages/core/agent-loop/README.md#understand-the-implementation) owns prompt admission and replacement details.
 

@@ -14,14 +14,16 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Session, SessionEvent, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
 import { installTurnArchiveAdmission } from './archive-admission.ts'
-import type { Agent, TurnBoundaryProjection } from './types.ts'
+import type { Agent, ModelSelection, SessionModelPolicy, TurnBoundaryProjection } from './types.ts'
 import type { AgentOptions, SessionStartSource } from './runtime-types.ts'
 import { turnBoundaryProjectionDefinition } from './projection.ts'
+import { assertModelPolicy, assertModelPolicySelection, modelPolicyProjectionDefinition, sameModelPolicy, type ModelPolicyState } from './model-policy.ts'
 
 export * from './runtime-types.ts'
 export * from './types.ts'
 export { AgentModel, modelSelectionProjectionDefinition, installModelSelection } from './model-selection.ts'
 export type { ModelSelectionProjectionState } from './model-selection.ts'
+export { ModelPolicyViolationError } from './model-policy.ts'
 export type * from './projection.ts'
 export * from './consumed-work.ts'
 export { agentCarrier, agentEvents, assembleContextFor, emitAgentEvent } from './dispatch.ts'
@@ -253,6 +255,7 @@ export class AgentRegistry extends Service {
   static inject = ['sessionProjections']
 
   private turnBoundaryProjectionHandle!: ProjectionHandle<TurnBoundaryProjection>
+  private modelPolicyProjectionHandle!: ProjectionHandle<ModelPolicyState>
   private store = new Map<SessionId, AgentEntry>()
   private factory: FactorySlot | undefined
   private readonly initiators = new AsyncLocalStorage<Agent | undefined>()
@@ -296,6 +299,56 @@ export class AgentRegistry extends Service {
 
   protected async [Service.init](): Promise<void> {
     this.turnBoundaryProjectionHandle = await this.ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
+    this.modelPolicyProjectionHandle = await this.ctx.sessionProjections.register(modelPolicyProjectionDefinition)
+  }
+
+  /**
+   * Bind complete model authorization before a Session records its first request.
+   * Identical bindings are idempotent and preserve later user selections.
+   * @param agent - Agent whose Session receives the policy; this does not select its initial model.
+   * @param policy - exact allowed choices and the Session's default-persistence behavior.
+   * @throws when policy invariants fail, a different policy is already bound, or requests already exist.
+   */
+  bindModelPolicy(agent: Agent, policy: SessionModelPolicy): void {
+    assertModelPolicy(policy)
+    const state = this.modelPolicyProjectionHandle.stateOf(agent.session)
+    if (state.policy !== null) {
+      if (sameModelPolicy(state.policy, policy)) return
+      throw new Error('clear the blank Session model policy before binding another policy')
+    }
+    if (state.hasRequests) throw new Error('Session model policy cannot be bound after the first request')
+    agent.session.append('model/selection-policy', { policy })
+  }
+
+  /**
+   * Clear authorization while a user can still change an unstarted Session's preset.
+   * @param agent - Agent whose blank Session returns to ordinary model selection.
+   * @throws when the Session has already recorded any request.
+   */
+  clearModelPolicy(agent: Agent): void {
+    const state = this.modelPolicyProjectionHandle.stateOf(agent.session)
+    if (state.hasRequests) throw new Error('Session model policy cannot be cleared after the first request')
+    if (state.policy !== null) agent.session.append('model/selection-policy', { policy: null })
+  }
+
+  /**
+   * Read authorization reconstructed from the Session, including resumed or forked history.
+   * @param agent - Agent whose recorded policy is read.
+   * @returns the immutable recorded value; null preserves ordinary model selection.
+   */
+  modelPolicyFor(agent: Agent): SessionModelPolicy | null {
+    return this.modelPolicyProjectionHandle.stateOf(agent.session).policy
+  }
+
+  /**
+   * Validate the complete final route against recorded Session authorization.
+   * Availability remains the caller's LLM-adapter check.
+   * @param agent - Agent whose Session owns authorization.
+   * @param selection - final provider/model/effort choice, including omitted effort.
+   * @throws ModelPolicyViolationError when the choice is not allowed.
+   */
+  assertModelSelectionAllowed(agent: Agent, selection: Readonly<ModelSelection>): void {
+    assertModelPolicySelection(this.modelPolicyFor(agent), selection)
   }
 
   /**

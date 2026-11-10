@@ -84,6 +84,8 @@ Headless/ACP 与 SDK 适配器在规范化之前，将原始目录中的子创�
 
 首次录制尚无 Session 文件的 headless 在线场景时，临时在 `snapshot.yml` 设置 `input.task`，由在线组合选择模型。录制后移除该输入，让选定 Session 拥有任务文本。回放与刷新必须已有规范 Session 文件，格式错误或缺少 parent 的角色仍会报错。
 
+SDK 适配器仅在私有回放副本中还原 `{{cwd}}`，保留本机路径写法、嵌套 JSON 字符串的转义及所有其他字节。带引号的 cwd 标记采用 JSON 字符串字面量编码，包括 runtime-context 路径；任意自然语言引号和 JavaScript 字符串语法不属于其他可用编码。如果 JSON 解码产生额外的 cwd 标记，会在替换前拒绝该输入。它在启动 SDK 子进程前使用回放解析器验证每个 parent 和 child 副本；无效 fixture 在父进程中报错。
+
 嵌套的 `workspace.expected/<directory>/.empty` 标记表示空目录；实际 workspace 中的同名文件仍按普通文件比较。
 
 ### 固定请求 header 与系统提示

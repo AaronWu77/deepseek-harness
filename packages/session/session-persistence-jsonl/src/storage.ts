@@ -11,6 +11,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { errorChain } from '@deepseek-ai/dsh-llm'
+import { SESSION_FLUSH_DURABLE } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, SessionHeader, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import {
   assertContiguous,
@@ -92,6 +93,7 @@ export class JsonlSessionHandle implements SessionHandle {
   /** Set when a drain failed; the automatic timer stays quiet until the next drain. */
   private drainPaused = false
   private draining: Promise<void> | undefined
+  private boundSession: Session | undefined
 
   constructor(
     private readonly storage: JsonlHandleStorage,
@@ -106,6 +108,32 @@ export class JsonlSessionHandle implements SessionHandle {
   /** Exact fork-inherited prefix length stored with this session's log. */
   get inheritedEventCount(): SessionLogOffset {
     return this.state.inheritedEventCount
+  }
+
+  /** Bind the writer to its owner's exact Session before publication. */
+  bindSession(session: Session): void {
+    this.assertOpen('bindSession')
+    if (this.access !== 'write') throw new SessionReadOnlyError(this.id, 'bindSession')
+    if (session.id !== this.id || (this.boundSession !== undefined && this.boundSession !== session)) {
+      throw new Error(`session "${session.id}": writer cannot bind this Session`)
+    }
+    this.boundSession = session
+  }
+
+  /** Check the open writer’s exact Session binding.
+   * @param session - the Session requesting acknowledgement.
+   * @returns true while this writer is open and bound to that Session.
+   */
+  isBoundTo(session: Session): boolean {
+    return this.closing === undefined && this.boundSession === session
+  }
+
+  /** Check whether live events may route to this writer.
+   * @param session - the Session publishing an event.
+   * @returns true for an unbound writer or its exact bound Session.
+   */
+  routes(session: Session): boolean {
+    return this.boundSession === undefined || this.boundSession === session
   }
 
   /**
@@ -289,6 +317,23 @@ export class JsonlSessionHandle implements SessionHandle {
     return this.draining ??= this.drainBuffered().finally(() => {
       this.draining = undefined
     })
+  }
+
+  /**
+   * Drain through a captured Session log length, rejecting a missing durable prefix.
+   * @param watermark - the Session's next sequence number at flush entry.
+   * @throws when the routed buffer cannot reach the captured prefix.
+   */
+  async drainThrough(watermark: SessionLogOffset): Promise<void> {
+    do {
+      await this.drainLive()
+      // Recovered torn-frame records count toward cursor but need a durable rewrite.
+      const durableCursor = this.state.cursor - (this.state.recoveredTail?.length ?? 0)
+      if (durableCursor >= watermark) return
+      if (this.buffered.length === 0) {
+        throw new Error(`session "${this.id}": durable prefix ends at ${durableCursor}, before flush watermark ${watermark}`)
+      }
+    } while (true)
   }
 
   private async drainBuffered(): Promise<void> {
@@ -547,21 +592,29 @@ export class JsonlBackendTracker {
         if (errors.length > 0) throw new AggregateError(errors, `${name} dispose failed`)
       }
       yield ctx.on('session/event', (session: Session, event) => {
-        writers.get(session.id)?.enqueueLive(event, (error) => {
+        const writer = writers.get(session.id)
+        if (writer == null || !writer.routes(session)) return
+        writer.enqueueLive(event, (error) => {
           ctx.logger.warn(`session-persistence: background write for session "${session.id}" failed (buffered events retained): ${String(error)}`)
         })
       })
       yield ctx.on('session/flush', (session: Session) => {
         const writer = writers.get(session.id)
-        if (writer === null || writer === undefined) return undefined
+        if (writer == null) return undefined
+        const bound = writer.isBoundTo(session)
+        const watermark = session.seq
         return (async () => {
-          await writer.drainLive()
+          // A synchronous event observer can flush before the router sees the committed event.
+          await Promise.resolve()
+          if (bound) await writer.drainThrough(watermark)
+          else await writer.drainLive()
           await writer.flush()
+          if (bound && writers.get(session.id) === writer && writer.isBoundTo(session)) return SESSION_FLUSH_DURABLE
         })()
       })
       yield ctx.on('session/disposed', (session: Session) => {
         const writer = writers.get(session.id)
-        if (writer === null || writer === undefined) return
+        if (writer == null || !writer.routes(session)) return
         writer.close().catch((error: unknown) => {
           ctx.logger.warn(`session-persistence: final drain for session "${session.id}" failed: ${String(error)}`)
         })

@@ -70,7 +70,10 @@ describe('local one-shot activation', () => {
     const inspect = (child: import('@deepseek-ai/dsh-agent').Agent): void => {
       expect(f.ctx.sandboxPolicy.overrideOf(child.session)).toBe('workspace-write')
       expect(f.ctx.workingDirectory.get(child.session)).toBe(expectedDirectory)
-      expect(child.session.header.cwd).toBe(expectedDirectory)
+      expect(child.session.header.cwd).toBe(f.parent.session.header.cwd)
+      const parentWorkspace = f.ctx.sandboxPolicy.resolve({ session: f.parent.session }).workspaceRoot
+      expect(f.ctx.sandboxPolicy.resolve({ session: child.session }).workspaceRoot).toBe(parentWorkspace)
+      expect(f.ctx.sandboxPolicy.resolve({ session: child.session }).workspaceRoot).not.toBe(expectedDirectory)
       expect(child.session.snapshotEvents().filter(event => event.type === 'approval/policy'))
         .toMatchObject([{ data: { policy: 'never', source: 'delegation' } }])
     }
@@ -299,7 +302,7 @@ describe('local one-shot activation', () => {
   it('waits for live one-shot cleanup before parent handle disposal resolves', async () => {
     const cleaning = Promise.withResolvers<true>()
     const release = Promise.withResolvers<true>()
-    const f = await setup(['hang'], { setup: async childCtx => {
+    const f = await setup(['hang'], { setup: async (childCtx) => {
       childCtx.effect(() => async () => {
         cleaning.resolve(true)
         await release.promise

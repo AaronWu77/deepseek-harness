@@ -51,6 +51,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### What a delegation does
 
+Programmatic callers may select `lifecycle: 'one-shot'` on `startActivation()` to create a fresh local child that rejects follow-up input and cold resume. Omitting the lifecycle keeps the continuable spawn behavior. Both lifetimes support independent presets, child model options, and structured output; one-shot caller cancellation remains attached after publication until cleanup. The selected preset keeps its own tool executor, including PTC.
+
 One tool call creates a background child and returns its session id immediately. The child works in its own session; the parent receives its final answer in a completion notice. The child can also send messages through `send_message`. A rejected start leaves no published child. Programmatic callers such as workflows can await the activation result directly.
 
 An explicit `agentPreset` selects the currently registered preset independently; omission joins the parent's active revision. Only spawn supports this choice. Persona and tools belong in the [preset definition](../../preset/agent-preset-registry/README.md). Cold resume follows the shared [child composition rules](../subagent/README.md#restoring-child-composition).
@@ -67,17 +69,17 @@ This section explains provider preparation and the activation lifecycle owned by
 
 ### Design concept
 
-This backend registers the provider and prepares a fresh child session. `dsh-subagent` owns activation depth checks, child creation, preset composition, structured output, result collection, and disposal. The caller signal cancels unpublished creation; the published handle cancels and reaches quiescence through `dispose()`.
+This backend registers the provider and prepares a fresh child session. `dsh-subagent` owns activation depth checks, child creation, preset composition, structured output, result collection, and disposal. The caller signal cancels unpublished creation and remains attached to explicit one-shot execution; `dispose()` cancels either lifetime and waits for quiescence.
 
 ### Source map
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Provider registration: `Config` schema, capability declaration, `prepareContinuable()` |
+| [`src/index.ts`](src/index.ts) | Provider registration: `Config` schema, capability declaration, fresh local preparation |
 
 ### Run flow
 
-`startActivation()` resolves the provider and calls `prepareContinuable()`, then creates and publishes the child. Structured output is attached separately for each activation. Callers can await `result` and use `dispose()` to wait for the entire child subtree to reach quiescence.
+`startActivation()` resolves the provider and selects continuable or explicit one-shot preparation, then creates and publishes the child. Structured output is attached separately for each activation. Callers can await `result` and use `dispose()` to wait for the entire child subtree to reach quiescence.
 
 ### Ownership and scope
 

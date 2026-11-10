@@ -87,7 +87,7 @@ interface SubagentStartRequest {
   readonly prompt: ContentBlock[]
   /**
    * The spawning agent. Its effective directory supplies the default cwd;
-   * continuable children retain its project origin; all local children retain lineage and delegation depth.
+   * all local children retain its project origin, lineage, and delegation depth.
    */
   readonly parent: Agent
   /**
@@ -129,6 +129,15 @@ interface ResolvedSubagentStartRequest extends SubagentStartRequest {
   readonly cwd: string
 }
 ```
+
+<a id="admission-and-model-authorization"></a>
+## 准入与模型授权
+
+`SubagentStartGuard` 是通过 `ctx.subagents.guardStarts()` 注册、随 effect 释放、仅用于拒绝的同步回调。所有当前守卫在实际 `startActivation` 操作中、能力和精确在线父级检查之后、资源获取之前，检查借用的不可变规范。抛错会拒绝本地和外部启动。守卫既不改写请求，也不覆盖其他拒绝；释放仅影响后续启动。
+
+`SubagentModelSelectionSource` 提供唯一的 `name` 与 `resolve(agent)` 回调，返回非空 provider/model 路由或不参与。`ctx.subagentModelSelection.registerSource()` 仅在预设组合完成后、创建全新且无种子的根 Session 时采样来源。一个匹配来源为该 Session 覆盖 Host 偏好而不改变全局设置；无匹配时使用偏好。多个来源匹配或解析期间来源发生变化会拒绝创建。决定冻结在 `subagent/model-selection-policy` 中；恢复与有种子的 Session 保留已记录授权，子 Session 继承授权。
+
+可选 [Review-Gated bundle](../../packages/experimental/review-gated/README.zh.md)使用这些扩展点管理一次性角色；模型策略、尝试次数、报告与审查范围规则仍由该包负责。
 
 ## 本地子代理与 activation
 
@@ -417,11 +426,125 @@ type SubagentDescendantListEntry = SubagentListEntry & {
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxreviewgated--reviewgatedservice"></a>
+
+### `ctx.reviewGated` — `ReviewGatedService`
+
+Settings, Session policy, durable reservations, and parent-visible formal results.
+
+```ts cordis-catalog
+/** Bind a fresh RG composition or restore main policy; persisted children gain no new run authorization.
+ * @param agent - live or initialization-window Agent.
+ */
+initialize(agent: Agent): void
+
+/** Read the current projection without cold-log scans.
+ * @param session - prepared Session.
+ * @returns exact RG state, or null outside RG.
+ */
+read(session: Session): RgSessionState | null
+
+/** Read process-local save evidence for an exact live Session.
+ * @param session - attached Session whose save lifecycle is being inspected.
+ * @returns unknown for missing, replaced, or uncertain owners; saving until the owned operation settles.
+ */
+statusOf(session: Session): 'ready' | 'saving' | 'unknown'
+
+/** Read the exact Session claim disposition without starting an Agent.
+ * @param session - prepared Session.
+ * @returns the claim view, or undefined when its projection is unavailable.
+ */
+claimOf(session: Session): ClaimWireState | null | undefined
+
+/** Bound model-visible claim details including the complete JSON wrapper.
+ * @param session - Session owning the input.
+ * @param status - live claim durability state.
+ * @param claim - JSON-safe claim retained by the Agent or its projection.
+ * @returns a bounded summary; omitted raw fields and text are explicitly marked.
+ * @throws RgError when the configured budget cannot hold the minimum summary.
+ */
+claimReport(session: Session, status: 'saving' | 'unknown' | null, claim: ClaimRecovery | ClaimWireState | null): RgClaimReport
+
+/** Follow complete RG snapshots without activating a historical Agent.
+ * @param request - authorized Session identity.
+ * @param signal - transport lifetime.
+ * @returns ordered replacement snapshots; unknown disables dependent actions.
+ */
+@Remote({ mode: 'stream', resources: { session: request => request.sessionId } }) async *watchView(request: { readonly sessionId: SessionId }, signal: AbortSignal): AsyncIterable<RgView>
+
+/** Check every request against its frozen policy and, for children, its exact live reservation.
+ * @param agent - requesting Agent.
+ * @param selection - frozen request selection.
+ * @param context - exact pre-step messages and signal for a confirmed first claim.
+ */
+assertRequest(agent: Agent, selection: Readonly<ModelSelection>, context?: { readonly signal: AbortSignal; readonly messages: readonly UserMessage[] }): void
+
+/** Start a new budget only from a human-owned Remote action. Concurrent actions on the same Agent are refused.
+ * A failed save or interrupted delivery leaves the task outcome uncertain and refuses further RG work.
+ * @param agent - exact Session selected in the GUI.
+ * @param objective - human-entered next task.
+ * @returns the new task after its input is submitted.
+ */
+@Remote async newTask(agent: Agent, objective: string): Promise<RgTask>
+
+/** Authorize local commits for one unused task; no remote publication is granted.
+ * @param agent - exact idle main Agent selected by the workspace owner.
+ * @param scope - explicit repository-relative files or directories approved by the human.
+ * @param signal - cancels Git inspection; accepted work remains owned until its flush settles.
+ * @returns the committed local-only task grant.
+ */
+@Remote async authorizeLocalGit(agent: Agent, scope: readonly string[], signal: AbortSignal): Promise<RgGitState>
+
+/** Explicitly leave local Git delivery, retaining all branches and checkouts for human inspection.
+ * @param agent - idle coordinating Agent selected by the workspace owner.
+ */
+@Remote async leaveLocalGit(agent: Agent): Promise<void>
+
+/** Read the task's committed local Git facts without starting commands.
+ * @param session - prepared owner Session.
+ * @returns null in workspace mode, otherwise the current local delivery facts.
+ */
+readGit(session: Session): RgGitState | null
+
+/** Recheck a previous report's exact scope without launching another model.
+ * @param agent - Session owning the review.
+ * @param signal - cancels file inspection.
+ * @returns current RG state after any stale-report mutation.
+ */
+@Remote async recheck(agent: Agent, signal: AbortSignal): Promise<RgSessionState | null>
+
+/** Admit one fresh role after model preflight, then notify its parent on formal settlement.
+ * @param parent - coordinating main Agent.
+ * @param role - worker or reviewer.
+ * @param input - complete structured handoff.
+ * @param requested - optional candidate route.
+ * @param signal - cancellation of startup, not the lifetime of an already-returned tool call.
+ * @returns the started role identity; it is not a completion or pass.
+ */
+async startRole(parent: Agent, role: 'worker' | 'reviewer', input: RgHandoff, requested: { provider: string; model: string } | undefined, signal: AbortSignal): Promise<{ kind: 'activation'; subagentId: SessionId; runId: RgRunId }>
+```
+
+Types: [Agent](core.zh.md) · [ClaimRecovery](core.zh.md) · [ClaimWireState](core.zh.md) · [ModelSelection](core.zh.md) · [Session](session.zh.md) · [SessionId](core.zh.md) · [UserMessage](session.zh.md)
+
+Source: [`packages/experimental/review-gated/src/runtime.ts`](../../packages/experimental/review-gated/src/runtime.ts)
+
 <a id="ctxsubagentmodelselection--subagentmodelselectionconfig"></a>
 
 ### `ctx.subagentModelSelection` — `SubagentModelSelectionConfig`
 
 Host settings owner that records Session authorization before the first model request.
+
+```ts cordis-catalog
+/**
+ * Register a composition-owned authorization source without changing global preferences.
+ * Sources are sampled only for new root Sessions. Existing, resumed, seeded and
+ * child Sessions retain their recorded or inherited decision. More than one
+ * matching source, or removal/replacement during resolution, rejects creation.
+ * @param source - named resolver returning a non-empty route list or abstaining.
+ * @returns the effect disposer that withdraws this source for later creations.
+ */
+registerSource(source: SubagentModelSelectionSource): () => void
+```
 
 Source: [`packages/subagent/tool-subagent/src/model-selection-settings.ts`](../../packages/subagent/tool-subagent/src/model-selection-settings.ts)
 
@@ -452,6 +575,16 @@ startActivation(spec: SubagentActivationSpec & { readonly childId: SessionId }):
  * @returns activation with a message id only for local children.
  */
 startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>
+
+/**
+ * Register a synchronous, rejection-only check at the actual activation start.
+ * Every current guard inspects the immutable specification before the manager
+ * reserves resources. A throw prevents local and external provider execution.
+ * Removing a guard affects later starts, not activations already admitted.
+ * @param check - synchronous callback that throws to reject and otherwise returns.
+ * @returns the effect disposer that removes this exact registration.
+ */
+guardStarts(check: SubagentStartGuard): () => void
 
 /**
  * Join progressing descendants without cancelling them. Idle descendants whose

@@ -306,6 +306,7 @@ hydratePrepared( session: Session, events: readonly SessionEvent[], ): Projectio
  * fail-soft paths contain it.
  * @param session - the live session to checkpoint.
  * @returns resolution after durability and event emission.
+ * @throws when a live Session has no durable writer acknowledgement or the cache write fails.
  */
 async write(session: Session): Promise<void>
 

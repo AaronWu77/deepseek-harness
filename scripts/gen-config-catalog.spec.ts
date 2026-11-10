@@ -1,4 +1,4 @@
-/** Shared schema aliases must retain the catalog's declared-field checks. */
+/** Plugin classification and schema aliases retain the catalog's declared-field checks. */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -178,6 +178,84 @@ export const Shared = makeSchema()
 export const Shared = Schema.union([MissingSchema])
 `)
     expect(() => collectConfigCatalog(root)).toThrow("schema alias 'MissingSchema' must name a const or named value import")
+  })
+})
+
+describe('default plugin export classification', () => {
+  const config = `
+import Schema from '@deepseek-ai/schemastery'
+export interface Settings {
+  /** Whether the feature is enabled. */
+  enabled: boolean
+}
+export interface Config {
+  /** Complete feature settings. */
+  settings: Settings
+}
+export const Config = Schema.object({ settings: Schema.object({ enabled: Schema.boolean() }) })
+`
+  const runtime = `
+import { Config } from './config.ts'
+export default class Provider {
+  static inject = ['agents']
+  static Config = Config
+  constructor(ctx: unknown, config: Config) {}
+}
+`
+
+  it.each(['declaration', 'identifier', 're-export'])('collects the declaration context for a default service (%s)', (mode) => {
+    const { root, write } = fixture()
+    write('packages/test/provider/src/config.ts', config)
+    write('packages/test/provider/src/runtime.ts', runtime)
+    write('packages/test/provider/src/barrel.ts', "export { default } from './runtime.ts'\n")
+    const entry = mode === 're-export' ? "export { default } from './barrel.ts'\n"
+      : mode === 'identifier' ? runtime.replace('export default class', 'class') + '\nexport default Provider\n' : runtime
+    write('packages/test/provider/src/index.ts', entry)
+    const provider = collectConfigCatalog(root).find(entry => entry.pkg === '@test/provider')
+    expect(provider).toMatchObject({ kind: 'config', className: 'Provider', configTypeName: 'Config',
+      entry: 'packages/test/provider/src/index.ts', inject: ['agents'], schemaKeys: ['settings', 'settings.enabled'] })
+    expect(provider?.pastes?.map(paste => paste.source)).toEqual([
+      'packages/test/provider/src/config.ts:7', 'packages/test/provider/src/config.ts:3',
+    ])
+    expect(provider?.pastes?.[0]?.text).toContain('settings: Settings')
+  })
+
+  it.each([
+    { entry: "export { Provider as default } from './runtime.ts'", named: true },
+    { entry: "import { Provider as Service } from './runtime.ts'; export default Service", named: true },
+    { entry: "import Service from './runtime.ts'; export { Service as default }", named: false },
+  ])('resolves an explicit plugin alias: $entry', ({ entry, named }) => {
+    const { root, write } = fixture()
+    write('packages/test/provider/src/config.ts', config)
+    write('packages/test/provider/src/runtime.ts', named ? runtime.replace('export default class', 'export class') : runtime)
+    write('packages/test/provider/src/index.ts', entry)
+    const provider = collectConfigCatalog(root).find(entry => entry.pkg === '@test/provider')
+    expect(provider).toMatchObject({ kind: 'config', className: 'Provider', inject: ['agents'], schemaKeys: ['settings', 'settings.enabled'] })
+  })
+
+  it.each([
+    { entry: "export { default } from './runtime.ts'", target: 'export const Other = 1', error: "does not export plugin 'default'" },
+    { entry: "export { default } from './runtime.ts'", target: "export { default } from './index.ts'", error: 'cyclic plugin export' },
+    { entry: "export { Missing as default } from './runtime.ts'", target: runtime, error: "does not export plugin 'Missing'" },
+    { entry: "export type { Provider as default } from './runtime.ts'", target: runtime, error: 'type-only plugin export' },
+    { entry: "export { type Provider as default } from './runtime.ts'", target: runtime, error: 'type-only plugin export' },
+    { entry: "import type Service from './runtime.ts'; export default Service", target: runtime, error: 'type-only plugin export' },
+    { entry: "export { default } from './runtime.js'", target: runtime, error: 'package-relative .ts' },
+    { entry: 'export default Missing', target: runtime, error: "cannot resolve plugin binding 'Missing'" },
+  ])('rejects an unresolved plugin export instead of classifying a library: $entry', ({ entry, target, error }) => {
+    const { root, write } = fixture()
+    write('packages/test/provider/src/config.ts', config)
+    write('packages/test/provider/src/runtime.ts', target)
+    write('packages/test/provider/src/index.ts', entry)
+    expect(() => collectConfigCatalog(root)).toThrow(error)
+  })
+
+  it('checks schema fields in a re-exported service declaration', () => {
+    const { root, write } = fixture()
+    write('packages/test/provider/src/config.ts', config.replace('enabled: Schema.boolean()', 'hidden: Schema.boolean()'))
+    write('packages/test/provider/src/runtime.ts', runtime)
+    write('packages/test/provider/src/index.ts', "export { default } from './runtime.ts'\n")
+    expect(() => collectConfigCatalog(root)).toThrow("schema validates key 'settings.hidden'")
   })
 })
 

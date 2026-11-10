@@ -28,7 +28,12 @@
     // not declaration path aliases, keep each package/vendor source compiled
     // under its own tsconfig boundary.
     "paths": {
+      "@deepseek-ai/dsh-session-persistence-jsonl/src/format": ["./packages/session/session-persistence-jsonl/src/format.ts"],
       "@deepseek-ai/dsh-experimental-review-gated": ["./packages/experimental/review-gated/src/index.ts"],
+      "@deepseek-ai/dsh-experimental-review-gated/role": ["./packages/experimental/review-gated/src/role.ts"],
+      "@deepseek-ai/dsh-experimental-review-gated/client": ["./packages/experimental/review-gated/src/client/index.ts"],
+      "@deepseek-ai/dsh-experimental-review-gated/types": ["./packages/experimental/review-gated/src/types.ts"],
+      "@deepseek-ai/dsh-experimental-review-gated/src/*": ["./packages/experimental/review-gated/src/*"],
       "@deepseek-ai/dsh-client-ui-file-actions": ["./packages/client/ui-file-actions/src/index.ts"],
       "@deepseek-ai/dsh-client-ui-file-actions/client": ["./packages/client/ui-file-actions/src/client/index.ts"],
       "@deepseek-ai/dsh-client-ui-file-actions/types": ["./packages/client/ui-file-actions/src/types.ts"],

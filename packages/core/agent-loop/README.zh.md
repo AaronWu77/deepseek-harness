@@ -70,9 +70,11 @@ const handle = await ctx.agents.create({
 
 每次 inbox 变更都会提交一条规范化的 `agent/inbox/spliced` 事件。投影注册表会同步折叠该事件，因此 `Session.append()` 返回时，实时投影已经反映该 splice。插入、编辑、移除、领取与取消都通过同一组标准 splice 坐标回放。普通删除携带 `outcome: 'canceled'` 并发出 `agent/inbox/discarded { message }`；领取使用不带 outcome 的纯删除，并发出 `agent/inbox/claimed`。每次插入都会发出 `agent/inbox/inserted { message }`。`MessageId` 在两个待处理列表之间保持唯一。需要被移除消息的消费方应使用 claimed 或 discarded 通知，而不依赖 splice 前的 `session/event` 投影视图。
 
+消费方可以在提交输入前启用受保护认领。循环在移除原始有序批次或运行 pre-step 前保存该批次，并在主模型请求前保存被接纳的消息。被拒绝或为空的决定会保留最近的原始批次供检查。中断的认领或恢复出的未结算独占准入会保持暂停；请检查 Session，并仅在确认重试安全后开始新会话。Pre-step 可能已经调用模型或工具，flush 失败不会回滚写入。取消会保留受保护的待处理输入；teardown 等待已接受的 flush 监听器结算。
+
 ### 一个步骤做什么
 
-每个步骤都会发送会话的派生历史——最新的非空 `system/message` 节点是有效提示词，渲染提示词为空时则没有系统消息——及其可见工具 schema；模型的工具调用经过受守卫的工具流水线，每个被接纳的事实都会在下一步据此派生之前追加到会话日志。循环把完整的原始调用批次传给 `ctx.tools.execute()`；内置执行器保留模型顺序的结果和独占屏障。取消是协作式的：`agent.cancel()` 中止当前活动，并在未设置 `keepInbox` 时清除待处理工作；被取消的流会终结已送达用户的文本。
+每个步骤都会发送会话的派生历史——最新的非空 `system/message` 节点是有效提示词，渲染提示词为空时则没有系统消息——及其可见工具 schema；模型的工具调用经过受守卫的工具流水线，每个被接纳的事实都会在下一步据此派生之前追加到会话日志。循环把完整的原始调用批次传给 `ctx.tools.execute()`；内置执行器保留模型顺序的结果和独占屏障。取消是协作式的：`agent.cancel()` 中止当前活动，并通常在未设置 `keepInbox` 时清除待处理工作；受保护的待处理输入会保留。被取消的流会终结已送达用户的文本。
 
 -----
 
@@ -113,11 +115,11 @@ loop 在发布工厂前等待必需的注册完成。它对模型选择和 inbox
 
 ### 持久化集成
 
-循环是会话写句柄在生产环境中的获取点。挂载 `ctx.sessionPersistence` 后，`create`/`createAgent` 调用 `persistence.create(header)`——在发布之前存储持久身份并取得写所有权——并通过句柄追加构造 seed；`resume` 先调用 `persistence.open(id, 'write')`（排除同 id 的并发恢复），通过句柄读取物理上有效的日志，并为在轮次中途崩溃的日志把 `interruptedTurnClosers` 作为普通批次追加——语义崩溃修复是 agent 层的职责，而非存储入口。入库前，`appendUnstoredSuffix` 存储包含 seed 标记的构造历史。随后 setup 通过实时事件流追加。从入库起，挂载的后端按会话 id 把该会话的 `session/event` 批次、`session/flush` 屏障与 `session/disposed` 退役路由进活跃写句柄；循环只通过它拥有的句柄触碰存储。在后端仍保持挂载时，teardown 会在驱动器提交收尾事件后关闭句柄；close 排空已路由的缓冲并释放写所有权。没有后端时，会话只存在于内存中，其余一切不变。
+循环是会话写句柄在生产环境中的获取点。挂载 `ctx.sessionPersistence` 后，`create`/`createAgent` 调用 `persistence.create(header)`——在发布之前存储持久身份并取得写所有权——并通过句柄追加构造 seed；`resume` 先调用 `persistence.open(id, 'write')`（排除同 id 的并发恢复），通过句柄读取物理上有效的日志，并为在轮次中途崩溃的日志把 `interruptedTurnClosers` 作为普通批次追加——语义崩溃修复是 agent 层的职责，而非存储入口。入库前，`appendUnstoredSuffix` 存储包含 seed 标记的构造历史；写句柄支持 `bindSession` 时，循环会绑定精确 Session。随后 setup 通过实时事件流追加。从入库起，挂载的后端把该会话的 `session/event` 批次、`session/flush` 屏障与 `session/disposed` 退役路由进活跃写句柄；循环只通过它拥有的句柄触碰存储。在后端仍保持挂载时，teardown 会在驱动器提交收尾事件后关闭句柄；close 排空已路由的缓冲并释放写所有权。没有后端时，会话只存在于内存中，其余一切不变。
 
 ### 轮次与步骤流程
 
-驱动器在其整个生命周期内拥有一个 agent，并在 `ctx.agents.withInitiator(agent, ...)` 内运行。`AgentLoop` 在服务生命周期内注册标准 `inbox` 投影，因此冷读取在没有 Agent 和所有 Agent 卸载后都可用。它还拥有 `modelSelection`，并为每个 Agent 构建 `AgentModel`，实现公开的 [Model API](../agent/README.zh.md#model-selection)。其包内部 `ReactLoopInbox` 使用该共享投影执行结构化命令与仅供 loop 使用的领取操作。在轮次边界，它先打开持久轮次，再原子领取待处理的 next-step 输入与一条排队提示词；在步骤之间则只领取 next-step 输入。驱动器组装提示词与工具，并运行 `agent/pre-step`；fallback 在监听器执行后投影运行时上下文。被拒绝的决定或空的首批输入不打开步骤。接纳后的首次尝试先记录 `step/start`，再运行 `agent/request` waterfall 与 `prepareCall()`；这两个异步阶段都看不到待提交的系统提示词与已接纳用户消息进入历史，在任一阶段取消都不会提交这两者。每次尝试时，循环随后依据已准备调用的能力，同步将渲染后的提示词与存活的 `system/message` 节点协调一致、刷新已注册运行时事实而不重新组装绑定的提示词或工具、仅在首次尝试追加已接纳的 `user/message` 批次并原位替换循环自有上下文候选、恢复被移除的运行时上下文、按需记录 header 与 context，再派生并冻结请求，通过该绑定的已准备调用发起流式请求。重试复用同一份已渲染组装结果，不重复组装、`agent/pre-step` 或用户消息准入。协调过程可见 pre-step 与重试中的压缩；序列中断时将提示词归并到头部，而非在已提交用户消息之后追加更新。请求由 `header.config`、`deriveMessages()` 与 `header.tools` 构成，不携带 `system` 字段。每次模型尝试会发出一个进程本地 `start`，仅在匹配的持久 assistant-frame 结算之后发出各个 `chunk`，并恰好发出一个终态 `end`；最终组装或消息追加失败时以 `aborted` 结算，`committed` 则出现在持久 `assistant/message` 之后。每次成功的模型调用都恰好追加一个 message 锚点，被取消的流则追加带 `interrupted: true` 的锚点并携带已交付前缀，使下一次请求包含用户看到的内容。在步骤内，独占调用形成屏障，并行安全调用使用有界滚动池；策略、持久结果与结果上下文保持模型顺序。
+驱动器在其整个生命周期内拥有一个 agent，并在 `ctx.agents.withInitiator(agent, ...)` 内运行。`AgentLoop` 在服务生命周期内注册标准 `inbox` 投影，因此冷读取在没有 Agent 和所有 Agent 卸载后都可用。它还拥有 `modelSelection`，并为每个 Agent 构建 `AgentModel`，实现公开的 [Model API](../agent/README.zh.md#model-selection)。其包内部 `ReactLoopInbox` 使用该共享投影执行结构化命令与仅供 loop 使用的领取操作。在轮次边界，它先打开持久轮次，再原子领取待处理的 next-step 输入与一条排队提示词；在步骤之间则只领取 next-step 输入。驱动器组装提示词与工具，并运行 `agent/pre-step`；fallback 在监听器执行后投影运行时上下文。最终 `enter` 决策后，串行 `agent/post-pre-step` 监听器观察原始与最终消息，并可注册同步 guard；该步骤每次进入 AgentLoop stream 前都执行 guard，失败时受保护认领保持 unknown。guard 只覆盖该入口，不覆盖后续适配器或网络活动。被拒绝的决定或空的首批输入不打开步骤。接纳后的首次尝试先记录 `step/start`，再运行 `agent/request` waterfall 与 `prepareCall()`；这两个异步阶段都看不到待提交的系统提示词与已接纳用户消息进入历史，在任一阶段取消都不会提交这两者。每次尝试时，循环随后依据已准备调用的能力，同步将渲染后的提示词与存活的 `system/message` 节点协调一致、刷新已注册运行时事实而不重新组装绑定的提示词或工具、仅在首次尝试追加已接纳的 `user/message` 批次并原位替换循环自有上下文候选、恢复被移除的运行时上下文、按需记录 header 与 context，再派生并冻结请求，通过该绑定的已准备调用发起流式请求。重试复用同一份已渲染组装结果，不重复组装、`agent/pre-step` 或用户消息准入。协调过程可见 pre-step 与重试中的压缩；序列中断时将提示词归并到头部，而非在已提交用户消息之后追加更新。请求由 `header.config`、`deriveMessages()` 与 `header.tools` 构成，不携带 `system` 字段。每次模型尝试会发出一个进程本地 `start`，仅在匹配的持久 assistant-frame 结算之后发出各个 `chunk`，并恰好发出一个终态 `end`；最终组装或消息追加失败时以 `aborted` 结算，`committed` 则出现在持久 `assistant/message` 之后。每次成功的模型调用都恰好追加一个 message 锚点，被取消的流则追加带 `interrupted: true` 的锚点并携带已交付前缀，使下一次请求包含用户看到的内容。在步骤内，独占调用形成屏障，并行安全调用使用有界滚动池；策略、持久结果与结果上下文保持模型顺序。
 
 提示词准入依据实际的 `prepareCall()` 结果，而非先前的 `request/context`。没有系统节点时，即使提示词为空也追加（预留第 0 号节点，但不产生协议消息）。在不具备能力的路由上，或有效文本不同的新请求序列开始时，非空渲染文本归并到首个系统节点：每个非空的后续系统节点分别收到有日志记录的空内容替换，随后按需重写头节点。未生效的空尾节点无需替换，也不决定有效文本。新序列开始时若最新存活节点已经持有该渲染文本，则不产生系统事件，请求保留原有前缀。延续中的 `in-history` 序列在有效提示词不变时不产生事件，非空变更则追加。无论路由或序列状态如何，空渲染文本都会通过有日志记录的逐节点空内容替换清除每个非空的后续系统节点，再按需清空头节点。模型不会继续看到旧指令。空头节点且没有生效的后续系统节点表示没有提示词；重复清除与恢复会话都保持为空。重新提供的非空提示词遵循同一路由／序列规则：延续中的具备能力路由可以追加它，不具备能力的路由或有效文本不同的新序列则重新填充头节点。以下情况开启序列：pre-step 决定声明 `startsRequestSeries`，或 `session.surface.contentGeneration` 自附接或上次请求以来发生变化（替换或图片省略决定）。仅当已准备路由未声明 `toolUpdate` 时，可见工具 schema 变化才强制归并提示词。同时支持工具和系统提示词更新的路由可以追加变更后的提示词并激活新增工具，无需改写此前消息。如果其他准入条件替换系统节点，请求会以当前工具声明开启新序列。恢复与单纯的提供方或模型切换都延续序列；准入仍由已准备的路由决定。逐节点的空内容替换保留其间历史，无需 surface 删除操作。
 
@@ -214,6 +216,7 @@ loop 在发布工厂前等待必需的注册完成。它对模型选择和 inbox
 
 - **分类是一元的**：安全性取决于比较同级调用或资源的调用必须保持独占（[原理](../../../.agents/notes/implemented/feature/2026-07-10-parallel-tool-call-execution.zh.md)）。
 - **根上下文关停的持久化**：存在活跃 Agent 时，关停根上下文可能使最终的 `turn/end` 仅留在内存中，未写入持久化日志。Agent teardown 完成不保证该事件已保存。
+- **未结算的 flush 监听器**：受保护输入会等待所有已接受的 Session flush 监听器，之后才释放写入器。永不结算的监听器可能使 `whenIdle()` 和 teardown 无法完成。
 - **此前已关闭的不一致历史**：失败步骤恢复不会改写已关闭历史轮次中尚无结果的调用。
 - **配置标签默认对应新会话**：省略 `sessionId` 时，每次启动都会创建新的 `${id}-session-<uuid>`；如需确切的恢复或创建行为，必须显式提供稳定的 `sessionId`，而 `resumeSessionId` 要求已有持久化历史。
 - **配置 agent 没有逐 agent persona 字段或 setup 钩子**：它们使用部署 persona；只有编程式 `ctx.agents.create()` / `resume()` 工厂选项支持带作用域的 persona 与工具组合。

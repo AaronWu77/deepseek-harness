@@ -60,6 +60,10 @@ kind: "package-reference"
 
 `startActivation({ provider, lifecycle?, childId?, label, request, signal, delivery })` 返回 `{ childId, messageId?, result, dispose }`，本地子级返回 `messageId`。省略 `lifecycle` 时，`prepareContinuable` 选择本地可续接子级，`start` 选择外部执行，保留已有分派。显式 `lifecycle: 'one-shot'` 必须使用 `prepareLocalOneShot`，创建真实本地子级并记录 one-shot descriptor/catalog，不接受后续输入或冷恢复。分离的 preparation 提供创建 hook，不返回 Agent 或 handle。manager 在 hook 前检查在线父级、深度、能力和重复身份，再统一管理子级创建、工作目录、权限继承、执行与清理。显式 one-shot preset 取代父级 preset 组合；setup 挂载该 preset，preflight 探测尚未发布的子级。调用方信号取消启动；本地 one-shot 与外部执行在发布后仍绑定 `signal`，直到终止清理完成。可续接调用方在发布后使用 `dispose()`。dispose 和中断也会终止并释放子级。`request.agentOptions` 覆盖后端支持的子级模型设置。`delivery: 'parent'` 提供模型完成通知，`delivery: 'caller'` 不发送通知或初始返回指导。one-shot 父级投递可以使用临时持久化；可续接父级投递需要持久化，调用方投递可以使用临时会话。可续接子级保留父级项目 origin，one-shot 子级以所选初始目录作为 origin。冷恢复需要持久化与 Session 查询服务。
 
+### 启动接纳策略
+
+`guardStarts(check)` 为每次 `startActivation()` 调用注册由 effect 持有的同步检查，涵盖直接调用的本地与外部启动。回调接收完整且不可变的 activation 请求，在 manager 获取子级资源之前抛出错误即可拒绝。检查不能改写请求或覆盖其他检查的拒绝。返回的 disposer 仅移除本次注册；插件卸载会撤销其检查，但不撤销已接纳的运行。这些检查不管理向已有可续接子级发送的后续消息。
+
 ### 子级 preset
 
 进程内 spawn 接受独立的 `agentPreset`；fork 与外部后端拒绝此选项。省略选择时，本地子级加入父方当前的 preset 代际。显式 id 挂载当前可用代际，即使该 id 与父方相同。通过 [`dsh-tool-subagent`](../tool-subagent/README.zh.md#selecting-a-child-preset) 配置模型可选项，并在 [preset 组装](../../preset/agent-preset-registry/README.zh.md)中配置 persona 与工具。冷恢复保留历史子级 descriptor 记录的 persona 和工具限制。

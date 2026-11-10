@@ -53,6 +53,16 @@ interface SessionHandle extends AsyncDisposable {
   readonly access: SessionAccess
 
   /**
+   * Bind live event routing to this exact Session until close. The owner must
+   * first append the complete Session prefix through this handle and must bind
+   * immediately before publishing it, without intervening Session appends.
+   * Backends without this optional capability cannot acknowledge live flushes.
+   * @param session - the Session owned by this write handle.
+   * @throws when the handle cannot bind this Session.
+   */
+  bindSession?(session: Session): void
+
+  /**
    * Read a slice of the valid contiguous logical log. The slice is a legal log
    * prefix segment: a torn physical tail is never returned, and repeated reads
    * on this handle never observe an older state than a prior read.
@@ -103,7 +113,7 @@ interface SessionHandle extends AsyncDisposable {
 
 ## flush 检查点
 
-`session/event` 是一个*同步*通知；挂载的后端按会话 id 把它路由进活跃写句柄的有界 write-behind 窗口，而不阻塞生产方（后端一次性安装这些监听器，因为持久化已保证每个 id 只有一个活跃写句柄）。第一个待处理事件会开启固定的内部批处理窗口，后续事件会加入但不会重置其截止时间。窗口到期后会通过该会话的写句柄启动一次持久化 `append`；该次写入期间接纳的事件会获得自己的截止时间，并形成后续批次。`session/flush` 会取消等待并排空至完全停稳，因此循环仍将其用作在领取下一个普通轮次之前的顺序与错误观察检查点。后台写入被拒绝时会按序保留对应事件、暂停自动路径，并通过 logger 报告；下一次显式 flush 会重试，并向其调用方响亮地拒绝。`session/disposed` 会执行同样的最终排空并关闭句柄，而 `close()` 本身会经由仍然打开的存储排空已路由的缓冲，因此后端 teardown 的关闭清扫不丢任何数据。该窗口只限制有意的批处理等待，不限制事件循环调度或后端完成持久化的延迟。
+`session/event` 是一个*同步*通知；挂载的后端把它路由进活跃写句柄的有界 write-behind 窗口，而不阻塞生产方。已绑定写入器只接受精确 Session；JSONL 为未绑定的旧写入器保留按 id 路由，但这类写入器不能确认持久化。第一个待处理事件会开启固定的内部批处理窗口，后续事件会加入但不会重置其截止时间。窗口到期后会通过该会话的写句柄启动一次持久化 `append`；该次写入期间接纳的事件会获得自己的截止时间，并形成后续批次。`session/flush` 会取消等待并排空至完全停稳。只有监听器通过 `SESSION_FLUSH_DURABLE` 确认精确绑定的 Session 已持久刷新时，`ctx.sessions.flush(session)` 才返回 `true`；观察者和未绑定写入器不提供确认。后台写入被拒绝时会按序保留对应事件、暂停自动路径，并通过 logger 报告；下一次显式 flush 会重试，并向其调用方响亮地拒绝。`session/disposed` 会执行同样的最终排空并关闭句柄，而 `close()` 本身会经由仍然打开的存储排空已路由的缓冲，因此后端 teardown 的关闭清扫不丢任何数据。该窗口只限制有意的批处理等待，不限制事件循环调度或后端完成持久化的延迟。
 
 ## 崩溃恢复保留被中断的轮次
 

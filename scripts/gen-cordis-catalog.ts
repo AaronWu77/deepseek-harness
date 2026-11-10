@@ -132,6 +132,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   spillStore: 'spill.md',
   storage: 'storage.md',
   storageDomain: 'storage.md',
+  reviewGated: 'subagent.md',
   subagentModelSelection: 'subagent.md',
   subagents: 'subagent.md',
   subprocess: 'subprocess.md',
@@ -299,6 +300,8 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  * appear on more than one page.
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
+  ClaimRecovery: 'core.md',
+  ClaimWireState: 'core.md',
   Principal: 'typert.md',
   PrincipalMap: 'typert.md',
   RemoteAccessResource: 'typert.md',
@@ -382,8 +385,10 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   AgentFactory: 'core.md',
   AgentHandle: 'core.md',
   ModelSelection: 'core.md',
+  SessionModelPolicy: 'core.md',
   AllowedModelRoute: 'subagent.md',
   SubagentModelSelectionSettings: 'subagent.md',
+  SubagentModelSelectionSource: 'subagent.md',
   AgentOptions: 'core.md',
   TurnBoundaryProjection: 'core.md',
   AgentStatus: 'core.md',
@@ -392,6 +397,8 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   CreateAgentOptions: 'core.md',
   CreateWorktreeRequest: 'worktrees.md',
   CreatedWorktree: 'worktrees.md',
+  ProvisionWorktreeRequest: 'worktrees.md',
+  ProvisionedWorktree: 'worktrees.md',
   CreateWorktreePhase: 'worktrees.md',
   RestoreWorktreeRequest: 'worktrees.md',
   RestoredWorktree: 'worktrees.md',
@@ -657,6 +664,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   SessionLocation: 'persistence.md',
   SessionPreparation: 'persistence.md',
   SessionAccess: 'persistence.md',
+  SESSION_FLUSH_DURABLE: 'persistence.md',
   SessionHandle: 'persistence.md',
   SessionPersistenceCreateOptions: 'persistence.md',
   SessionPersistenceOpenOptions: 'persistence.md',
@@ -746,6 +754,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   SubagentRun: 'subagent.md',
   SubagentRuntime: 'subagent.md',
   SubagentStartRequest: 'subagent.md',
+  SubagentStartGuard: 'subagent.md',
   AssembleContext: 'system-prompt.md',
   PromptContext: 'system-prompt.md',
   PromptContextOrderName: 'system-prompt.md',
@@ -989,6 +998,13 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
+  RgClaimReport: 'packages/experimental/review-gated/README.md',
+  RgView: 'packages/experimental/review-gated/README.md',
+  RgSessionState: 'packages/experimental/review-gated/README.md',
+  RgGitState: 'packages/experimental/review-gated/README.md',
+  RgTask: 'packages/experimental/review-gated/README.md',
+  RgHandoff: 'packages/experimental/review-gated/README.md',
+  RgRunId: 'packages/experimental/review-gated/README.md',
   ActionCardDecision: 'packages/experimental/action-cards/README.md',
   ActionCardKind: 'packages/experimental/action-cards/README.md',
   ActionCardResult: 'packages/experimental/action-cards/README.md',

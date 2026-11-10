@@ -4,7 +4,7 @@
  * @module @deepseek-ai/dsh-session-persistence/handle
  */
 
-import type { SessionEvent, SessionHeader, SessionId, SessionLogOffset, SessionSeedEventState } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionHeader, SessionId, SessionLogOffset, SessionSeedEventState } from '@deepseek-ai/dsh-session'
 
 /**
  * Log access granted by an open. `write` is read-write: the session's single
@@ -69,6 +69,16 @@ export interface SessionHandle extends AsyncDisposable {
   readonly inheritedEventCount: SessionLogOffset
   /** Whether this handle may mutate the log. */
   readonly access: SessionAccess
+
+  /**
+   * Bind live event routing to this exact Session until close. The owner must
+   * first append the complete Session prefix through this handle and must bind
+   * immediately before publishing it, without intervening Session appends.
+   * Backends without this optional capability cannot acknowledge live flushes.
+   * @param session - the Session owned by this write handle.
+   * @throws when the handle cannot bind this Session.
+   */
+  bindSession?(session: Session): void
 
   /**
    * Read a slice of the valid contiguous logical log. The slice is a legal log

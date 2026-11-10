@@ -85,7 +85,7 @@ The logical `SessionHeader.isSeeded` field reports whether fork history exists w
 
 ### Flush durable state
 
-`ctx.sessions.flush(session)` dispatches the awaited durability checkpoint: every persistence listener flushes and the call settles after all of them. A producer that needs an immediate durability barrier awaits it instead of assuming the write-behind drained.
+`ctx.sessions.flush(session)` waits for every scoped flush listener and returns `true` only when a listener explicitly acknowledges durable storage for that exact Session with `SESSION_FLUSH_DURABLE`. An observer returns no acknowledgement; `false` means no writer confirmed the checkpoint. A producer that needs durability must check the returned value and handle rejection.
 
 -----
 

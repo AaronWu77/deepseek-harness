@@ -497,7 +497,6 @@ export class SubagentManager {
             seed,
             meta: {
               ...childSessionMeta(parent, childDepth, prepared.seed !== undefined, preparation?.agentPreset ?? request.agentPreset),
-              ...(oneShot ? { cwd } : {}),
             },
             inheritedEventCount,
             delegatedPolicies,

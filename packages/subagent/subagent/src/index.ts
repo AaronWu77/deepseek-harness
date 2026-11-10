@@ -65,6 +65,7 @@ import type {
   SubagentRunInfo,
   SubagentSendMessageOptions,
   SubagentStartRequest,
+  SubagentStartGuard,
 } from './types.ts'
 import { SubagentError } from './error.ts'
 import { assertSubagentMaxDepth } from './depth.ts'
@@ -97,6 +98,7 @@ export type {
   SubagentRun,
   SubagentSendMessageOptions,
   SubagentStartRequest,
+  SubagentStartGuard,
   ResolvedSubagentStartRequest,
   SubagentStopReason,
   SubagentStopReasonMap,
@@ -205,6 +207,7 @@ export class SubagentRuntime extends TypertRemoteService {
   /** Local one-shot creation and lifecycle hooks are available on this manager implementation. */
   readonly supportsLocalOneShot: true = true
   private providers = new Map<string, SubagentProvider>()
+  private readonly startGuards = new Set<{ check: SubagentStartGuard }>()
   private manager: SubagentManager | undefined
   /**
    * The contained lifecycle-edge publisher. Built here because scoped dispatch
@@ -298,9 +301,27 @@ export class SubagentRuntime extends TypertRemoteService {
       throw new SubagentError('subagent creation requires the exact live parent agent', 'UNAUTHORIZED')
     }
     if (spec.request.outputSchema !== undefined) assertObjectJsonSchema(spec.request.outputSchema)
+    for (const guard of [...this.startGuards]) guard.check(spec)
     return !oneShot && provider.prepareContinuable === undefined
       ? manager.startExternal(spec)
       : manager.startLocal(spec)
+  }
+
+  /**
+   * Register a synchronous, rejection-only check at the actual activation start.
+   * Every current guard inspects the immutable specification before the manager
+   * reserves resources. A throw prevents local and external provider execution.
+   * Removing a guard affects later starts, not activations already admitted.
+   * @param check - synchronous callback that throws to reject and otherwise returns.
+   * @returns the effect disposer that removes this exact registration.
+   */
+  guardStarts(check: SubagentStartGuard): () => void {
+    // oxlint-disable-next-line typescript/no-misused-promises -- synchronous effect disposer
+    return this.ctx.effect(() => {
+      const entry = { check }
+      this.startGuards.add(entry)
+      return () => { this.startGuards.delete(entry) }
+    }, 'subagents.guardStarts()')
   }
 
   /**
