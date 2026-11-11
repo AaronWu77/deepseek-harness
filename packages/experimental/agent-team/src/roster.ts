@@ -277,8 +277,10 @@ export class TeamRoster {
         phase: 'failed',
         error: errorMessage(error),
       }
+      let cleanupStarted = false
       try {
         const phase = await this.settleProvisioning(root, failed)
+        cleanupStarted = true
         await this.stopTeammates(root, [childId])
         if (phase === 'active') {
           throw new TeamError(
@@ -288,6 +290,13 @@ export class TeamRoster {
           )
         }
       } catch (recordError: unknown) {
+        if (!cleanupStarted) {
+          try {
+            await this.stopTeammates(root, [childId])
+          } catch (cleanupError: unknown) {
+            throw new AggregateError([error, recordError, cleanupError], 'teammate creation, failure recording, and cleanup failed')
+          }
+        }
         throw new AggregateError([error, recordError], 'teammate creation and durable failure recording both failed')
       }
       throw error
@@ -355,7 +364,12 @@ export class TeamRoster {
       signal.addEventListener('abort', onAbort, { once: true })
       try {
         signal.throwIfAborted()
-        await this.ctx.sessions.flush(session)
+        if (!await this.ctx.sessions.flush(session)) {
+          throw new TeamError(
+            `teammate "${childId}" initial prompt was not durably acknowledged; restore its Session writer and inspect state before retrying`,
+            'TEAM_PROVISIONING_CONFLICT',
+          )
+        }
         // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
         const suffix = session.snapshotEvents(session.inheritedEventCount)
         if (messageAccepted(suffix, message => message.id === messageId)) return

@@ -5,8 +5,8 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import { unsupportedModel, unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
-import type { CreateSessionOptions } from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FLUSH_DURABLE, SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
+import type { CreateSessionOptions, SessionEvent } from '@deepseek-ai/dsh-session'
 import { SessionPersistenceRevision, type SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 import Storage, { type KvUnit, type KvUnitDescriptor, type StorageBackend } from '@deepseek-ai/dsh-storage'
 import { DomainFacility, type KvTable } from '@deepseek-ai/dsh-storage-domain'
@@ -82,6 +82,7 @@ export async function harness(options: {
   backend?: StorageBackend
   direct?: true
   sessionController?: false
+  sessionWriter?: false
   config?: Config
 } = {}) {
   const ctx = new Context()
@@ -113,7 +114,12 @@ export async function harness(options: {
     ctx.provide('sessionController', { resolveAgent: resolve, create: createSession } as never)
   }
   const flush = vi.fn(async () => {})
-  ctx.on('session/flush', flush)
+  const storedSessions = new Map<SessionId, readonly SessionEvent[]>()
+  if (options.sessionWriter !== false) ctx.on('session/flush', async (session): Promise<typeof SESSION_FLUSH_DURABLE> => {
+    await flush()
+    storedSessions.set(session.id, structuredClone(session.snapshotEvents()))
+    return SESSION_FLUSH_DURABLE
+  })
   ctx.provide('sessionPersistence', { stat } as never)
   await options.beforeService?.(ctx, facility)
   let fiber: Context['fiber']
@@ -131,7 +137,7 @@ export async function harness(options: {
     if ('error' in result) throw result.error
     return result.agent
   }
-  return { ctx, service: ctx.schedule, pool, resolve, resolveAgent, createSession, stat, flush, fiber }
+  return { ctx, service: ctx.schedule, pool, resolve, resolveAgent, createSession, stat, flush, storedSessions, fiber }
 }
 
 /**

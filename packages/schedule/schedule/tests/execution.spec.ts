@@ -6,7 +6,7 @@ import GoalService from '@deepseek-ai/dsh-goal'
 import * as goalRoundDriver from '@deepseek-ai/dsh-goal-round-driver'
 import { createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FLUSH_DURABLE, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { expect, it, vi } from 'vitest'
 import { ScheduleId } from '../src/domain.ts'
@@ -55,10 +55,13 @@ it('requeues a still-queued delivery after restart instead of enqueuing another 
       const flushStarted = Promise.withResolvers<undefined>()
       const releaseFlush = Promise.withResolvers<undefined>()
       let eventsAtFlush: readonly SessionEvent[] = []
-      ctx.on('session/flush', (session) => {
+      const stored = new Map<SessionId, readonly SessionEvent[]>()
+      ctx.on('session/flush', async (session): Promise<typeof SESSION_FLUSH_DURABLE> => {
         eventsAtFlush = session.snapshotEvents()
         flushStarted.resolve(undefined)
-        return releaseFlush.promise
+        await releaseFlush.promise
+        stored.set(session.id, structuredClone(eventsAtFlush))
+        return SESSION_FLUSH_DURABLE
       })
       const commit = vi.fn(async (task: ScheduleTask) => { tasks[0] = task })
       const runtime = new ScheduleRuntime(ctx, () => tasks, work => work(), commit, () => {}, LIMITS, async () => agent)
@@ -73,6 +76,7 @@ it('requeues a still-queued delivery after restart instead of enqueuing another 
         vi.setSystemTime(new Date('2026-09-16T00:00:03.000Z'))
         releaseFlush.resolve(undefined)
         await runtime.dispose()
+        expect(stored.get(agent.session.id)).toEqual(eventsAtFlush)
         expect(tasks).toEqual([expect.objectContaining({
           record, target: { kind: 'session', sessionId: agent.session.id }, status: 'ended',
           lastDelivery: {
@@ -153,7 +157,12 @@ it('holds every recovered batch member before the real driver claims their share
       if (subject === agent && input.id === message.id) claimed.resolve(undefined)
     })
     // The restored driver takes the shared message before the recovery flush finishes.
-    ctx.on('session/flush', () => claimed.promise)
+    const stored = new Map<SessionId, readonly SessionEvent[]>()
+    ctx.on('session/flush', async (session): Promise<typeof SESSION_FLUSH_DURABLE> => {
+      await claimed.promise
+      stored.set(session.id, structuredClone(session.snapshotEvents()))
+      return SESSION_FLUSH_DURABLE
+    })
     const commit = vi.fn(async (task: ScheduleTask) => {
       tasks[tasks.findIndex(current => current.record.id === task.record.id)] = task
     })
@@ -196,12 +205,16 @@ it('consolidates manual executions while a real Goal round is in flight', async 
     const adapter = new HangingAdapter()
     ctx.llm.registerAdapter(['mock'], adapter)
     const agent = await ctx.agentLoop.create(SessionId('goal-owner'), { provider: 'mock', model: 'mock' })
+    const stored = new Map<SessionId, readonly SessionEvent[]>()
+    ctx.on('session/flush', (session) => {
+      stored.set(session.id, structuredClone(session.snapshotEvents()))
+      return SESSION_FLUSH_DURABLE
+    })
     ctx.goals.create(agent, { objective: 'Keep working while the schedule queues', maxGoalRounds: 2 })
     await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
     expect(agent.status).toBe('running')
 
     ctx.provide('sessionController', { resolveAgent: async () => ({ agent }) } as never)
-    ctx.on('session/flush', () => {})
     const record = createRRuleScheduleRecord(
       ScheduleId('goal-queue'), 'Queue behind Goal', 'Scheduled follow-up',
       'DTSTART:20260916T010000Z\nRRULE:FREQ=DAILY', Date.now(),

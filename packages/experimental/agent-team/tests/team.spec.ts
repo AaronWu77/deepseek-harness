@@ -18,6 +18,7 @@ import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-a
 import { mountWorkingDirectoryFixture } from '../../../subagent/subagent/tests/working-directory-fixture.ts'
 import TeamService, { TeamError, TeamId, TeamMessageId, TeamTaskId } from '../src/index.ts'
 import { TeamRuntimeLifecycle } from '../src/lifecycle.ts'
+import { TeamJournal } from '../src/journal.ts'
 import { teamProjectionDefinition } from '../src/projection.ts'
 import type { TeamMemberSnapshot, TeamMessageSnapshot, TeamTaskSnapshot } from '../src/index.ts'
 import { TestSessionQuery } from './test-session-query.ts'
@@ -241,6 +242,46 @@ describe('Team identity and provisioning', () => {
     await expect(spawn(ctx, lead, 'fresh-worker')).rejects.toMatchObject({ code: 'TEAM_MEMBER_NAME_TAKEN' })
   })
 
+  it('does not publish a task after an unacknowledged lead checkpoint', async () => {
+    const { ctx, lead } = await setup([])
+    let session: Session | undefined
+    await ctx.plugin(Object.assign(function bareLead(childCtx: Context) {
+      session = childCtx.sessions.create(SessionId('unbound-lead'))
+    }, { inject: ['sessions'] }))
+    if (session === undefined) throw new Error('missing lead session')
+    expect(await ctx.sessions.flush(lead.session)).toBe(true)
+    const onCommit = vi.fn()
+    const journal = new TeamJournal(ctx, null as never, onCommit)
+    const root = { session } as Agent
+    await expect(journal.appendAndFlush(root, 'team/task', {
+      version: 2, teamId: TeamId(session.id), task: {
+        id: TeamTaskId('task-1'), revision: 1, subject: 'unsaved', description: 'must not publish',
+        status: 'pending', blockedBy: [], writeScopes: [],
+      },
+    })).rejects.toMatchObject({ code: 'TEAM_DURABILITY_UNAVAILABLE' })
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(session.snapshotEvents().some(event => event.type === 'team/task')).toBe(true)
+  })
+
+  it('rejects the public task operation when its checkpoint is unacknowledged', async () => {
+    const { ctx, lead } = await setup([])
+    vi.spyOn(ctx.sessions, 'flush').mockResolvedValue(false)
+    await expect(ctx.agentTeams.createTask(lead, { subject: 'unsaved', description: 'inspect before retry' }))
+      .rejects.toMatchObject({ code: 'TEAM_DURABILITY_UNAVAILABLE' })
+  })
+
+  it('does not accept a live child receipt without its own writer', async () => {
+    const { ctx } = await setup([])
+    let child: Session | undefined
+    await ctx.plugin(Object.assign(function bareSession(childCtx: Context) {
+      child = childCtx.sessions.create(SessionId('unbound-child'))
+    }, { inject: ['sessions'] }))
+    if (child === undefined) throw new Error('missing child session')
+    const initial = createUserMessage({ content: content('unpersisted'), source: { kind: 'user' } })
+    child.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [initial] })
+    await expect(teamInternals(ctx).roster.checkpointInitialPrompt(child.id, initial.id, SIGNAL)).rejects.toThrow()
+  })
+
   it('flushes the accepted child prompt before committing the active roster edge', async () => {
     const { ctx, lead } = await setup([textResponse('checkpointed child answer')])
     const flush = ctx.sessions.flush.bind(ctx.sessions)
@@ -268,6 +309,8 @@ describe('Team identity and provisioning', () => {
       liveSession = childCtx.sessions.create(SessionId('checkpoint-child'))
     }, { inject: ['sessions'] }))
     if (liveSession === undefined) throw new Error('checkpoint fixture did not create its Session')
+    const persisted = await ctx.sessionPersistence.create(liveSession.header)
+    persisted.bindSession!(liveSession)
     const initial = createUserMessage({ content: content('checkpoint me'), source: { kind: 'user' } })
     const checkpoint = internal.checkpointInitialPrompt(liveSession.id, initial.id, SIGNAL)
     await Promise.resolve(undefined)
@@ -280,10 +323,6 @@ describe('Team identity and provisioning', () => {
       target: 'next-turn', start: 0, inserted: [initial],
     })
     await checkpoint
-    // Live sessions persist only through an attached agent-loop writer; this
-    // bare fixture session seeds its durable log directly for the cold reread.
-    const persisted = await ctx.sessionPersistence.create(liveSession.header)
-    await persisted.append(liveSession.snapshotEvents())
     await persisted.close()
     await liveFiber.dispose()
 
@@ -297,17 +336,25 @@ describe('Team identity and provisioning', () => {
       disposedSession = childCtx.sessions.create(SessionId('disposed-checkpoint-child'))
     }, { inject: ['sessions'] }))
     if (disposedSession === undefined) throw new Error('disposed checkpoint fixture did not create its Session')
-    const disposed = internal.checkpointInitialPrompt(disposedSession.id, missing.id, SIGNAL)
-    const disposedResult = expect(disposed).rejects.toThrow('not found')
-    await Promise.resolve(undefined)
-    await disposedFiber.dispose()
-    await disposedResult
+    const disposedWriter = await ctx.sessionPersistence.create(disposedSession.header)
+    disposedWriter.bindSession!(disposedSession)
+    const realFlush = ctx.sessions.flush.bind(ctx.sessions)
+    const flushSpy = vi.spyOn(ctx.sessions, 'flush').mockImplementation(async (session) => {
+      const result = await realFlush(session)
+      if (session === disposedSession) await disposedFiber.dispose()
+      return result
+    })
+    await expect(internal.checkpointInitialPrompt(disposedSession.id, missing.id, SIGNAL))
+      .rejects.toMatchObject({ code: 'TEAM_PROVISIONING_CONFLICT' })
+    flushSpy.mockRestore()
 
     let abortedSession: Session | undefined
     const abortedFiber = await ctx.plugin(Object.assign(function abortedCheckpointFixture(childCtx: Context) {
       abortedSession = childCtx.sessions.create(SessionId('aborted-checkpoint-child'))
     }, { inject: ['sessions'] }))
     if (abortedSession === undefined) throw new Error('aborted checkpoint fixture did not create its Session')
+    const abortedWriter = await ctx.sessionPersistence.create(abortedSession.header)
+    abortedWriter.bindSession!(abortedSession)
     const controller = new AbortController()
     const aborted = internal.checkpointInitialPrompt(abortedSession.id, missing.id, controller.signal)
     await Promise.resolve(undefined)
@@ -332,6 +379,75 @@ describe('Team identity and provisioning', () => {
     const member = durable(lead).members[0]
     expect(member).toMatchObject({ phase: 'failed', error: 'checkpoint failed' })
     if (member !== undefined) await waitNoAgent(ctx, member.id)
+  })
+
+  it.each([false, true])('drains an accepted child when checkpoint failure cannot be durably acknowledged by the Lead (drain rejects: %s)', async (drainFails) => {
+    const { ctx, lead } = await setup(['hang'])
+    const checkpointFailure = new Error('child checkpoint failed')
+    const cleanupFailure = new Error('child drain failed')
+    const checkpointEntered = Promise.withResolvers<{ childId: SessionId; messageId: string }>()
+    const releaseCheckpoint = Promise.withResolvers<undefined>()
+    const checkpoint = vi.spyOn(teamInternals(ctx).roster, 'checkpointInitialPrompt')
+      .mockImplementationOnce(async (childId, messageId) => {
+        checkpointEntered.resolve({ childId, messageId })
+        await releaseCheckpoint.promise
+        throw checkpointFailure
+      })
+    const realFlush = ctx.sessions.flush.bind(ctx.sessions)
+    let unacknowledgedFailure = false
+    const flush = vi.spyOn(ctx.sessions, 'flush').mockImplementation(async (session) => {
+      if (!unacknowledgedFailure && session === lead.session && session.snapshotEvents().some(event =>
+        event.type === 'team/member' && event.data.member.name === 'unacknowledged-worker' && event.data.member.phase === 'failed')) {
+        unacknowledgedFailure = true
+        return false
+      }
+      return realFlush(session)
+    })
+    const drain = vi.spyOn(ctx.subagents, 'drainChildren')
+    if (drainFails) drain.mockRejectedValueOnce(cleanupFailure)
+    const outcome = spawn(ctx, lead, 'unacknowledged-worker').then(() => undefined, (error: unknown) => error)
+    let childId: SessionId | undefined
+    try {
+      const admission = await Promise.race([
+        checkpointEntered.promise.then(value => ({ kind: 'checkpoint' as const, ...value })),
+        outcome.then(error => ({ kind: 'settled' as const, error })),
+      ])
+      expect(admission.kind).toBe('checkpoint')
+      if (admission.kind !== 'checkpoint') throw new Error('child was not accepted before spawn settled')
+      childId = admission.childId
+      const child = await waitRunning(ctx, childId)
+      expect(child.session.snapshotEvents().some(event =>
+        (event.type === 'user/message' && event.data.id === admission.messageId)
+          || (event.type === 'agent/inbox/spliced' && event.data.inserted.some(message => message.id === admission.messageId)),
+      )).toBe(true)
+      expect(durable(lead).members[0]).toMatchObject({ id: childId, phase: 'provisioning' })
+
+      releaseCheckpoint.resolve(undefined)
+      const error = await outcome
+      expect(unacknowledgedFailure).toBe(true)
+      expect(error).toBeInstanceOf(AggregateError)
+      if (!(error instanceof AggregateError)) throw new Error('missing creation failure')
+      const errorTree = (value: unknown): unknown[] => {
+        if (!(value instanceof Error)) return [value]
+        return [value, ...(value instanceof AggregateError ? value.errors.flatMap(errorTree) : []),
+          ...(value.cause === undefined ? [] : errorTree(value.cause))]
+      }
+      expect.soft(errorTree(error)).toEqual(expect.arrayContaining([
+        checkpointFailure,
+        expect.objectContaining({ code: 'TEAM_DURABILITY_UNAVAILABLE' }),
+        ...(drainFails ? [cleanupFailure] : []),
+      ]))
+      expect.soft(drain).toHaveBeenCalledOnce()
+      expect.soft(drain).toHaveBeenCalledWith(lead, [childId])
+      if (!drainFails) expect(ctx.agents.get(childId) === undefined, 'accepted child must leave the Agent registry').toBe(true)
+    } finally {
+      releaseCheckpoint.resolve(undefined)
+      await outcome
+      checkpoint.mockRestore()
+      flush.mockRestore()
+      drain.mockRestore()
+      if (childId !== undefined) await ctx.subagents.drainChildren(lead, [childId])
+    }
   })
 
   it('records failed provisioning durably, reserves its name, and counts it against the limit', async () => {

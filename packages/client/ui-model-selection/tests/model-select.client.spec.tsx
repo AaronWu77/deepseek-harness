@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { RemoteError, SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm/brand'
 import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ComponentProps } from 'react'
@@ -205,6 +206,28 @@ describe('ModelSelect catalog badges', () => {
 })
 
 describe('ModelSelect reasoning effort', () => {
+  it.each([ReasoningEffortId('max'), undefined])('uses the configured policy effort %s without offering a per-session override', async (reasoningEffort) => {
+    const selected = { provider: 'deepseek-official', model: 'policy-model',
+      ...reasoningEffort === undefined ? {} : { reasoningEffort },
+    }
+    const initial = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
+    const directory = createSnapshotStore(state({
+      policy: { allowedSelections: [initial, selected], defaultSelection: initial, rememberDefault: false },
+      groups: [{ ...state().groups[0]!, models: [
+        ...state().groups[0]!.models, { id: selected.model, name: 'Policy model', reasoning },
+      ] }],
+    }))
+    const select = vi.fn(async (_selection: ModelSelection) => ({ ok: true as const, value: undefined }))
+    render(<ModelSelect renderSlot={renderLabel} locked={false} available directory={directory} load={vi.fn()}
+      resolveText={resolveText} select={select} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: /选择模型，当前/ }))
+    expect(screen.queryByRole('menuitem', { name: /推理等级/ })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Policy model' }))
+    await waitFor(() => { expect(select).toHaveBeenCalledWith(selected) })
+  })
+
+
   it('renders effort names without descriptions and submits the effort as part of the session selection', async () => {
     const directory = createSnapshotStore<ModelDirectoryState>(state())
     const select = vi.fn(async (selection: ModelSelection) => {
@@ -343,7 +366,7 @@ describe('ModelSelect reasoning effort', () => {
     })
   })
 
-  it.each([false, true])('announces rejected selections with ownership guidance only for held writers (%s)', async (sessionInUse) => {
+  it.each(['writer', 'unavailable', 'policy'] as const)('announces rejected selections with category-specific guidance (%s)', async (reason) => {
     const groups = [{
       id: 'deepseek-official',
       name: 'DeepSeek',
@@ -354,9 +377,11 @@ describe('ModelSelect reasoning effort', () => {
     }]
     const directory = createSnapshotStore<ModelDirectoryState>(state({ groups }))
     const select = vi.fn(async () => {
-      const error = sessionInUse
+      const error = reason === 'writer'
         ? new RemoteError('session/writer-held', 'writer held', { sessionId: SessionId('owned') })
-        : new RemoteError('session/model-unavailable', 'session already contains images', { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+        : reason === 'policy'
+          ? new RemoteError('session/model-not-allowed', 'outside policy', { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+          : new RemoteError('session/model-unavailable', 'session already contains images', { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
       directory.set(state({ groups, status: 'error', error: 'unrelated catalog refresh' }))
       return { ok: false as const, error }
     })
@@ -377,9 +402,10 @@ describe('ModelSelect reasoning effort', () => {
     fireEvent.click(rejected)
     const toast = await screen.findByRole('alert')
     expect(document.activeElement).toBe(trigger)
-    expect(toast.textContent).toBe(sessionInUse
+    expect(toast.textContent).toBe(reason === 'writer'
       ? zh['error.sessionInUse']
-      : '模型操作失败：session/model-unavailable: session already contains images')
+      : reason === 'policy' ? zh['error.modelNotAllowed']
+        : '模型操作失败：session/model-unavailable: session already contains images')
     // The selection failure does not render the in-menu load strip (no Retry).
     expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
     fireEvent.keyDown(trigger, { key: 'Tab' })

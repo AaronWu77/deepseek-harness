@@ -69,6 +69,9 @@ export function sessionLogExportDeps(ctx: Context): SessionLogExportDeps {
   }
 }
 
+/** A live Session has no confirmed durable checkpoint for export. */
+export class SessionLogDurabilityError extends Error {}
+
 /**
  * Flush one currently live session through the store's authoritative durability
  * barrier immediately before its logical log is read. A cold or absent id has
@@ -76,6 +79,7 @@ export function sessionLogExportDeps(ctx: Context): SessionLogExportDeps {
  * @param deps - export services, including the optional live-session store.
  * @param id - the session whose artifact is about to be read.
  * @param signal - optional cancellation observed around the flush barrier.
+ * @throws if a live Session lacks a durable acknowledgement or the checkpoint fails.
  */
 export async function flushLiveSessionLog(
   deps: Pick<SessionLogExportDeps, 'sessions'>,
@@ -87,8 +91,9 @@ export async function flushLiveSessionLog(
   if (sessions === undefined) return
   const session = sessions.get(id)
   if (session === undefined) return
-  await sessions.flush(session)
+  const durable = await sessions.flush(session)
   signal?.throwIfAborted()
+  if (!durable) throw new SessionLogDurabilityError('Session log was not durably acknowledged; restore its Session writer before exporting')
 }
 
 /** One exported file: a serialized session log or one referenced attachment object. */

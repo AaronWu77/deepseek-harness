@@ -5,6 +5,7 @@ import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEventMap, SessionId } from '@deepseek-ai/dsh-session'
 import type { TeamEventType, TeamProjectionState, TeamState } from './projection.ts'
+import { TeamError } from './error.ts'
 
 type AppendTeamEvent = <T extends TeamEventType>(type: T, data: SessionEventMap[T]) => void
 type MutableTeamEventType = 'team/member' | 'team/task'
@@ -59,6 +60,7 @@ export class TeamJournal {
    * @param root - exact live Lead whose Session owns the event.
    * @param type - Team event discriminant.
    * @param data - payload correlated with the event type.
+   * @throws if the checkpoint lacks a durable acknowledgement; the append may already exist.
    */
   async appendAndFlush<T extends MutableTeamEventType>(
     root: Agent,
@@ -70,7 +72,12 @@ export class TeamJournal {
     // preserving the event-key/payload correlation.
     const append = root.session.append.bind(root.session) as unknown as AppendTeamEvent
     append(type, data)
-    await this.ctx.sessions.flush(root.session)
+    if (!await this.ctx.sessions.flush(root.session)) {
+      throw new TeamError(
+        'Team change was appended but not durably acknowledged; restore the Session writer and inspect state before retrying',
+        'TEAM_DURABILITY_UNAVAILABLE',
+      )
+    }
     this.onCommit(root)
   }
 }

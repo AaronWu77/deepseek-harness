@@ -33,6 +33,22 @@ describe('storage helper failures', () => {
     expect(b.requests).toEqual([])
   })
 
+  it('rejects a storage read that omits an acknowledged request', async () => {
+    const b = await storageFixture(cleanups), original = await b.createSession(), storage = new TranslationStorage(b.ctx)
+    const open = b.ctx.sessionPersistence.open.bind(b.ctx.sessionPersistence)
+    await expect(storage.run(original.id, identity, new AbortController().signal, async (log) => {
+      vi.spyOn(b.ctx.sessionPersistence, 'open').mockImplementationOnce(async (...args) => {
+        const handle = await open(...args)
+        const read = handle.read.bind(handle)
+        vi.spyOn(handle, 'read').mockImplementationOnce(async (...readArgs) => ({ ...await read(...readArgs), events: [] }))
+        return handle
+      })
+      await log.request(identity)
+      return 'unexpected success'
+    })).rejects.toMatchObject({ code: 'TRANSLATION_STORAGE_ERROR' })
+    expect(b.requests).toEqual([])
+  })
+
   it.each(stages)('classifies %s writer failures after its artifact is removed', async (stage) => {
     const b = await storageFixture(cleanups), original = await b.createSession(), storage = new TranslationStorage(b.ctx)
     let observed: unknown

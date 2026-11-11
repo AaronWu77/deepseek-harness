@@ -784,6 +784,39 @@ describe('web e2e: shipped right Sidebar', () => {
       expect(tripwire.warnings).toEqual([])
     })
 
+    it('resizes from the visible panel edge with frame padding', async () => {
+      const viewport = page.viewportSize()
+      if (viewport === null) throw new Error('expected a fixed viewport')
+      const column = await resetSidebar(page)
+      const frame = page.locator('[data-dsh-surface="frame"]')
+      const panel = column.locator('[data-sidebar-right-panel]')
+      try {
+        await page.setViewportSize({ width: 1600, height: viewport.height })
+        await ensureExpanded(page, column)
+        await frame.evaluate((element) => { element.style.padding = '18px' })
+        const grip = frame.locator('[data-side="rightbar"]')
+        await expect.poll(async () => {
+          const gripBox = await grip.boundingBox()
+          const panelBox = await panel.boundingBox()
+          if (gripBox === null || panelBox === null) return Number.NaN
+          return Math.abs(gripBox.x + gripBox.width / 2 - panelBox.x)
+        }).toBeLessThanOrEqual(1)
+        const before = await panel.boundingBox()
+        if (before === null) throw new Error('panel is not rendered')
+        const y = before.y + before.height / 2
+        await page.mouse.move(before.x, y)
+        await page.mouse.down()
+        await page.mouse.move(before.x - 100, y, { steps: 10 })
+        await page.mouse.up()
+        await expect.poll(async () => await width(panel)).toBeGreaterThan(before.width + 80)
+      } finally {
+        await frame.evaluate((element) => { element.style.removeProperty('padding') })
+        await page.setViewportSize(viewport)
+        await ensureExpanded(page, column)
+        await setPanelWidth(page, Math.round(viewport.width * 0.45))
+      }
+    }, 60_000)
+
     it('survives grip drags past both clamps on a squeezed viewport', async () => {
       // Regression: an overshoot drag swept the panel through widths where a
       // width-blocked split control hid itself, which changed the very strip
@@ -811,12 +844,12 @@ describe('web e2e: shipped right Sidebar', () => {
         // The frame reads the new viewport through a throttled ResizeObserver,
         // a couple of frames after the resize; until then the grip sits at the
         // old frame's coordinates. Press only a grip aligned with the panel's
-        // left edge (the handle is 8px wide, centred on the seam).
+        // left edge before dragging.
         await expect.poll(async () => {
           const gripBox = await grip.boundingBox()
           const panelBox = await panel.boundingBox()
           if (gripBox === null || panelBox === null) return Number.NaN
-          return Math.abs(gripBox.x + 4 - panelBox.x)
+          return Math.abs(gripBox.x + gripBox.width / 2 - panelBox.x)
         }).toBeLessThanOrEqual(1)
         // Narrow with overshoot: drag the grip far right past the clamp floor.
         const from = await centre(grip)

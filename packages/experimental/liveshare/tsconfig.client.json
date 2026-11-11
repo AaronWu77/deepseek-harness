@@ -109,6 +109,9 @@
     },
     {
       "path": "../liveshare-protocol/tsconfig.client.json"
+    },
+    {
+      "path": "../review-gated/tsconfig.client.json"
     }
   ]
 }

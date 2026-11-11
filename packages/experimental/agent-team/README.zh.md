@@ -143,7 +143,7 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 
 ### 持久性模型
 
-roster 与任务变更将 `team/member` 和 `team/task` 追加到精确的 live Lead 会话，并在报告成功或唤醒等待者之前 flush。历史 `team/message/queued` 与 `team/message/delivered` 记录仍可读取；Team 不再写入这两种记录。这四种事件仅存在于日志：它们从不进入会话表面，因此派生模型历史不受协作记录影响。顺序与时间由会话事件的 `seq` 与 `time` 负责，快照不重复保存。
+roster 与任务变更将 `team/member` 和 `team/task` 追加到精确的 live Lead 会话，并在报告成功或唤醒等待者之前 flush。历史 `team/message/queued` 与 `team/message/delivered` 记录仍可读取；Team 不再写入这两种记录。这四种事件仅存在于日志：它们从不进入会话表面，因此派生模型历史不受协作记录影响。顺序与时间由会话事件的 `seq` 与 `time` 负责，快照不重复保存。 每个检查点都需要精确 Session 的 writer 确认；缺少确认时变更报错，且不会唤醒提交等待者。追加可能已存在于内存或存储中：请恢复 writer 并在重试前检查状态。发布 active roster 条目前，child receipt 也需要由其自己的 writer 确认。
 
 历史 mailbox 事件与 `team-message` source 仍可读取，投影仍报告 queued-minus-delivered 记录。Team 不会投递或确认这些记录：目标尚未记录的历史消息保持未投递。
 

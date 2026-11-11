@@ -9,7 +9,7 @@ import type { GoalView } from '@deepseek-ai/dsh-goal'
 import { createUserMessage, LlmAdapter, LlmError  } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FLUSH_DURABLE, SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type { SubagentRuntime } from '@deepseek-ai/dsh-subagent'
 import * as goalSession from '../src/index.ts'
@@ -92,11 +92,21 @@ afterEach(async () => {
   await Promise.allSettled(contexts.splice(0).map(context => context.fiber.dispose()))
 })
 
+/** Keep full detached Session snapshots as the test persistence backend. */
+function mountSnapshotPersistence(ctx: Context): void {
+  const snapshots = new Map<SessionId, { header: object; events: readonly object[] }>()
+  ctx.on('session/flush', (session) => {
+    snapshots.set(session.id, structuredClone({ header: session.header, events: session.snapshotEvents() }))
+    return SESSION_FLUSH_DURABLE
+  })
+}
+
 /** Mount a real loop with only its model scripted. */
-async function harness(script: ScriptEntry[]): Promise<Harness> {
+async function harness(script: ScriptEntry[], durable = true): Promise<Harness> {
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
+  if (durable) mountSnapshotPersistence(ctx)
   await ctx.plugin(GoalService)
   const driver = await ctx.plugin(goalSession)
   await ctx.plugin(AgentLoop, { agents: [] })
@@ -228,6 +238,7 @@ describe('same-session goal driving', () => {
     const ctx = new Context()
     contexts.push(ctx)
     await mountAgentLoopTestDependencies(ctx)
+    mountSnapshotPersistence(ctx)
     await ctx.plugin(GoalService)
     await ctx.plugin(AgentLoop, { agents: [] })
     const adapter = new ScriptedAdapter([textResponse('after resume')])
@@ -570,6 +581,34 @@ describe('same-session goal driving', () => {
     expect(requestText(test.adapter.requests[0]!)).not.toContain('<goal_round>')
     expect(requestText(test.adapter.requests[1]!)).toContain('revised after claim')
     expect(requestText(test.adapter.requests[1]!)).not.toContain('stale before admission')
+  })
+
+  it.each([false, true])('disarms without dispatch when no writer acknowledges (observer: %s)', async (observer) => {
+    const test = await harness([], false)
+    if (observer) test.ctx.on('session/flush', () => {})
+    test.ctx.goals.create(test.agent, { objective: 'wait for a durable writer' })
+
+    const goal = await waitForGoal(test.ctx, test.agent, current => current?.activation === 'disarmed')
+    expect(goal).toMatchObject({ phase: 'active', roundsStarted: 0 })
+    expect(test.adapter.requests).toHaveLength(0)
+    expect(test.agent.inbox.nextTurn).toHaveLength(0)
+  })
+
+  it('does not use another Session writer to authorize a goal round', async () => {
+    const test = await harness([], false)
+    const other = test.ctx.sessions.create(SessionId('other-writer-session'))
+    const snapshots = new Map<SessionId, { header: object; events: readonly object[] }>()
+    test.ctx.on('session/flush', (session) => {
+      if (session !== other) return undefined
+      snapshots.set(session.id, structuredClone({ header: session.header, events: session.snapshotEvents() }))
+      return SESSION_FLUSH_DURABLE
+    })
+    expect(await test.ctx.sessions.flush(other)).toBe(true)
+    expect(snapshots.has(other.id)).toBe(true)
+    test.ctx.goals.create(test.agent, { objective: 'require my own writer' })
+    const goal = await waitForGoal(test.ctx, test.agent, current => current?.activation === 'disarmed')
+    expect(goal).toMatchObject({ phase: 'active', roundsStarted: 0 })
+    expect(test.adapter.requests).toHaveLength(0)
   })
 
   it('disarms without dispatch when a durability checkpoint fails', async () => {

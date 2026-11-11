@@ -1,12 +1,15 @@
 import { imageOffloadProjection } from '@deepseek-ai/dsh-compaction-image-offload/projection'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as JsonlPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
 import { CompactionId, isCompactCheckpointSource, ManualCompactionError } from '@deepseek-ai/dsh-compaction'
-import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
 import {
   createAssistantMessage,
   createUserMessage,
@@ -42,6 +45,10 @@ declare module '@deepseek-ai/dsh-llm' {
 const MODEL = 'mock'
 const SIGNAL = new AbortController().signal
 const PROMPT = 'older conversation history '.repeat(60)
+const roots: string[] = []
+afterEach(async () => {
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
+})
 
 /** A summarizer under test control: it can block, fail, or mutate mid-call. */
 class GatedCompactionEngine extends BasicCompactionEngine {
@@ -105,6 +112,9 @@ interface LoopHarness {
 async function loopHarness(): Promise<LoopHarness> {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
+  const root = await mkdtemp(join(tmpdir(), 'dsh-manual-compaction-'))
+  roots.push(root)
+  await ctx.plugin(JsonlPersistence, { root, compression: 'none' })
   ctx.sessions.registerMessageProjection(imageOffloadProjection)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(TokenMeter)
@@ -419,16 +429,13 @@ describe('compactNow transaction and failure classification', () => {
     expect(compactEvents(session)).toEqual([])
   })
 
-  it('commits a standalone bracket without consuming a turn number and checkpoints durability', async () => {
+  it('commits a correlated standalone bracket before reporting missing durability', async () => {
     const { compact, flushes } = detachedService()
     const session = closedConversation(2, 7)
     const agent = fakeAgent(session, () => () => undefined)
     const commandId = CommandId('manual-compact-command')
 
-    const result = await compact.compactNow(agent, SIGNAL, commandId)
-
-    expect(result).not.toBeNull()
-    expect(result?.sourceCommandId).toBe(commandId)
+    expect((await rejection(compact.compactNow(agent, SIGNAL, commandId))).code).toBe('persistence')
     expect(flushes()).toBe(1)
     expect(session.snapshotEvents().filter(event => event.type === 'turn/start').at(-1)?.data.turn).toBe(7)
     const start = session.snapshotEvents().findLast(event => event.type === 'compaction/start')
@@ -438,7 +445,7 @@ describe('compactNow transaction and failure classification', () => {
         && isCompactCheckpointSource(event.data.source),
     )
     const end = session.snapshotEvents().findLast(event => event.type === 'compaction/end')
-    const correlated = { compactionId: result?.compactionId, sourceCommandId: commandId }
+    const correlated = { compactionId: start?.data.compactionId, sourceCommandId: commandId }
     expect(start?.data).toEqual({ ...correlated, turn: null })
     expect(summaryEvent?.data.sourceCommandId).toBe(commandId)
     expect(checkpoint?.data.source).toMatchObject(correlated)
@@ -473,7 +480,7 @@ describe('compactNow transaction and failure classification', () => {
     const agent = fakeAgent(reloaded, () => () => undefined)
 
     expect(boundary?.seq).toBeGreaterThan(orphan?.seq ?? Number.MAX_SAFE_INTEGER)
-    await expect(compact.compactNow(agent, SIGNAL)).resolves.not.toBeNull()
+    expect((await rejection(compact.compactNow(agent, SIGNAL))).code).toBe('persistence')
     expect(compact.calls).toHaveLength(1)
   })
 
@@ -495,7 +502,7 @@ describe('compactNow transaction and failure classification', () => {
     const child = Session.create(SessionId('forked-orphan'), seed)
     const agent = fakeAgent(child, () => () => undefined)
 
-    await expect(compact.compactNow(agent, SIGNAL)).resolves.not.toBeNull()
+    expect((await rejection(compact.compactNow(agent, SIGNAL))).code).toBe('persistence')
     expect(compact.calls).toHaveLength(1)
   })
 
@@ -511,7 +518,7 @@ describe('compactNow transaction and failure classification', () => {
     const reloaded = Session.create(SessionId('reloaded-orphan'), original.snapshotEvents())
     const agent = fakeAgent(reloaded, () => () => undefined)
 
-    await expect(compact.compactNow(agent, SIGNAL)).resolves.not.toBeNull()
+    expect((await rejection(compact.compactNow(agent, SIGNAL))).code).toBe('persistence')
     expect(compact.calls).toHaveLength(1)
   })
 
@@ -729,12 +736,25 @@ describe('compactNow transaction and failure classification', () => {
     }
     const agent = fakeAgent(session, () => () => undefined)
 
-    const result = await compact.compactNow(agent, SIGNAL)
+    expect((await rejection(compact.compactNow(agent, SIGNAL))).code).toBe('persistence')
 
-    expect(result).not.toBeNull()
     expect(session.snapshotEvents().some(event => event.type === 'turn/start')).toBe(false)
-    expect(session.snapshotEvents().find(event => event.type === 'compaction/start')?.data)
-      .toEqual({ compactionId: result?.compactionId, turn: null })
+    expect(session.snapshotEvents().find(event => event.type === 'compaction/start')?.data.turn).toBeNull()
+  })
+
+  it('rejects an unacknowledged flush after committing the standalone bracket', async () => {
+    const { compact } = detachedService()
+    const session = closedConversation(2)
+    const before = session.surface.replaceGeneration
+    const agent = fakeAgent(session, () => () => undefined)
+
+    const error = await rejection(compact.compactNow(agent, SIGNAL))
+    expect(error.code).toBe('persistence')
+    expect(causeOf(error).message).toContain('durable')
+    expect(session.surface.replaceGeneration).toBe(before + 1)
+    expect(compactEvents(session).map(event => event.type)).toEqual([
+      'compaction/start', 'compaction/summary', 'compaction/end',
+    ])
   })
 
   it('classifies a durability failure after the standalone bracket committed', async () => {
@@ -869,7 +889,7 @@ describe('compactNow transaction and failure classification', () => {
     ]
     compact.usage = { inputTokens: 40, outputTokens: 5 }
 
-    await compact.compactNow(agent, SIGNAL)
+    expect((await rejection(compact.compactNow(agent, SIGNAL))).code).toBe('persistence')
 
     const summary = session.snapshotEvents().find(event => event.type === 'compaction/summary')
     expect(summary?.type === 'compaction/summary' && summary.data.rawOutput).toEqual(compact.rawOutput)
@@ -886,7 +906,7 @@ describe('compactNow transaction and failure classification', () => {
     try {
       compact.duringSummary = () => { clock.mockReturnValue(openedAt + 25) }
 
-      await compact.compactNow(agent, SIGNAL)
+      expect((await rejection(compact.compactNow(agent, SIGNAL))).code).toBe('persistence')
 
       const start = session.snapshotEvents().findLast(event => event.type === 'compaction/start')
       const end = session.snapshotEvents().findLast(event => event.type === 'compaction/end')
@@ -917,8 +937,7 @@ describe('compactNow transaction and failure classification', () => {
 
     gate.resolve()
     compact.gate = undefined
-    const result: CompactionResult | null = await manual
-    expect(result).not.toBeNull()
+    expect((await rejection(manual)).code).toBe('persistence')
   })
 
   it('excludes a manual request while an explicit region compaction runs', async () => {

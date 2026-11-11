@@ -518,19 +518,18 @@ describe('Schedule dispatch failures and concurrent changes', () => {
 
   it('keeps an enqueued task when the Session reports no durability acknowledgment', async () => {
     const records = [task(createAfterScheduleRecord(ScheduleId('unacknowledged'), 'Keep', 1, Date.now() - 2000, 'Keep'))]
-    const test = await setup(records)
-    const flush = vi.spyOn(test.ctx.sessions, 'flush').mockResolvedValue(false)
-    try {
-      test.runtime.requestDrive()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(test.followup).toHaveBeenCalledTimes(1)
-      expect(test.commit).not.toHaveBeenCalled()
-      expect(records).toHaveLength(1)
-      expect(records[0]?.status).toBe('active')
-      expect(records[0]?.lastDelivery).toBeUndefined()
-    } finally {
-      flush.mockRestore()
-    }
+    const test = await setup(records, { sessionWriter: false })
+    const observer = vi.fn()
+    test.ctx.on('session/flush', observer)
+    test.runtime.requestDrive()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(test.followup).toHaveBeenCalledTimes(1)
+    expect(test.commit).not.toHaveBeenCalled()
+    expect(records).toHaveLength(1)
+    expect(records[0]?.status).toBe('active')
+    expect(records[0]?.lastDelivery).toBeUndefined()
+    expect(observer).toHaveBeenCalledWith(test.agent.session)
+    expect(test.changed).not.toHaveBeenCalled()
   })
 
   it('retires a recurring task after the final representable occurrence', async () => {

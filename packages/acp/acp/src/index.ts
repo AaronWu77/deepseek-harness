@@ -228,7 +228,7 @@ export function apply(ctx: Context, config: AcpConfig): void {
         const configOptions = await record.configOptions(signal)
         assertOpen()
         // The attached log writer's flush materializes an empty session durably.
-        await ctx.sessions.flush(record.agent.session)
+        if (!await ctx.sessions.flush(record.agent.session)) throw new Error('The ACP Session writer did not acknowledge its creation checkpoint.')
         assertOpen()
         return { sessionId, configOptions }
       } catch (error: unknown) {

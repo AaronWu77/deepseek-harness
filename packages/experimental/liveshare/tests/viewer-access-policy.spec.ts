@@ -45,7 +45,7 @@ const GLOBAL_ACTIONS = [
 ] as const
 /** Session reads the served page's startup and render paths need; see {@link GLOBAL_ACTIONS}. */
 const SESSION_READS = [
-  'commands/list', 'fileUploads/upload', 'goals/get', 'session/attachment', 'session/control',
+  'commands/list', 'fileUploads/upload', 'goals/get', 'reviewGated/watchView', 'session/attachment', 'session/control',
   'session/events', 'session/follow', 'session/list', 'session/observeEvent', 'session/observeProjections',
   'session/observeState', 'session/page', 'session/projections', 'session/state', 'session/wait',
   'skills/list', 'toolResults/watch', 'workspace/follow',

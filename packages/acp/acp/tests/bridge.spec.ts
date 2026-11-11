@@ -190,6 +190,26 @@ describe('automation-only ACP bridge', () => {
     ])
   })
 
+  it('refuses a new ACP Session when its writer does not acknowledge the checkpoint', async () => {
+    harness = await makeBridgeHarness()
+    await harness.client.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} })
+    const flush = vi.spyOn(harness.ctx.sessions, 'flush').mockResolvedValue(false)
+    try {
+      await expect(harness.client.newSession({ cwd: process.cwd(), mcpServers: [] })).rejects.toThrow()
+    } finally { flush.mockRestore() }
+  })
+
+  it('reports a missing writer acknowledgement while still closing the ACP Session', async () => {
+    harness = await makeBridgeHarness()
+    await harness.client.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} })
+    const { sessionId } = await harness.client.newSession({ cwd: process.cwd(), mcpServers: [] })
+    const flush = vi.spyOn(harness.ctx.sessions, 'flush').mockResolvedValue(false)
+    try {
+      await expect(harness.client.closeSession({ sessionId })).rejects.toThrow()
+      expect(harness.ctx.agents.get(SessionId(sessionId))).toBeUndefined()
+    } finally { flush.mockRestore() }
+  })
+
   it('materializes an empty closed session for list and resume', async () => {
     harness = await makeBridgeHarness()
     await harness.client.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} })

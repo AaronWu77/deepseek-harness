@@ -433,7 +433,7 @@ export class AcpSession {
         failures.push(new Error('subagent teardown failed', { cause: error }))
       }
       try {
-        await this.ctx.sessions.flush(this.agent.session)
+        if (!await this.ctx.sessions.flush(this.agent.session)) throw new Error('The ACP Session writer did not acknowledge its final checkpoint.')
       } catch (error: unknown) {
         failures.push(new Error('ACP session persistence flush failed', { cause: error }))
       }

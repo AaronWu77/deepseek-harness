@@ -9,19 +9,19 @@
  * Scope disposal drops the directory (HMR safety).
  */
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createScope } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { createSnapshotStore, type ObservableSnapshot, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { RemoteError, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent/types'
-import type { ModelSelectionProjection } from '@deepseek-ai/dsh-agent/types'
+import type { ModelSelectionProjection, SessionModelPolicy } from '@deepseek-ai/dsh-agent/types'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm/brand'
 import type { CommandContribution, PopupSelectSpec, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
 import type { ModelSelectInjected } from '../src/client/slots.ts'
 import { apply, inject } from '../src/client/index.ts'
-import { zh } from '../src/client/locales.ts'
+import { en, zh } from '../src/client/locales.ts'
 
 const sid = (k: string): SessionId => k as SessionId
 
@@ -77,7 +77,7 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
   let routable = true
   let catalogFailure = false
   let groups = GROUPS
-  let selectionFailure: RemoteError<'session/writer-held'> | undefined
+  let selectionFailure: RemoteError<'session/writer-held' | 'session/model-not-allowed'> | undefined
   const sessionRemote = {
     modelCatalog: () => {
       calls.models += 1
@@ -143,7 +143,7 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
     session: {
       sessionId: SessionId
       getSnapshot: () => { blank: boolean }
-      projections: { faceOf: () => SnapshotStore<ModelSelectionProjection | undefined> }
+      projections: { faceOf: (key: string) => ObservableSnapshot<unknown> }
     }
     ctx: Context
   }>()
@@ -169,16 +169,19 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
       next: null,
     })
     projections.set(id, projection)
+    const policy = createSnapshotStore<SessionModelPolicy | null>(null)
     const binding = {
       sessionId: id,
-      session: { sessionId: id, getSnapshot: () => ({ blank }), projections: { faceOf: () => projection } },
+      session: { sessionId: id, getSnapshot: () => ({ blank }), projections: {
+        faceOf: (key: string): ObservableSnapshot<unknown> => key === 'modelSelectionPolicy' ? policy : projection,
+      } },
       ctx: handle.ctx,
     }
     bindings.set(id, binding)
     handle.ctx.effect(() => () => {
       if (bindings.get(id) === binding) bindings.delete(id)
     })
-    return { ...handle, projection }
+    return { ...handle, projection, policy }
   }
   return {
     ctx, fiber, mint, calls, remote, track,
@@ -193,6 +196,9 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
     rejectSelection: () => {
       selectionFailure = new RemoteError('session/writer-held', 'writer held', { sessionId: sid('owned') })
     },
+    rejectPolicySelection: () => {
+      selectionFailure = new RemoteError('session/model-not-allowed', 'outside policy', { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+    },
     setHostCurrent: (selection: ModelSelection) => { defaultSelection = selection },
     setProjected: (id: SessionId, value: ModelSelectionProjection) => { projections.get(id)?.set(value) },
     address: (id: SessionId) => { addressed.add(id) },
@@ -206,6 +212,55 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
 const projection = (id: string) => ({ sessionId: sid(id) })
 
 describe('ui-model-selection dual entry', () => {
+  it('filters each Session independently and preserves exact policy effort in popup selections', async () => {
+    const b = await bench()
+    onTestFinished(() => b.ctx.fiber.dispose())
+    const restricted = b.mint('restricted')
+    b.mint('ordinary')
+    const selected = { provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: ReasoningEffortId('max') }
+    restricted.policy.set({ allowedSelections: [selected], defaultSelection: selected, rememberDefault: false })
+    const input = projection('restricted')
+    const options = await b.popup().options(input, new AbortController().signal)
+    expect(options).toMatchObject([{ id: 'deepseek-official/deepseek-v4-pro', active: true }])
+    expect(options).toHaveLength(1)
+    await b.popup().onSelect(options[0]!, input)
+    expect(b.hostCurrent()).toEqual(selected)
+    const ordinary = await b.popup().options(projection('ordinary'), new AbortController().signal)
+    expect(ordinary).toHaveLength(3)
+    const directory = b.ctx.modelDirectories.directoryFor(sid('restricted'))
+    expect(directory.store.getSnapshot()).toMatchObject({ policy: { rememberDefault: false }, current: selected })
+    restricted.policy.set(null)
+    expect(directory.store.getSnapshot().groups.flatMap(group => group.models)).toHaveLength(3)
+    expect(directory.store.getSnapshot().policy).toBeUndefined()
+    await b.ctx.fiber.dispose()
+  })
+
+  it('does not turn policy provider defaults into an explicit advertised effort', async () => {
+    const b = await bench()
+    onTestFinished(() => b.ctx.fiber.dispose())
+    const scope = b.mint('default-effort')
+    const selected = { provider: 'deepseek-official', model: 'deepseek-v4-pro' }
+    scope.policy.set({ allowedSelections: [selected], defaultSelection: selected, rememberDefault: false })
+    const input = projection('default-effort')
+    const options = await b.popup().options(input, new AbortController().signal)
+    await b.popup().onSelect(options[0]!, input)
+    expect(b.hostCurrent()).toEqual(selected)
+    await b.ctx.fiber.dispose()
+  })
+
+  it.each(['zh', 'en'] as const)('localizes policy refusal in the %s command popup', async (locale) => {
+    const b = await bench(locale)
+    onTestFinished(() => b.ctx.fiber.dispose())
+    b.mint('policy-error')
+    const input = projection('policy-error')
+    const options = await b.popup().options(input, new AbortController().signal)
+    b.rejectPolicySelection()
+    await expect(b.popup().onSelect(options[0]!, input)).rejects.toThrow((locale === 'zh' ? zh : en)['error.modelNotAllowed'])
+    expect(b.ctx.modelDirectories.directoryFor(sid('policy-error')).store.getSnapshot()).toMatchObject({
+      status: 'error', errorCode: 'session/model-not-allowed',
+    })
+  })
+
   it('carries writer contention to the model seat and localizes the command failure', async () => {
     const b = await bench()
     b.mint('owned')

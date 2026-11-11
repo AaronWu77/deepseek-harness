@@ -77,12 +77,12 @@ describe('message feedback through a real Loader composition', () => {
       sessionId: unowned.id, messageId: unownedFixture.assistantMessageIds[0], rating: 'positive' as const, ifVersion: null,
     }
     // A mounted JSONL listener alone does not persist Sessions without a write handle.
-    await expect(first.messageFeedback.put(unownedRequest)).rejects.toThrow(/not found/u)
+    await expect(first.messageFeedback.put(unownedRequest)).rejects.toThrow(/no durability listener participated/u)
     expect(await first.sessionPersistence.stat(unowned.id)).toBeUndefined()
     const unownedItems = await first.messageFeedback.list({ sessionId: unowned.id })
     if (!unownedItems.ok) throw new Error(unownedItems.error.code)
     await expect(first.messageFeedback.put({ ...unownedRequest, ifVersion: unownedItems.value.items[0]!.version }))
-      .rejects.toThrow(/not found/u)
+      .rejects.toThrow(/no durability listener participated/u)
 
     const session = first.sessions.create(SessionId('loader-feedback'), {
       meta: { cwd: root },
@@ -90,6 +90,9 @@ describe('message feedback through a real Loader composition', () => {
     // The mounted backend routes this published session's `session/event`
     // batches and `session/flush` barriers into its active write handle.
     const writeHandle = await first.sessionPersistence.create(session.header)
+    await writeHandle.append(session.snapshotEvents())
+    expect(await first.sessions.flush(session)).toBe(false)
+    writeHandle.bindSession?.(session)
     const fixture = appendMessageFixture(session)
     const put = await first.messageFeedback.put({
       sessionId: session.id,

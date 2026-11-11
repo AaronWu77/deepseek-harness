@@ -432,7 +432,9 @@ export class BasicCompactionEngine extends CompactionEngine {
               stability: 'selected-span',
               ...sourceCommandId === undefined ? {} : { sourceCommandId },
               flush: async () => {
-                await this.ctx.sessions.flush(agent.session)
+                if (!await this.ctx.sessions.flush(agent.session)) {
+                  throw new Error('manual compaction has no durable Session writer acknowledgement')
+                }
               },
             },
             operationSignal,

@@ -125,7 +125,7 @@ export async function storageFixture(cleanups: Array<() => Promise<void>>, optio
     await using handle = await ctx.sessionPersistence.open(id, 'read')
     return (await handle.read()).events
   }
-  const createSession = async (id: SessionId = SessionId('stored-translation'), live = true) => {
+  const createSession = async (id: SessionId = SessionId('stored-translation'), live = true, bind = true) => {
     const events = mainEvents()
     const header: SessionHeader = { version: SESSION_FORMAT_VERSION, id, createdAt: 1, cwd: root, isSeeded: false, delegationDepth: 0 }
     let session: Session | undefined, scope: Fiber | undefined, writer: SessionHandle | undefined
@@ -135,7 +135,6 @@ export async function storageFixture(cleanups: Array<() => Promise<void>>, optio
       } })
       await scope.await()
       if (session === undefined) throw new Error('Live Session was not published')
-      writer = await ctx.sessionPersistence.create(session.header)
       for (const event of events) {
         switch (event.type) {
           case 'user/message': session.append(event.type, event.data, { surfaceOp: 'append' }); break
@@ -147,7 +146,10 @@ export async function storageFixture(cleanups: Array<() => Promise<void>>, optio
           default: throw new Error('Unexpected main fixture event')
         }
       }
-      await ctx.sessions.flush(session)
+      writer = await ctx.sessionPersistence.create(session.header)
+      await writer.append(session.snapshotEvents())
+      await writer.flush()
+      if (bind) writer.bindSession?.(session)
     } else {
       await using handle = await ctx.sessionPersistence.create(header)
       await handle.append(events)

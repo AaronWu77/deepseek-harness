@@ -614,6 +614,64 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('enforces Session model candidates and fixed effort without changing the deployment default', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    onTestFinished(() => ctx.fiber.dispose())
+    const saveDefault = vi.fn(() => Promise.resolve())
+    const remote = await createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      saveDefaultModelSelection: saveDefault, cwd: '/tmp',
+    })
+    const selected = { provider: 'deepseek-official', model: 'deepseek-reasoner', reasoningEffort: ReasoningEffortId('max') }
+    ctx.agents.bindModelPolicy(agent, { allowedSelections: [selected], defaultSelection: selected, rememberDefault: false })
+    for (const proposed of [
+      { provider: 'unknown-provider', model: 'unknown-model' },
+      { provider: 'deepseek-official', model: 'deepseek-chat' },
+      { provider: 'deepseek-official', model: 'deepseek-reasoner' },
+      { ...selected, reasoningEffort: 'high' },
+    ]) {
+      expect(await remote.selectModel({ sessionId, ...proposed })).toMatchObject({
+        ok: false, error: { code: 'session/model-not-allowed' },
+      })
+    }
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'model/selection')).toHaveLength(0)
+    expectValue(await remote.selectModel({ sessionId, ...selected }))
+    expect(agent.model.current()).toEqual(selected)
+    expect(saveDefault).not.toHaveBeenCalled()
+    ctx.agents.clearModelPolicy(agent)
+    expectValue(await remote.selectModel({ sessionId, provider: 'deepseek-official', model: 'deepseek-chat' }))
+    expect(saveDefault).toHaveBeenCalledOnce()
+  })
+
+  it('rechecks policy after asynchronous adapter preflight before recording a selection', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const pending: Promise<unknown>[] = []
+    onTestFinished(async () => { release.resolve(undefined); await Promise.allSettled(pending); await ctx.fiber.dispose() })
+    const remote = await createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp',
+    })
+    const initial = { provider: 'deepseek-official', model: 'deepseek-chat' }
+    const selected = { provider: 'deepseek-official', model: 'deepseek-reasoner' }
+    ctx.agents.bindModelPolicy(agent, { allowedSelections: [initial, selected], defaultSelection: initial, rememberDefault: false })
+    const resolve = ctx.llm.resolveCallConfig.bind(ctx.llm)
+    const spy = vi.spyOn(ctx.llm, 'resolveCallConfig').mockImplementationOnce(async (selection) => {
+      entered.resolve(undefined)
+      await release.promise
+      return resolve(selection)
+    })
+    onTestFinished(() => { spy.mockRestore() })
+    const outcome = remote.selectModel({ sessionId, ...selected })
+    pending.push(outcome)
+    await entered.promise
+    ctx.agents.clearModelPolicy(agent)
+    ctx.agents.bindModelPolicy(agent, { allowedSelections: [initial], defaultSelection: initial, rememberDefault: false })
+    release.resolve(undefined)
+    expect(await outcome).toMatchObject({ ok: false, error: { code: 'session/model-not-allowed' } })
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'model/selection')).toHaveLength(0)
+  })
+
   it('accepts consecutive model switches while default persistence is blocked', async () => {
     const { ctx, sessionId } = await harness()
     const release = Promise.withResolvers<undefined>()

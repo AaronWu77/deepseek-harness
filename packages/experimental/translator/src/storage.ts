@@ -106,7 +106,7 @@ export class TranslationStorage {
               live()
               const snapshot = deepFreeze(structuredClone(data))
               const seq = appendPluginRecord(session, type, snapshot)
-              await sessions.flush(session)
+              if (!await sessions.flush(session)) throw required()
               live()
               const stored = (await this.read(id, persistence, signal, live, seq, 1))[0]
               live()

@@ -183,8 +183,9 @@ export async function paidFixture(cleanups: Array<() => Promise<void>>, options:
   }
   if (options.withSession !== false) {
     session = ctx.sessions.create(auditId, { meta: { cwd: root } })
-    await ctx.sessionPersistence.create(session.header)
-    await ctx.sessions.flush(session)
+    const writer = await ctx.sessionPersistence.create(session.header)
+    await writer.flush()
+    writer.bindSession?.(session)
   }
   const translate = (provider: 'deepseek-account' | 'deepseek-official', text = 'Original paragraph', signal?: AbortSignal) =>
     ctx.translator.translate(ctx.translator.resolve({ text, targetLanguage: 'zh', provider,
@@ -198,7 +199,8 @@ export async function paidFixture(cleanups: Array<() => Promise<void>>, options:
       session = ctx.sessions.create(id, {
         seed: [...stored.events, resumed], meta: writer.header, inheritedEventCount: writer.inheritedEventCount,
       })
-      await ctx.sessions.flush(session)
+      await writer.flush()
+      writer.bindSession?.(session)
       return session
     },
     async createHistorical(id: SessionId, events: SessionEvent[]) {

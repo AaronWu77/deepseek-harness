@@ -9,6 +9,7 @@ import type { CommandResult } from '@deepseek-ai/dsh-commands'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
+  SessionLogDurabilityError,
   flushLiveSessionLog,
   readSessionLogText,
   sessionLogExportDeps,
@@ -204,8 +205,11 @@ async function sessionLogExportResponse(
     await flushLiveSessionLog(deps, sessionId, request.signal)
     rootContent = await readSessionLogText(deps.sessionPersistence, sessionId, request.signal)
     request.signal.throwIfAborted()
-  } catch {
+  } catch (error: unknown) {
     request.signal.throwIfAborted()
+    if (error instanceof SessionLogDurabilityError) {
+      return new Response('session log export unavailable: restore the Session writer before exporting', { status: 500 })
+    }
     // Root preparation failure (flush, open, or read): answer 500 without
     // echoing the error, which may carry absolute host paths into the
     // browser error bar.

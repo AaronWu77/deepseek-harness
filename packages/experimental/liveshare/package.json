@@ -128,6 +128,7 @@
     "@deepseek-ai/dsh-experimental-api-speech-to-text": "workspace:*",
     "@deepseek-ai/dsh-experimental-claude-code-mods": "workspace:*",
     "@deepseek-ai/dsh-experimental-client-ui-cot-translation": "workspace:*",
+    "@deepseek-ai/dsh-experimental-review-gated": "workspace:*",
     "@deepseek-ai/dsh-fs": "workspace:*",
     "@deepseek-ai/dsh-fs-local": "workspace:*",
     "@deepseek-ai/dsh-fs-observation-policy": "workspace:*",

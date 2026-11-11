@@ -48,7 +48,9 @@ it.skipIf(!enabled)('translates a small independent billed query with exact Flas
     })
     close = async () => { await ctx.fiber.dispose() }
     const session = ctx.sessions.create(SessionId('paid-live-translation'), { meta: { cwd: root } })
-    await using _writer = await ctx.sessionPersistence.create(session.header)
+    await using writer = await ctx.sessionPersistence.create(session.header)
+    await writer.flush()
+    writer.bindSession?.(session)
     expect(await ctx.translator.availableProviders()).toContain('deepseek-official')
     const result = await ctx.translator.translate(ctx.translator.resolve({ provider: 'deepseek-official', text: 'Hello world.',
       targetLanguage: 'zh', sourceLanguage: 'en', sessionId: session.id }))

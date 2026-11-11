@@ -6,7 +6,7 @@
  * 404, missing descendant → errored stream).
  */
 
-import { SESSION_FORMAT_VERSION, SessionSeq } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, SessionSeq, SessionStore } from '@deepseek-ai/dsh-session'
 import { randomBytes } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -581,6 +581,26 @@ describe('session.export download endpoint', () => {
     const body = await response.text()
     expect(body).toBe('session log export failed to read the stored log')
     expect(body).not.toContain('/host/private/')
+  })
+
+  it('rejects an unacknowledged live root instead of exporting stale storage', async () => {
+    const context = new Context()
+    await context.plugin(SessionStore)
+    const session = context.sessions.create(sid('session-root'))
+    context.on('session/flush', () => {})
+    const open = vi.fn(async () => readHandle(log('session-root')))
+    try {
+      const api = await buildApi({ 'session-root': log('session-root') }, [], {
+        open,
+        sessions: { get: id => context.sessions.get(id), flush: () => context.sessions.flush(session) },
+      })
+      const response = await toFetchHandler(api).fetch(new Request('http://host/api/session.export?sessionId=session-root'))
+      expect(response.status).toBe(500)
+      expect(await response.text()).toContain('restore the Session writer')
+      expect(open).not.toHaveBeenCalled()
+    } finally {
+      await context.fiber.dispose()
+    }
   })
 
   it('answers the private-error-safe 500 when the live root flush fails', async () => {

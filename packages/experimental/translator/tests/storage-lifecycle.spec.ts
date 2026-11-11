@@ -92,7 +92,7 @@ describe('translation storage lifecycle', () => {
     const b = await storageFixture(cleanups), original = await b.createSession(SessionId('live-without-writer'), true)
     await original.writer?.close()
     await expect(b.ctx.translator.translate(b.ctx.translator.resolve({ text: 'source', targetLanguage: 'zh', sessionId: original.id })))
-      .rejects.toMatchObject({ code: 'TRANSLATION_STORAGE_ERROR' })
+      .rejects.toMatchObject({ code: 'TRANSLATION_SESSION_REQUIRED' })
     expect(await b.readEvents(original.id)).toEqual(original.events)
     expect(b.requests).toEqual([])
   })

@@ -225,7 +225,10 @@ describe('native Flash translation', () => {
     const sessionId = SessionId('transient-audit-session')
     const scope = b.ctx.plugin({ inject: ['sessions'], apply: (ctx) => { ctx.sessions.create(sessionId) } })
     await scope
-    const writer = await b.ctx.sessionPersistence.create(b.ctx.sessions.get(sessionId)!.header)
+    const session = b.ctx.sessions.get(sessionId)!
+    const writer = await b.ctx.sessionPersistence.create(session.header)
+    await writer.flush()
+    writer.bindSession?.(session)
     cleanups.push(async () => { await writer.close() })
     const entered = Promise.withResolvers<undefined>(), release = Promise.withResolvers<undefined>()
     const original = b.ctx.llm.prepareCall.bind(b.ctx.llm)

@@ -202,16 +202,25 @@ describe('translation storage guards', () => {
     expect([...absent.requests, ...b.requests]).toEqual([])
   })
 
+  it('refuses a request without a bound writer despite a void flush observer', async () => {
+    const b = await storageFixture(cleanups), original = await b.createSession(SessionId('unbound'), true, false)
+    b.ctx.on('session/flush', () => {})
+    await expect(b.ctx.translator.translate(b.ctx.translator.resolve({ text: 'source', targetLanguage: 'zh', sessionId: original.id })))
+      .rejects.toMatchObject({ code: 'TRANSLATION_SESSION_REQUIRED' })
+    expect(b.requests).toEqual([])
+  })
+
   it('does not return a provider response when result durability fails', async () => {
     const b = await storageFixture(cleanups, { async reply(call, response) {
       await original.writer?.close()
+      await b.ctx.sessionPersistence.open(original.id, 'write')
       storageReply(call, response)
     } })
     const original = await b.createSession()
+    b.ctx.on('session/flush', () => {})
     await expect(b.ctx.translator.translate(b.ctx.translator.resolve({ text: 'source', targetLanguage: 'zh', sessionId: original.id })))
-      .rejects.toMatchObject({ code: 'TRANSLATION_STORAGE_ERROR' })
+      .rejects.toMatchObject({ code: 'TRANSLATION_SESSION_REQUIRED' })
     expect(b.requests).toHaveLength(1)
-    expect(results(await b.readEvents(original.id))).toEqual([])
   })
 
   it.each([

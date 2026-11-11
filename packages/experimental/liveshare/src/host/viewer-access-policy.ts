@@ -122,6 +122,7 @@ const VIEWER_SESSION_READ_ROLE: RemoteAccessRole<'session'> = {
     'commands/list',
     'fileUploads/upload',
     'goals/get',
+    'reviewGated/watchView',
     'session/attachment',
     'session/control',
     'session/events',
