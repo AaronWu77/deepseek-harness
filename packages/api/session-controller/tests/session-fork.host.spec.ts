@@ -251,6 +251,8 @@ describe('sessions.fork', () => {
       await mountAgentLoopTestDependencies(ctx)
       const harness = await mountAgentLoopTestHarness(ctx)
       await ctx.plugin(TokenMeter)
+      // Manual compaction requires a participating flush listener; this harness mounts no persistence backend.
+      ctx.on('session/flush', () => {})
       const compact = new BasicCompactionEngine(ctx, { auto: false })
       const adapter = new MockAdapter([
         textResponse('reply'), textResponse('checkpoint'), textResponse('continued'),

@@ -7,14 +7,19 @@ import {
 import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AgentPresetSectionState } from './section-store.ts'
-import { isBuiltInPreset, presetDisplayText } from './locales.ts'
+import { isBuiltInPreset } from './locales.ts'
+import { displayPreset, type PresetDisplayContribution } from './preset-display.ts'
 import { requiresCodingTools } from './settings-store.ts'
 import { PresetGuideDialog, presetGuide, trapPresetReaderTab, type PresetGuidePage } from './PresetGuideDialog.tsx'
 import css from './AgentPresetSection.module.css'
 
 /** Settings actions and their shared controller state. */
 export interface AgentPresetSectionInjected {
+  /** Resolve translations with the current Client locale. */
+  resolvePresetDescription: (text: PresetDisplayContribution['description']) => string
   hooks: {
+    /** Registered descriptions; renderer subscribes to changes. */
+    presetDisplay: ObservableSnapshot<readonly PresetDisplayContribution[]>
     agentPresetSection: SnapshotStore<AgentPresetSectionState>
     /** Shared Coding Tools preference; off hides the built-in PTC and Minimal cards. */
     developerTools: ObservableSnapshot<boolean>
@@ -63,8 +68,9 @@ function CardDescription({ text }: { text: string }): ReactNode {
  */
 export function AgentPresetSection({
   useAgentPresetSection, load, view, closeView, makeDefault, startCreatorDraft,
-  close: closeSettings, useDeveloperTools, t,
+  close: closeSettings, useDeveloperTools, usePresetDisplay, resolvePresetDescription, t,
 }: AgentPresetSectionProps) {
+  const descriptions = usePresetDisplay(value => value)
   const state = useAgentPresetSection(value => value)
   const developerTools = useDeveloperTools(enabled => enabled)
   const [guide, setGuide] = useState<{
@@ -79,7 +85,7 @@ export function AgentPresetSection({
   const closeViewer = () => { closeView(); viewTrigger.current?.focus() }
   const viewed = state.view
   const viewedRow = viewed === null ? undefined : state.rows.find(row => row.id === viewed.id)
-  const viewedTitle = viewed === null ? '' : viewedRow === undefined ? viewed.title : presetDisplayText(viewedRow, t).name
+  const viewedTitle = viewed === null ? '' : viewedRow === undefined ? viewed.title : displayPreset(viewedRow, t, descriptions, resolvePresetDescription).name
   // Creator mode authors presets in conversation; it needs the flow to land a
   // session in and the self-referential preset on the roster.
   const creator = startCreatorDraft !== undefined && state.rows.some(row => row.id === 'cordis') ? startCreatorDraft : undefined
@@ -111,7 +117,7 @@ export function AgentPresetSection({
         <h3 className={css.groupHead}>{t(builtIn ? 'builtInGroup' : 'customGroup')}</h3>
         {rows.length === 0 ? null : <ul className={css.cards}>
           {rows.map((row) => {
-            const display = presetDisplayText(row, t)
+            const display = displayPreset(row, t, descriptions, resolvePresetDescription)
             const help = presetGuide(row.id, builtIn ? 'system' : 'user')
             const selectionAction = row.broken !== undefined ? t('brokenBadge')
               : t(row.isDefault ? 'inUse' : 'setDefault')

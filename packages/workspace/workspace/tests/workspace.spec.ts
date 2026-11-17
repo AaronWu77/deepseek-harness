@@ -1077,6 +1077,25 @@ describe('registry-global session archive', () => {
     expect(result.registry.archivedSessionIds).toEqual(['gone', 'kept'])
   })
 
+  it('forgets a session from the archive set, the pin set, and workspace accounting', async () => {
+    const dir = await makeDir('forget-home')
+    const result = await harness({ sessions: [header('kept', dir, 100), header('gone', dir, 200)] })
+    await result.registry.archiveSession(SessionId('gone'))
+    await result.registry.pinSession(SessionId('kept'))
+
+    await expect(result.registry.removeSession(SessionId('gone'))).resolves.toBe(true)
+    expect(result.registry.archivedSessionIds).toEqual([])
+    expect(storedState(result.pool).archivedSessionIds).toEqual([])
+    expect(result.registry.list()[0]!.sessionIds).not.toContain('gone')
+    expect(result.registry.list()[0]!.sessionIds).toContain('kept')
+
+    await expect(result.registry.removeSession(SessionId('kept'))).resolves.toBe(true)
+    expect(result.registry.pinnedSessionIds).toEqual([])
+
+    // An id the registry never knew changes nothing and reports it.
+    await expect(result.registry.removeSession(SessionId('unknown'))).resolves.toBe(false)
+  })
+
   it('accepts unaccounted and live sessions but rejects unknown ids without writing', async () => {
     const dir = await makeDir('archive-strays')
     const live = await makeDir('archive-live')

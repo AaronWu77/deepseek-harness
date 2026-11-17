@@ -1,6 +1,6 @@
 /** The optional namespace and both UI contributions leave with the plugin. */
 import assert from 'node:assert/strict'
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context, FiberState, Service } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -118,9 +118,9 @@ it('registers translated reasoning and preferences, adopts accepted choices, and
   } finally { await b.ctx.fiber.dispose() }
 })
 
-it.each(['limits', 'registration'])('rolls back the Remote when %s fails', async (kind) => {
-  const b = await fixture(kind === 'limits')
-  if (kind === 'registration') vi.spyOn(b.ctx.slots, 'inject').mockImplementationOnce(() => { throw new Error('registration failed') })
+it('rolls back the Remote when UI registration fails', async () => {
+  const b = await fixture()
+  vi.spyOn(b.ctx.slots, 'inject').mockImplementationOnce(() => { throw new Error('registration failed') })
   try {
     await expect(mountTranslation(b.ctx, contribution)).rejects.toThrow()
     expect(b.unmount).toHaveBeenCalledOnce()
@@ -275,14 +275,32 @@ it('rechecks the caller abort after a held metadata query completes', async () =
 })
 
 
-it('rolls back a failed initial metadata transport read', async () => {
+it.each(['throw', 'refuse'] as const)('activates with original reasoning after a %s initial metadata read and recovers on reconnect', async (outcome) => {
   const b = await fixture()
-  b.limits.mockRejectedValueOnce(new Error('metadata transport failed'))
+  const warning = vi.spyOn(b.ctx.logger, 'warn').mockImplementation(() => {})
+  if (outcome === 'throw') b.limits.mockRejectedValueOnce(new Error('metadata transport failed'))
+  else b.limits.mockResolvedValueOnce({ ok: false, error: new RemoteError('cotTranslation/failed', 'metadata unavailable', {}) })
   try {
-    await expect(mountTranslation(b.ctx, contribution)).rejects.toThrow('metadata transport failed')
+    const fiber = b.ctx.plugin({ inject: [...inject], apply: ctx => mountTranslation(ctx, contribution) })
+    await fiber
+    expect(fiber.state).toBe(FiberState.ACTIVE)
     expect(b.ctx.slots.entries('conversation.chat.reasoning.body')).toHaveLength(0)
+    expect(b.ctx.slots.entries('plugins.bundle.config')).toHaveLength(0)
+    expect(b.unmount).not.toHaveBeenCalled()
+    expect(b.translate).not.toHaveBeenCalled()
+    expect(warning).toHaveBeenCalledOnce()
+    b.ctx.emit('connection/reset')
+    await vi.waitFor(() => { expect(b.ctx.slots.entries('conversation.chat.reasoning.body')).toHaveLength(1) })
+    expect(b.ctx.slots.entries('plugins.bundle.config')).toHaveLength(1)
+    const body = injectReasoning(b.ctx.slots.entries('conversation.chat.reasoning.body')[0]!, sourceSessionId)
+    bodyFace(body)
+    expect(await body.translate({ text: 'original', provider: 'bing', targetLanguage: 'zh' }, new AbortController().signal)).toBe('translated')
+    expect(b.limits).toHaveBeenCalledTimes(2)
+    await fiber.dispose()
     expect(b.unmount).toHaveBeenCalledOnce()
-  } finally { await b.ctx.fiber.dispose() }
+    expect(b.ctx.slots.entries('conversation.chat.reasoning.body')).toHaveLength(0)
+    expect(b.listeners.size).toBe(0)
+  } finally { warning.mockRestore(); await b.ctx.fiber.dispose() }
 })
 
 it.each(['throw', 'refuse'] as const)('does not submit after a %s metadata refresh and retries metadata before the next fragment', async (outcome) => {

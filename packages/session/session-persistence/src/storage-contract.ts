@@ -52,6 +52,28 @@ export function assertVersion(
   }
 }
 
+/** Refuse an unknown required event or retired header. */
+function assertStoredEventAdmitted(meta: SessionHeader, event: SessionEvent, location: SessionLocation | undefined): void {
+  if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true) {
+    throw unsupported(
+      `session "${meta.id}" contains event type "${event.type}" (seq ${event.seq}) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness`,
+      location,
+    )
+  }
+  // The one retired shape hiding under a known type: the removed delta codec's
+  // full-header "fallback" reason. Everything else retired was a whole type.
+  if (event.type === 'request/header') {
+    const data: unknown = event.data
+    if (typeof data === 'object' && data !== null
+      && (data as Record<string, unknown>)['reason'] === 'fallback') {
+      throw unsupported(
+        `session "${meta.id}" contains a request/header event (seq ${event.seq}) with the unsupported legacy reason "fallback"; refusing to interpret the log — it was written by a retired pre-release harness`,
+        location,
+      )
+    }
+  }
+}
+
 /**
  * Validate one exclusively owned stored event array in place: adopt each
  * record (validating and freezing it) and refuse any event type this build
@@ -71,26 +93,7 @@ export function validateStoredEvents(
   events: SessionEvent[],
   location?: SessionLocation,
 ): SessionEvent[] {
-  for (const event of events) {
-    if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true) {
-      throw unsupported(
-        `session "${meta.id}" contains event type "${event.type}" (seq ${event.seq}) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness`,
-        location,
-      )
-    }
-    // The one retired shape hiding under a known type: the removed delta codec's
-    // full-header "fallback" reason. Everything else retired was a whole type.
-    if (event.type === 'request/header') {
-      const data: unknown = event.data
-      if (typeof data === 'object' && data !== null
-        && (data as Record<string, unknown>)['reason'] === 'fallback') {
-        throw unsupported(
-          `session "${meta.id}" contains a request/header event (seq ${event.seq}) with the unsupported legacy reason "fallback"; refusing to interpret the log — it was written by a retired pre-release harness`,
-          location,
-        )
-      }
-    }
-  }
+  for (const event of events) assertStoredEventAdmitted(meta, event, location)
   try {
     for (const [index, event] of events.entries()) events[index] = adoptSessionEvent(event)
   } catch (error: unknown) {

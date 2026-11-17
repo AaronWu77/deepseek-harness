@@ -9,6 +9,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionEvent, SessionHeader, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionHandle, SessionAccess } from './handle.ts'
+import { SessionPersistenceDeleteUnsupportedError } from './errors.ts'
 import type { SessionLocation } from './errors.ts'
 import type { SessionPersistenceRevision } from './revision.ts'
 
@@ -30,6 +31,7 @@ export {
   SessionHandleClosedError,
   SessionOwnershipLostError,
   SessionPersistenceCorruptionError,
+  SessionPersistenceDeleteUnsupportedError,
   SessionPersistenceNotFoundError,
   SessionReadOnlyError,
   sessionFormatVersionRefusal,
@@ -109,6 +111,15 @@ export interface SessionPersistenceStatOptions {
   readonly signal?: AbortSignal
 }
 
+/** Outcome of {@link SessionPersistence.delete}. */
+export type SessionPersistenceDeleteOutcome = 'deleted' | 'absent'
+
+/** Options for {@link SessionPersistence.delete}. */
+export interface SessionPersistenceDeleteOptions {
+  /** Optional cancellation for backend deletion work. */
+  readonly signal?: AbortSignal
+}
+
 /** Options for {@link SessionPersistence.list}. */
 export interface SessionPersistenceListOptions {
   /** Optional cancellation for backend listing work. */
@@ -152,7 +163,7 @@ export abstract class SessionPersistence extends Service {
   /**
    * Create a new stored session and take its write ownership.
    * @param header - the immutable header (id, version, cwd, lineage) to store.
-   * @param options - optional cancellation.
+   * @param options - unused optional cancellation; backends that support deletion implement it.
    * @returns a `write` handle owned by the caller; close it to release ownership.
    * @throws {SessionAlreadyExistsError} when the id already exists.
    */
@@ -208,6 +219,26 @@ export abstract class SessionPersistence extends Service {
    * @returns one snapshot per stored session.
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+  /**
+   * Remove one stored session's durable artifacts.
+   *
+   * Deletion is not part of the append contract: a deleted id stops being
+   * observable through `stat`/`list`/`open`, and the backend may retain a
+   * recoverable copy outside its storage root because only the operator
+   * decides when bytes are unrecoverable. A created-but-unmaterialized
+   * session has no durable artifact, so it reports `absent` once its handle
+   * closes. Concurrent readers keep the handles they already opened; a write
+   * handle holds ownership of the id and refuses deletion until it closes.
+   * @param id - the stored session to remove.
+   * @param _options - optional cancellation; this base implementation ignores it.
+   * @returns `deleted` when artifacts were removed, `absent` when the id stored nothing.
+   * @throws {SessionAlreadyOwnedError} when a write handle holds the session.
+   * @throws {SessionPersistenceDeleteUnsupportedError} from a backend that keeps no removable artifact.
+   */
+  async delete(id: SessionId, _options?: SessionPersistenceDeleteOptions): Promise<SessionPersistenceDeleteOutcome> {
+    throw new SessionPersistenceDeleteUnsupportedError(id)
+  }
 }
 
 export default SessionPersistence

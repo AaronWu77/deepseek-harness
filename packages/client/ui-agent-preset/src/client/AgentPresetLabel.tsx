@@ -9,19 +9,23 @@
  */
 
 import { useEffect } from 'react'
-import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconAgentPresetOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: pulls the ui-conversation SlotMap merge (the header actions).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry/types'
 import type { AgentPresetSettingsState } from './settings-store.ts'
-import { presetDisplayText } from './locales.ts'
+import { displayPreset, type PresetDisplayContribution } from './preset-display.ts'
 import css from './AgentPresetLabel.module.css'
 
 /** Registration-side business face for the header label. */
 export interface AgentPresetLabelInjected {
+  /** Resolve translations with the current Client locale. */
+  resolvePresetDescription: (text: PresetDisplayContribution['description']) => string
   hooks: {
+    /** Registered descriptions; renderer subscribes to changes. */
+    presetDisplay: ObservableSnapshot<readonly PresetDisplayContribution[]>
     /** Roster snapshot bound by the renderer as useAgentPresets. */
     agentPresets: SnapshotStore<AgentPresetSettingsState>
   }
@@ -41,13 +45,14 @@ export type AgentPresetLabelProps =
  * @returns the label, or null when the session records no preset.
  */
 export function AgentPresetLabel({
-  sessionId, useSessions, useAgentPresets, load, t,
+  sessionId, useSessions, useAgentPresets, usePresetDisplay, resolvePresetDescription, load, t,
 }: AgentPresetLabelProps) {
   const preset = useSessions((state) => {
     const value = state.byId[sessionId]?.projectionValues?.agentPreset
     return typeof value === 'string' ? value : undefined
   })
   const options = useAgentPresets(state => state.options)
+  const descriptions = usePresetDisplay(value => value)
 
   useEffect(() => {
     // Deployments that compose no presets never label anything, so the roster
@@ -58,7 +63,7 @@ export function AgentPresetLabel({
   if (preset === undefined) return null
 
   const option = options.find(entry => entry.id === preset)
-  const text = option === undefined ? undefined : presetDisplayText(option, t)
+  const text = option === undefined ? undefined : displayPreset(option, t, descriptions, resolvePresetDescription)
   return (
     <span className={css.label} title={text?.description ?? t('headerHint')}>
       <IconAgentPresetOutlineRegular size={14} className={css.icon} />

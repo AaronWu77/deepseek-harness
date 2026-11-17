@@ -1,3 +1,5 @@
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
+import { appendRecord } from './records.ts'
 /** Controlled persistence interleavings for RG admission and completion notices. */
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { describe, expect, it, vi } from 'vitest'
@@ -47,9 +49,9 @@ describe('RG persistence admission races', { timeout: 120_000 }, () => {
     const release = f.gate()
     let intercepted = false
     const off = f.ctx.on('session/flush', async (session) => {
-      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => event.type === 'review-gated/result-confirmed')) return
+      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')) return
       intercepted = true
-      session.append('review-gated/git-state', { version: 1, state: replacement })
+      appendRecord(session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
       entered.resolve(undefined)
       await release.promise
     })
@@ -66,7 +68,7 @@ describe('RG persistence admission races', { timeout: 120_000 }, () => {
       expect(f.runtime.read(agent.session)?.diagnostic).toContain('Git delivery changed')
       await f.ctx.sessionPersistence.flush()
       const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
-      try { expect((await stored.read()).events.some(event => event.type === 'review-gated/result-confirmed')).toBe(true) }
+      try { expect((await stored.read()).events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(true) }
       finally { await stored.close() }
     } finally { off(); release.resolve(undefined); sent.mockRestore() }
   })
@@ -81,9 +83,9 @@ describe('RG persistence admission races', { timeout: 120_000 }, () => {
     const release = f.gate()
     let intercepted = false
     const off = f.ctx.on('session/flush', async (session) => {
-      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => event.type === 'review-gated/result-confirmed')) return
+      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')) return
       intercepted = true
-      session.append('review-gated/git-state', { version: 1, state: replacement })
+      appendRecord(session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
       entered.resolve(undefined)
       await release.promise
     })
@@ -112,7 +114,7 @@ describe('RG persistence admission races', { timeout: 120_000 }, () => {
     const release = f.gate()
     let intercepted = false
     const off = f.ctx.on('session/flush', async (session) => {
-      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => event.type === 'review-gated/result-confirmed')) return
+      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')) return
       intercepted = true
       entered.resolve(undefined)
       await release.promise
@@ -128,7 +130,7 @@ describe('RG persistence admission races', { timeout: 120_000 }, () => {
       await disposing
       expect(sent).not.toHaveBeenCalled()
       const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
-      try { expect((await stored.read()).events.some(event => event.type === 'review-gated/result-confirmed')).toBe(true) }
+      try { expect((await stored.read()).events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(true) }
       finally { await stored.close() }
     } finally { off(); release.resolve(undefined); sent.mockRestore() }
   })
@@ -141,11 +143,11 @@ describe('RG persistence admission races', { timeout: 120_000 }, () => {
     const release = f.gate()
     let intercepted = false
     const off = f.ctx.on('session/flush', async (session) => {
-      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => event.type === 'review-gated/result-confirmed')) return
+      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')) return
       intercepted = true
       const state = f.runtime.read(session)
       if (state?.task == null) throw new Error('Expected confirmed task')
-      session.append('review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'A changed task' } } })
+      appendRecord(session, 'plugin:review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'A changed task' } } })
       entered.resolve(undefined)
       await release.promise
     })
@@ -159,9 +161,12 @@ describe('RG persistence admission races', { timeout: 120_000 }, () => {
       expect(sent).not.toHaveBeenCalled()
       await f.ctx.sessionPersistence.flush()
       const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
-      try { expect((await stored.read()).events.some(event => event.type === 'review-gated/result-confirmed')).toBe(true) }
+      try { expect((await stored.read()).events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(true) }
       finally { await stored.close() }
-      expect(f.runtime.read(agent.session)?.task?.objective).toBe('A changed task')
+      // The replacement withdraws the receipt, so the public read fails closed while the folded task
+      // still names the change.
+      expect(() => f.runtime.read(agent.session)).toThrow(expect.objectContaining({ code: 'RG_NOT_READY' }))
+      expect(f.ctx.sessionProjections.snapshot(agent.session, ['reviewGated']).values.reviewGated?.state?.task?.objective).toBe('A changed task')
       expect(f.runtime.statusOf(agent.session)).toBe('unknown')
     } finally { off(); release.resolve(undefined); sent.mockRestore() }
   })

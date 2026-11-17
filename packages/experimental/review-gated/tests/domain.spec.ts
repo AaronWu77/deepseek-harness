@@ -1,4 +1,5 @@
 /** RG configuration parsing, attempt transitions, and deterministic projection recovery. */
+import { appendRecord, durableEvents, recordOf } from './records.ts'
 import { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -6,8 +7,8 @@ import { MessageId, type UserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
 import { describe, expect, it, onTestFinished } from 'vitest'
-import { capturePolicy, Config, defaultSettings, resolveModel } from '../src/config.ts'
-import { foldRgState, RG_TASK_ADMISSION_OWNER, rgProjectionDefinition, TASK_SAVE_UNCERTAIN, type RgProjectionState } from '../src/projection.ts'
+import { capturePolicy, Config, defaultSettings, parseSettings, resolveModel } from '../src/config.ts'
+import { foldRgState, rgProjectionDefinition, TASK_SAVE_UNCERTAIN, type RgProjectionState } from '../src/projection.ts'
 import { handoffSchema, policySchema, poolSchema, reviewReportSchema, settingsSchema, workerReportSchema } from '../src/schemas.ts'
 import { reserveRun, settleRun } from '../src/task.ts'
 import type { RgModel, RgModelPool, RgPolicy, RgReviewReport, RgRun, RgRunId, RgSessionState, RgSettings, RgTask, RgTaskId } from '../src/types.ts'
@@ -33,8 +34,7 @@ const pass = (): RgReviewReport => ({
 const sessionState = (current: RgTask | null = null): RgSessionState => ({
   policy: policy(), role: 'main', parentSessionId: null, taskId: null, runId: null, task: current, diagnostic: null,
 })
-const emptyProjection = (): RgProjectionState => ({ value: null, hasRequested: false, failure: null, pending: null,
-  taskAdmission: null, taskInputText: null, directClaim: null })
+const emptyProjection = (): RgProjectionState => rgProjectionDefinition.init()
 
 function activeId(value: RgTask): RgRunId {
   if (value.active === null) throw new Error('Expected a reserved RG run')
@@ -42,9 +42,14 @@ function activeId(value: RgTask): RgRunId {
 }
 
 describe('RG settings and frozen model choices', () => {
-  it('rejects the serialized Host transform without its Host-only decoder', () => {
+  it('decodes its serialized settings section without a Host-only decoder', () => {
+    // The settings page validates every section against this serialized schema,
+    // so the loader must not carry a transform whose callback cannot survive it.
     const schema = new Schema(JSON.parse(JSON.stringify(Config.toJSON())) as Schema)
-    expect(() => Schema.resolve({ settings: settings() }, schema, {})).toThrow()
+    const [resolved] = Schema.resolve({ settings: settings() }, schema, {})
+    const bound = (resolved as { settings: RgSettings | { get(): RgSettings } }).settings
+    const section = 'get' in bound && typeof bound.get === 'function' ? bound.get() : bound
+    expect(section).toEqual(settings())
   })
 
   it('starts unconfigured with no model authorization and rejects capturing that state', () => {
@@ -95,9 +100,17 @@ describe('RG settings and frozen model choices', () => {
     { ...settings(), maxReviewAttempts: 1.5 },
     { ...settings(), maxScopeFiles: Number.MAX_SAFE_INTEGER + 1 },
     { ...settings(), maxReportChars: -1 },
-  ])('rejects an invalid complete settings document', (input) => {
+  ])('rejects an invalid complete settings document at the consumption boundary', (input) => {
     expect(settingsSchema.safeParse(input).success).toBe(false)
-    expect(() => Schema.resolve({ settings: input }, Config, {})).toThrow()
+    expect(() => parseSettings(input)).toThrow('RG settings are invalid')
+  })
+
+  it('keeps cross-field invariants out of the serialized loader schema', () => {
+    // Field bounds stay in the loader schema; membership rules that the settings
+    // page must still display remain at the consumption boundary.
+    const crossField = { ...settings(), main: { candidates: [], default: null } }
+    expect(() => parseSettings(crossField)).toThrow('RG settings are invalid')
+    expect(Schema.resolve({ settings: crossField }, Config, {})).toBeDefined()
   })
 
   it('rejects duplicate routes and defaults that are not members even in an unconfigured pool', () => {
@@ -182,61 +195,84 @@ describe('RG attempt admission and settlement', () => {
 })
 
 describe('RG projection recovery', () => {
-  it('requires the matching independent confirmation across every prepared task prefix', async () => {
+  it('requires the matching entered settlement across every prepared task prefix', async () => {
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
     await ctx.plugin(SessionStore)
     await ctx.plugin(SessionProjections)
     await ctx.sessionProjections.register<'reviewGated', RgProjectionState>(rgProjectionDefinition)
     const session = ctx.sessions.create(SessionId('rg-admission-prefixes'))
-    session.append('review-gated/state', { version: 1, state: sessionState() })
-    session.append('agent/admission/opened', { owner: RG_TASK_ADMISSION_OWNER, messageId: MessageId('human-input') })
-    const opened = session.snapshotEvents().length
-    const prepared = session.append('review-gated/task-prepared', { version: 1, messageId: MessageId('human-input'), input: task().objective,
-      state: { ...sessionState(task()), diagnostic: TASK_SAVE_UNCERTAIN } })
-    expect(prepared.ignorable).toBeUndefined()
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState() })
+    session.append('turn/start', { turn: 1 })
     const human: UserMessage = { id: MessageId('human-input'), role: 'user', content: [{ type: 'text', text: task().objective }], source: { kind: 'user' } }
-    session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [human] })
+    const intent = appendRecord(session, 'plugin:review-gated/claim', { version: 1, phase: 'intent', turn: 1, step: 1, inputs: [{ message: human }] })
+    const opened = session.snapshotEvents().length
+    const prepared = appendRecord(session, 'plugin:review-gated/task-prepared', { version: 1, intentSeq: intent.seq, messageId: human.id, input: task().objective,
+      state: { ...sessionState(task()), diagnostic: TASK_SAVE_UNCERTAIN } })
+    expect(prepared.ignorable).toBe(true)
+    session.append('step/start', { turn: 1, step: 1 })
+    session.append('user/message', human, { surfaceOp: 'append' })
     const confirmedAt = session.snapshotEvents().length
-    session.append('agent/admission/confirmed', { owner: RG_TASK_ADMISSION_OWNER, messageId: human.id })
+    appendRecord(session, 'plugin:review-gated/claim-settled', { version: 1, phase: 'settled', intentSeq: intent.seq, outcome: 'entered', messages: [human] })
     const events = session.snapshotEvents()
     const full = ctx.sessionProjections.restore({}, events, SessionLogOffset(0), session.header, session.inheritedEventCount)
-    expect(full.snapshot.values.reviewGated).toMatchObject({ task: { id: task().id }, diagnostic: null })
+    expect(full.snapshot.values.reviewGated?.state).toMatchObject({ task: { id: task().id }, diagnostic: null })
+    expect(full.snapshot.values.reviewGated).toMatchObject({ failed: false, ready: false, taskReceipt: 'proven' })
     for (let cut = opened; cut <= confirmedAt; cut++) {
       const prefix = ctx.sessionProjections.restore(
         {}, events.slice(0, cut), SessionLogOffset(0), session.header, session.inheritedEventCount)
-      expect(prefix.snapshot.values.reviewGated?.diagnostic).toContain('RG_TASK_SAVE_UNCERTAIN')
+      if (cut === opened) {
+        expect(prefix.checkpoint.reviewGated?.val).toMatchObject({ taskAdmission: { intentSeq: intent.seq, taskId: null } })
+        expect(prefix.snapshot.values.reviewGated).toMatchObject({ taskReceipt: 'none', ready: false })
+      } else {
+        expect(prefix.snapshot.values.reviewGated?.state?.diagnostic).toContain('RG_TASK_SAVE_UNCERTAIN')
+        expect(prefix.snapshot.values.reviewGated).toMatchObject({ taskReceipt: 'unproven', ready: false })
+      }
       const suffix = ctx.sessionProjections.restore(
         prefix.checkpoint, events.slice(cut), SessionLogOffset(cut), session.header, session.inheritedEventCount)
       expect(suffix.snapshot.values.reviewGated).toEqual(full.snapshot.values.reviewGated)
       const forkId = SessionId(`rg-admission-fork-${cut}`)
       const fork = Session.create(forkId, events.slice(0, cut), { ...session.header, id: forkId, isSeeded: true }, SessionLogOffset(cut))
-      expect(fork.snapshotEvents().reduce(foldRgState, emptyProjection()).failure).toContain('RG_STATE_INVALID')
+      const inherited = fork.snapshotEvents().reduce(foldRgState, emptyProjection())
+      if (cut === opened) expect(inherited).toMatchObject({ failure: null, taskAdmission: { taskId: null } })
+      else expect(inherited.failure).toContain('RG_STATE_INVALID')
     }
   })
 
-  it('rejects a prepared task without its opening, exact receipt, and matching confirmation', () => {
+  it('rejects preparation without its intent and settlement without exact model-entry evidence', () => {
     const session = Session.create(SessionId('rg-admission-validation'), [])
-    const initial = foldRgState(emptyProjection(), session.append('review-gated/state', { version: 1, state: sessionState() }))
-    const opened = session.append('agent/admission/opened', { owner: RG_TASK_ADMISSION_OWNER, messageId: MessageId('human-input') })
-    const prepared = session.append('review-gated/task-prepared', { version: 1, messageId: MessageId('human-input'), input: task().objective,
-      state: { ...sessionState(task()), diagnostic: TASK_SAVE_UNCERTAIN } })
+    const seeded = foldRgState(emptyProjection(), appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState() }))
+    const initial = foldRgState(seeded, session.append('turn/start', { turn: 1 }))
     const human: UserMessage = { id: MessageId('human-input'), role: 'user', content: [{ type: 'text', text: task().objective }], source: { kind: 'user' } }
-    const receipt = session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [human] })
-    const confirmed = session.append('agent/admission/confirmed', { owner: RG_TASK_ADMISSION_OWNER, messageId: human.id })
+    const opened = appendRecord(session, 'plugin:review-gated/claim', { version: 1, phase: 'intent', turn: 1, step: 1, inputs: [{ message: human }] })
+    const prepared = appendRecord(session, 'plugin:review-gated/task-prepared', { version: 1, intentSeq: opened.seq, messageId: human.id, input: task().objective,
+      state: { ...sessionState(task()), diagnostic: TASK_SAVE_UNCERTAIN } })
+    const start = session.append('step/start', { turn: 1, step: 1 })
+    const receipt = session.append('user/message', human, { surfaceOp: 'append' })
+    const confirmed = appendRecord(session, 'plugin:review-gated/claim-settled', { version: 1, phase: 'settled', intentSeq: opened.seq, outcome: 'entered', messages: [human] })
+    const change = (event: typeof prepared, data: unknown) => durableEvents([{ ...event, data }])[0]!
     expect(foldRgState(initial, prepared).failure).toContain('RG_STATE_INVALID')
     const afterOpen = foldRgState(initial, opened)
-    expect(foldRgState(afterOpen, { ...prepared, data: { ...prepared.data, messageId: MessageId('wrong') } }).failure).toContain('RG_STATE_INVALID')
+    expect(foldRgState(afterOpen, change(prepared, { ...recordOf(prepared)?.data, messageId: MessageId('wrong') })).failure).toContain('RG_STATE_INVALID')
+    expect(foldRgState(afterOpen, change(prepared, { ...recordOf(prepared)?.data, intentSeq: opened.seq + 1 })).failure).toContain('RG_STATE_INVALID')
     const afterPrepare = foldRgState(afterOpen, prepared)
-    const premature = session.append('user/message', human, { surfaceOp: 'append' })
-    expect(foldRgState(afterPrepare, premature).value?.diagnostic).toBe(TASK_SAVE_UNCERTAIN)
+    expect(afterPrepare.taskReceipt).toBe('unproven')
+    expect(rgProjectionDefinition.stateSchema.safeParse({ ...afterPrepare, taskReceipt: 'proven' }).success).toBe(false)
+    expect(foldRgState(afterPrepare, receipt).value?.diagnostic).toBe(TASK_SAVE_UNCERTAIN)
     expect(foldRgState(afterPrepare, confirmed).failure).toContain('RG_STATE_INVALID')
-    expect(foldRgState(afterPrepare, { ...receipt, data: { ...receipt.data, inserted: [{ ...human, content: [{ type: 'text', text: 'wrong' }] }] } }).failure).toContain('RG_STATE_INVALID')
-    const received = foldRgState(afterPrepare, receipt)
-    expect(foldRgState(received, { ...confirmed, data: { ...confirmed.data, messageId: MessageId('wrong') } }).failure).toContain('RG_STATE_INVALID')
-    const removed = { ...receipt, data: { target: 'next-turn' as const, start: 0, removedCount: 1, inserted: [] } }
-    expect(foldRgState(received, removed).failure).toContain('RG_STATE_INVALID')
+    const started = foldRgState(afterPrepare, start)
+    const wrong = foldRgState(started, { ...receipt, data: { ...receipt.data, content: [{ type: 'text', text: 'wrong' }] } })
+    expect(foldRgState(wrong, confirmed).failure).toContain('RG_STATE_INVALID')
+    const received = foldRgState(started, receipt)
+    expect(foldRgState(received, change(confirmed, { ...recordOf(confirmed)?.data, intentSeq: opened.seq + 1 })).failure).toContain('RG_STATE_INVALID')
+    const requeued = session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [human] })
+    expect(foldRgState(received, requeued).failure).toContain('RG_STATE_INVALID')
     expect(foldRgState(received, confirmed).value?.diagnostic).toBeNull()
+    expect(foldRgState(initial, confirmed).failure).toContain('RG_STATE_INVALID')
+    expect(foldRgState(afterOpen, change(confirmed, { ...recordOf(confirmed)?.data, intentSeq: opened.seq + 1 }))).toBe(afterOpen)
+    for (const phase of ['opened', 'confirmed', 'uncertain']) {
+      expect(foldRgState(initial, change(opened, { version: 1, phase, messageId: human.id })).failure).toContain('RG_STATE_INVALID')
+    }
   })
 
   it.each([TASK_SAVE_UNCERTAIN, 'RG_TASK_SAVE_UNCERTAIN: the task or its message may not be saved reliably. Inspect the Session before continuing.'])
@@ -248,38 +284,38 @@ describe('RG projection recovery', () => {
     await ctx.sessionProjections.register<'reviewGated', RgProjectionState>(rgProjectionDefinition)
     const session = ctx.sessions.create(SessionId('rg-legacy-receipt-checkpoint'))
     const human: UserMessage = { id: MessageId('human-input'), role: 'user', content: [{ type: 'text', text: 'Implement the requested behavior' }], source: { kind: 'user' } }
-    session.append('review-gated/state', { version: 1, state: { ...sessionState(task()), diagnostic } })
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: { ...sessionState(task()), diagnostic } })
     const receipt = session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [human] })
     const prefix = session.snapshotEvents()
     const old = { reviewGated: { ver: 4, seq: receipt.seq,
       val: { value: sessionState(task()), hasRequested: false, failure: null, pending: null } } }
     expect(ctx.sessionProjections.restoreFloor(old)).toBe(0)
     const restored = ctx.sessionProjections.restore(old, prefix, SessionLogOffset(0), session.header, session.inheritedEventCount)
-    expect(restored.snapshot.values.reviewGated?.diagnostic).toBe(TASK_SAVE_UNCERTAIN)
+    expect(restored.snapshot.values.reviewGated?.state?.diagnostic).toBe(TASK_SAVE_UNCERTAIN)
     session.append('user/message', { ...human, id: MessageId('other') }, { surfaceOp: 'append' })
     const wrong = ctx.sessionProjections.restore(restored.checkpoint, session.snapshotEvents().slice(prefix.length),
       SessionLogOffset(prefix.length), session.header, session.inheritedEventCount)
-    expect(wrong.snapshot.values.reviewGated?.diagnostic).toBe(TASK_SAVE_UNCERTAIN)
+    expect(wrong.snapshot.values.reviewGated?.state?.diagnostic).toBe(TASK_SAVE_UNCERTAIN)
     session.append('user/message', human, { surfaceOp: 'append' })
     const full = ctx.sessionProjections.restore(
       {}, session.snapshotEvents(), SessionLogOffset(0), session.header, session.inheritedEventCount)
     const suffix = ctx.sessionProjections.restore(restored.checkpoint, session.snapshotEvents().slice(prefix.length),
       SessionLogOffset(prefix.length), session.header, session.inheritedEventCount)
-    expect(full.snapshot.values.reviewGated?.diagnostic).toBeNull()
+    expect(full.snapshot.values.reviewGated?.state?.diagnostic).toBeNull()
     expect(suffix.snapshot.values.reviewGated).toEqual(full.snapshot.values.reviewGated)
   })
 
   it('retains uncertain task input across receipts and clears it only for the matching historical user message', () => {
     const session = Session.create(SessionId('rg-task-receipt'), [])
     const human: UserMessage = { id: MessageId('human-input'), role: 'user', content: [{ type: 'text', text: 'Implement the requested behavior' }], source: { kind: 'user' } }
-    const saved = session.append('review-gated/state', { version: 1, state: { ...sessionState(task()), diagnostic: TASK_SAVE_UNCERTAIN } })
+    const saved = appendRecord(session, 'plugin:review-gated/state', { version: 1, state: { ...sessionState(task()), diagnostic: TASK_SAVE_UNCERTAIN } })
     const before = foldRgState(emptyProjection(), saved)
-    const legacyClear = session.append('review-gated/state', { version: 1, state: sessionState(task()) })
+    const legacyClear = appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState(task()) })
     const cleared = foldRgState(before, legacyClear)
     expect(cleared.value?.diagnostic).toBe(TASK_SAVE_UNCERTAIN)
-    const changedTask = { ...legacyClear, data: { ...legacyClear.data, state: sessionState({ ...task(), originMessageId: MessageId('different') }) } }
+    const changedTask = durableEvents([{ ...legacyClear, data: { ...recordOf(legacyClear)?.data, state: sessionState({ ...task(), originMessageId: MessageId('different') }) } }])[0]!
     expect(foldRgState(before, changedTask).failure).toContain('RG_STATE_INVALID')
-    const clearedTask = { ...legacyClear, data: { ...legacyClear.data, state: null } }
+    const clearedTask = durableEvents([{ ...legacyClear, data: { ...recordOf(legacyClear)?.data, state: null } }])[0]!
     expect(foldRgState(before, clearedTask).failure).toContain('RG_STATE_INVALID')
     const wrong = session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [{ ...human, id: MessageId('other') }] })
     expect(foldRgState(cleared, wrong)).toBe(cleared)
@@ -317,15 +353,15 @@ describe('RG projection recovery', () => {
     await ctx.plugin(SessionProjections)
     await ctx.sessionProjections.register<'reviewGated', RgProjectionState>(rgProjectionDefinition)
     const session = ctx.sessions.create(SessionId('rg-old-task-checkpoint'))
-    session.append('review-gated/state', { version: 1, state: { ...sessionState(task()), diagnostic: TASK_SAVE_UNCERTAIN } })
-    const legacyClear = session.append('review-gated/state', { version: 1, state: sessionState(task()) })
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: { ...sessionState(task()), diagnostic: TASK_SAVE_UNCERTAIN } })
+    const legacyClear = appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState(task()) })
     const prefix = session.snapshotEvents()
     for (const version of [1, 2, 3, 4]) {
       const old = { reviewGated: { ver: version, seq: legacyClear.seq,
         val: { value: sessionState(task()), hasRequested: false, failure: null, pending: null } } }
       expect(ctx.sessionProjections.restoreFloor(old)).toBe(0)
       const replay = ctx.sessionProjections.restore(old, prefix, SessionLogOffset(0), session.header, session.inheritedEventCount)
-      expect(replay.snapshot.values.reviewGated?.diagnostic).toBe(TASK_SAVE_UNCERTAIN)
+      expect(replay.snapshot.values.reviewGated?.state?.diagnostic).toBe(TASK_SAVE_UNCERTAIN)
       expect(replay.checkpoint.reviewGated?.ver).toBe(rgProjectionDefinition.stateVersion)
     }
     const childId = SessionId('rg-seeded-incomplete-task')
@@ -358,9 +394,9 @@ describe('RG projection recovery', () => {
       { status: 'completed', report: pass(), diagnostic: null, scope }, true)
     const legacy = sessionState(completed)
     const session = ctx.sessions.create(SessionId('legacy-scope-review'))
-    const legacyEvent = session.append('review-gated/state', { version: 1, state: legacy })
+    const legacyEvent = appendRecord(session, 'plugin:review-gated/state', { version: 1, state: legacy })
     expect(handle.stateOf(session).value?.task?.reviewStatus).toBe('stale')
-    expect(ctx.sessionProjections.snapshot(session).values.reviewGated?.task?.reviewStatus).toBe('stale')
+    expect(ctx.sessionProjections.snapshot(session).values.reviewGated?.state?.task?.reviewStatus).toBe('stale')
     const restored = Session.create(SessionId('legacy-scope-restored'), session.snapshotEvents())
     expect(handle.stateOf(restored).value?.task?.reviewStatus).toBe('stale')
     const oldCheckpoint = { reviewGated: { ver: 1, seq: legacyEvent.seq, val: { value: legacy, hasRequested: false, failure: null } } }
@@ -369,23 +405,22 @@ describe('RG projection recovery', () => {
     const replay = ctx.sessionProjections.restore(
       oldCheckpoint, session.snapshotEvents(), SessionLogOffset(0), session.header, session.inheritedEventCount,
     )
-    expect(replay.snapshot.values.reviewGated?.task?.reviewStatus).toBe('stale')
+    expect(replay.snapshot.values.reviewGated?.state?.task?.reviewStatus).toBe('stale')
     expect(replay.checkpoint.reviewGated?.ver).toBe(rgProjectionDefinition.stateVersion)
-    const checkpoint = rgProjectionDefinition.stateSchema.parse({ value: legacy, hasRequested: true, failure: null,
-      pending: null, taskAdmission: null, taskInputText: null, directClaim: null })
+    const checkpoint = rgProjectionDefinition.stateSchema.parse({ ...emptyProjection(), value: legacy, taskReceipt: 'unproven', hasRequested: true })
     expect(checkpoint.value?.task?.reviewStatus).toBe('stale')
     const unverifiable = { ...completed, lastReview: { ...completed.lastReview!, scope: { ...scope, fingerprint: null } } }
-    session.append('review-gated/state', { version: 1, state: sessionState(unverifiable) })
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState(unverifiable) })
     expect(handle.stateOf(session).value?.task?.reviewStatus).toBe('stale')
     // A v2 generation can no longer authenticate a pass; only v3 does.
     const current = { ...completed, lastReview: { ...completed.lastReview!, scope: { ...scope, fingerprint: 'v2:' + 'a'.repeat(64) } } }
-    session.append('review-gated/state', { version: 1, state: sessionState(current) })
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState(current) })
     expect(handle.stateOf(session).value?.task?.reviewStatus).toBe('stale')
     const verifiable = { ...completed, lastReview: { ...completed.lastReview!, scope: { ...scope, fingerprint: 'v3:' + 'a'.repeat(64),
       treeFingerprint: 'v1:' + 'b'.repeat(64) } } }
-    session.append('review-gated/state', { version: 1, state: sessionState(verifiable) })
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState(verifiable) })
     expect(handle.stateOf(session).value?.task?.reviewStatus).toBe('reported-pass')
-    session.append('review-gated/state', { version: 1, state: sessionState({ ...verifiable, lastReview: { ...verifiable.lastReview, scope: null } }) })
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState({ ...verifiable, lastReview: { ...verifiable.lastReview, scope: null } }) })
     expect(handle.stateOf(session).value?.task?.reviewStatus).toBe('reported-pass')
   })
 
@@ -396,15 +431,15 @@ describe('RG projection recovery', () => {
     await ctx.plugin(SessionProjections)
     const handle = await ctx.sessionProjections.register<'reviewGated', RgProjectionState>(rgProjectionDefinition)
     const session = ctx.sessions.create(SessionId('rg-projection'))
-    session.append('review-gated/state', { version: 1, state: sessionState(task()) })
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState(task()) })
     const reserved = reserveRun(task(), policy(), run('reviewer'))
-    session.append('review-gated/state', { version: 1, state: sessionState(reserved) })
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState(reserved) })
     const schema = rgProjectionDefinition.stateSchema
     if (schema === undefined) throw new Error('RG projection requires a checkpoint schema')
     const checkpoint = schema.parse(handle.stateOf(session))
     const cursor = session.snapshotEvents().length
     const ended = settleRun(reserved, activeId(reserved), { status: 'completed', report: pass(), diagnostic: null, scope: null }, true)
-    session.append('review-gated/state', { version: 1, state: sessionState(ended) })
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState(ended) })
     session.append('request/header', { header: { config: { provider: main.provider, model: main.model } }, reason: 'initial' })
     const repeatedHeader = session.append('request/header', {
       header: { config: { provider: main.provider, model: main.model } }, reason: 'resume',
@@ -419,17 +454,15 @@ describe('RG projection recovery', () => {
     expect(full.hasRequested).toBe(true)
     const restored = Session.create(SessionId('rg-restored'), session.snapshotEvents())
     expect(handle.stateOf(restored)).toEqual(full)
-    expect(ctx.sessionProjections.snapshot(session).values.reviewGated).toEqual(full.value)
-    session.append('review-gated/state', { version: 1, state: null })
-    expect(handle.stateOf(session)).toEqual({ value: null, hasRequested: true, failure: null, pending: null,
-      taskAdmission: null, taskInputText: null, directClaim: null })
+    expect(ctx.sessionProjections.snapshot(session).values.reviewGated?.state).toEqual(full.value)
+    appendRecord(session, 'plugin:review-gated/state', { version: 1, state: null })
+    expect(handle.stateOf(session)).toEqual({ ...emptyProjection(), hasRequested: true })
   })
 
   it('keeps the fold poisoned after invalid durable data instead of accepting a later pass', () => {
     const session = Session.create(SessionId('rg-invalid'), [])
-    const event = session.append('review-gated/state', { version: 1, state: sessionState(task()) })
-    const invalid = { ...event, data: { version: 2, state: null } }
-    // @ts-expect-error -- malformed version enters through durable JSON rather than typed callers.
+    const event = appendRecord(session, 'plugin:review-gated/state', { version: 1, state: sessionState(task()) })
+    const invalid = durableEvents([{ ...event, data: { version: 2, state: null } }])[0]!
     const poisoned = foldRgState(emptyProjection(), invalid)
     expect(poisoned.failure).toContain('RG_STATE_INVALID')
     expect(foldRgState(poisoned, event)).toBe(poisoned)

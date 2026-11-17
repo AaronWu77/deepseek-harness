@@ -19,6 +19,7 @@ import type { AgentPresetSeatProps } from '../src/client/AgentPresetSeat.tsx'
 import type { AgentPresetSettingsState } from '../src/client/settings-store.ts'
 import type { AgentPresetSeatState } from '../src/client/seat-store.ts'
 import { en } from '../src/client/locales.ts'
+import { createPresetDisplayRegistry } from '../src/client/preset-display.ts'
 
 afterEach(cleanup)
 
@@ -57,6 +58,7 @@ function renderSeat(
 ) {
   const store = createSnapshotStore<AgentPresetSeatState>({ ...SEAT_READY, ...state })
   const developerTools = createSnapshotStore(enabled)
+  const display = createPresetDisplayRegistry()
   const actions = {
     load: vi.fn(() => Promise.resolve()), select: vi.fn(select), introduced: vi.fn(),
     dismissRefusal: vi.fn((error: AgentPresetSeatState['error']) => {
@@ -70,13 +72,15 @@ function renderSeat(
     sessionId: session === undefined ? undefined : SessionId(session.id),
     useDeveloperTools: bindSnapshotSelector(developerTools),
     useAgentPresetSeat: bindSnapshotSelector(store),
+    usePresetDisplay: bindSnapshotSelector(display.source),
+    resolvePresetDescription: (text: { en: string }) => text.en,
     useSessionRetainInfo: session === undefined
       ? useSessionRetainInfo
       : <Selected,>(selector: (value: SessionRetainInfo | undefined) => Selected) => selector(session.retainInfo),
     t: translate,
   } as AgentPresetSeatProps
   render(<AgentPresetSeat {...props} />)
-  return { ...actions, developerTools, store }
+  return { ...actions, developerTools, store, display }
 }
 
 function renderLabel(
@@ -89,15 +93,37 @@ function renderLabel(
   })
   const sessions = createSnapshotStore({ byId: summary === undefined ? {} : { s1: summary } })
   const load = vi.fn(() => Promise.resolve())
+  const display = createPresetDisplayRegistry()
   const view = render(<AgentPresetLabel {...({
     load,
     sessionId: 's1',
     useSessions: bindSnapshotSelector(sessions),
     useAgentPresets: bindSnapshotSelector(store),
+    usePresetDisplay: bindSnapshotSelector(display.source),
+    resolvePresetDescription: (text: { en: string }) => text.en,
     t: (key: keyof typeof en) => en[key],
   } as unknown as AgentPresetLabelProps)} />)
-  return { load, view }
+  return { load, view, display }
 }
+
+it('updates the picker and session header when descriptions register and unregister', () => {
+  const match = { id: 'example', name: 'Example', description: 'Original' }
+  const seat = renderSeat({ current: 'example', options: [match] })
+  fireEvent.click(screen.getByRole('button'))
+  expect(screen.getByText('Original')).toBeTruthy()
+  let dispose = () => {}
+  act(() => { dispose = seat.display.registry.register({ match, description: { en: 'Localized', zh: '中文' } }) })
+  expect(screen.getByText('Localized')).toBeTruthy()
+  act(dispose)
+  expect(screen.getByText('Original')).toBeTruthy()
+  cleanup()
+  const label = renderLabel({ blank: false, projectionValues: { agentPreset: 'example' } }, { options: [match] })
+  expect(screen.getByTitle('Original')).toBeTruthy()
+  act(() => { dispose = label.display.registry.register({ match, description: { en: 'Localized', zh: '中文' } }) })
+  expect(screen.getByTitle('Localized')).toBeTruthy()
+  act(dispose)
+  expect(screen.getByTitle('Original')).toBeTruthy()
+})
 
 describe('the new-session chip', () => {
   it.each([false, true])('offers Standard, Creator and custom presets with Developer tools %s', (enabled) => {

@@ -4,7 +4,7 @@ import type { Context, Fiber } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent, SessionHeader, SessionId , SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type SessionPersistence from '@deepseek-ai/dsh-session-persistence'
 import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionRecord } from './types.ts'
+import type { SessionRecord, SessionSourceListing, SessionStoredMetadata } from './types.ts'
 import { SessionQueryError } from './config.ts'
 import { readColdSessionLog, type ColdSessionLog } from './cold-read.ts'
 import { assertSessionHeadersCompatible } from './sources.ts'
@@ -64,26 +64,39 @@ export class SessionCorpus {
     const persistence = this._persistence
     const persisted = persistence === undefined ? [] : await listPersisted(persistence, signal)
     signal?.throwIfAborted()
-    const records = new Map<SessionId, SessionRecord>()
-    for (const { header, formatStatus } of persisted) {
-      records.set(header.id, {
-        header: structuredClone(header),
-        live: false,
-        persisted: true,
-        ...(formatStatus === undefined ? {} : { formatStatus }),
-      })
+    return sessionRecords(persisted, () => this._ctx.sessions.list())
+  }
+
+  /**
+   * List records with the exact persistence and live-store sources used for the listing.
+   * @param signal - optional cancellation for persistence listing.
+   * @returns the Host-only listing without the enclosing Query instance identity.
+   * @throws {SessionQueryError} when the live store changes during listing.
+   */
+  async listSessionsWithSource(signal?: AbortSignal): Promise<Omit<SessionSourceListing, 'queryIdentity'>> {
+    signal?.throwIfAborted()
+    const persistence = this._persistence
+    const persistenceIdentity = persistence?.identity
+    const persisted = persistence === undefined ? [] : await listPersisted(persistence, signal)
+    signal?.throwIfAborted()
+    const sessions = this._ctx.sessions
+    const sessionStoreIdentity: symbol | undefined = sessions.identity
+    const records = sessionRecords(persisted, () => sessions.list())
+    const stored: SessionStoredMetadata[] = persisted.map(({ header, revision, eventCount, sizeBytes, formatStatus }) => ({
+      header: structuredClone(header),
+      revision,
+      ...(eventCount === undefined ? {} : { eventCount }),
+      ...(sizeBytes === undefined ? {} : { sizeBytes }),
+      ...(formatStatus === undefined ? {} : { formatStatus }),
+    }))
+    signal?.throwIfAborted()
+    if (this._ctx.sessions.identity !== sessionStoreIdentity) {
+      signal?.throwIfAborted()
+      throw new SessionQueryError('session store changed during listing', 'SESSION_QUERY_SOURCE_CONFLICT')
     }
-    for (const session of this._ctx.sessions.list()) {
-      const durable = records.get(session.id)
-      if (durable !== undefined) assertSessionHeadersCompatible(session.header, durable.header)
-      records.set(session.id, {
-        header: structuredClone(session.header),
-        live: true,
-        persisted: durable !== undefined,
-        formatStatus: 'current',
-      })
-    }
-    return [...records.values()].sort(compareSessions)
+    const observationPersistenceIdentity = this._ctx.get('sessionPersistence')?.identity
+    signal?.throwIfAborted()
+    return { records, stored, persistenceIdentity, observationPersistenceIdentity, sessionStoreIdentity }
   }
 
   /**
@@ -259,6 +272,32 @@ function orderedResults<Value>(
   resolved: ReadonlyMap<SessionId, LogicalProjectionResult<Value>>,
 ): LogicalProjectionResult<Value>[] {
   return ids.map(sessionId => resolved.get(sessionId) as LogicalProjectionResult<Value>)
+}
+
+function sessionRecords(
+  persisted: readonly SessionPersistenceSnapshot[],
+  live: () => readonly Session[],
+): SessionRecord[] {
+  const records = new Map<SessionId, SessionRecord>()
+  for (const { header, formatStatus } of persisted) {
+    records.set(header.id, {
+      header: structuredClone(header),
+      live: false,
+      persisted: true,
+      ...(formatStatus === undefined ? {} : { formatStatus }),
+    })
+  }
+  for (const session of live()) {
+    const durable = records.get(session.id)
+    if (durable !== undefined) assertSessionHeadersCompatible(session.header, durable.header)
+    records.set(session.id, {
+      header: structuredClone(session.header),
+      live: true,
+      persisted: durable !== undefined,
+      formatStatus: 'current',
+    })
+  }
+  return [...records.values()].sort(compareSessions)
 }
 
 async function listPersisted(

@@ -1,3 +1,5 @@
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
+import { appendRecord } from './records.ts'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -37,7 +39,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     const current = f.runtime.readGit(agent.session)
     expect(current?.binding?.role).toBe('reviewer')
     const next = change === 'cleared' ? null : replacement
-    agent.session.append('review-gated/git-state', { version: 1, state: next })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: next })
     release.resolve(undefined)
     await checking
     expect(f.runtime.readGit(agent.session)).toEqual(next)
@@ -75,7 +77,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     })
     const checking = f.track(f.role(agent, 'reviewer'))
     await entered.promise
-    agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     await writeFile(join(candidate.inspection.root, 'tracked.txt'), 'changed during verification\n')
     release.resolve(undefined)
     await checking
@@ -106,7 +108,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     const outcome = authorization.then(() => null, (error: unknown) => error)
     await entered.promise
     // Inject a durable replacement; overlapping authorization is blocked by the public API.
-    agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     release.resolve(undefined)
     expect(await outcome).toMatchObject({ code: 'review-gated/refused', details: { reason: 'RG_GIT_AUTH_REQUIRED' } })
     expect(f.runtime.readGit(agent.session)).toEqual(replacement)
@@ -139,7 +141,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     await entered.promise
     const next = change === 'cleared' ? null : replacement
     // Inject a durable state change; the public UI does not replace an active grant.
-    agent.session.append('review-gated/git-state', { version: 1, state: next })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: next })
     release.resolve(undefined)
     expect(await outcome).toMatchObject({ code: 'RG_GIT_CHANGED' })
     expect(f.runtime.readGit(agent.session)).toEqual(next)
@@ -170,7 +172,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     const outcome = starting.then(() => null, (error: unknown) => error)
     await entered.promise
     // Inject a durable state change; the public UI does not replace an active grant.
-    agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     release.resolve(undefined)
     expect(await outcome).toMatchObject({ code: 'RG_GIT_CHANGED' })
     expect(provision.mock.calls.length).toBe(0)
@@ -202,7 +204,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     const cwd = f.runtime.readGit(agent.session)?.workspace?.root
     if (cwd === undefined) throw new Error('The worker checkout must be retained.')
     // Inject a durable state change; the public UI does not replace an active grant.
-    agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     release.resolve(undefined)
     expect(await outcome).toMatchObject({ code: 'RG_GIT_CHANGED' })
     expect(f.runtime.readGit(agent.session)).toEqual(replacement)
@@ -234,7 +236,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     await entered.promise
     const next = change === 'cleared' ? null : replacement
     // Inject a durable state change; the public UI does not permit replacing an active grant.
-    agent.session.append('review-gated/git-state', { version: 1, state: next })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: next })
     release.resolve(undefined)
     expect(await outcome).toMatchObject({ code: 'RG_GIT_CHANGED' })
     expect(f.runtime.readGit(agent.session)).toEqual(next)
@@ -266,7 +268,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     const cwd = f.runtime.readGit(agent.session)?.workspace?.root
     if (cwd === undefined) throw new Error('The worker checkout must exist before finalization.')
     // Inject a durable state change; the public UI does not replace an active grant.
-    agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     release.resolve(undefined)
     await working
     expect(spawn.mock.calls.some(([spec]) => spec.argv.includes('commit'))).toBe(false)
@@ -307,7 +309,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     expect(committedHead).not.toBe(grant.source.headOid)
     const next = change === 'cleared' ? null : replacement
     // Inject a durable state change; the public UI does not replace an active grant.
-    agent.session.append('review-gated/git-state', { version: 1, state: next })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: next })
     release.resolve(undefined)
     await working
     expect(f.runtime.readGit(agent.session)).toEqual(next)
@@ -340,7 +342,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     if (candidate == null) throw new Error('A real candidate must have been committed before publication.')
     const next = change === 'cleared' ? null : replacement
     // Inject a durable state change; the public UI does not replace an active grant.
-    agent.session.append('review-gated/git-state', { version: 1, state: next })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: next })
     release.resolve(undefined)
     await working
     expect(f.runtime.readGit(agent.session)).toEqual(next)
@@ -374,7 +376,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     const candidate = f.runtime.readGit(agent.session)?.candidate
     if (candidate == null) throw new Error('A real candidate must have been committed before publication.')
     // Simulate a durable replacement, not an ordinary UI action during an active role.
-    agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     release.resolve(undefined)
     await working
     expect(f.runtime.readGit(agent.session)).toEqual(replacement)
@@ -402,7 +404,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     const working = f.track(f.role(agent, 'worker'))
     await entered.promise
     // Inject a durable state change; the public UI does not revoke an active grant.
-    agent.session.append('review-gated/git-state', { version: 1, state: null })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: null })
     release.resolve(undefined)
     await working
     expect(f.runtime.readGit(agent.session)).toBeNull()
@@ -435,7 +437,7 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     expect(cwd).toBe(f.root)
     expect(f.runtime.readGit(agent.session)).toBeNull()
     // Inject a durable state change; the public UI does not grant Git during an active role.
-    agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     release.resolve(undefined)
     await working
     expect(f.runtime.readGit(agent.session)).toEqual(replacement)
@@ -467,17 +469,17 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     const failed = f.until(agent, state => state?.diagnostic?.startsWith('RG_RESULT_SAVE_FAILED') === true)
     await f.runtime.startRole(agent, 'worker', gitHandoff, undefined, signal())
     await entered.promise
-    expect(agent.session.snapshotEvents().some(event => event.type === 'review-gated/result-prepared')).toBe(true)
-    expect(agent.session.snapshotEvents().some(event => event.type === 'review-gated/result-confirmed')).toBe(false)
+    expect(agent.session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-prepared')).toBe(true)
+    expect(agent.session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(false)
     // Inject a durable state change; the public UI does not grant Git during an active role.
-    agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     release.resolve(undefined)
     await failed
     expect(f.runtime.readGit(agent.session)).toEqual(replacement)
     expect(f.runtime.readGit(other.agent.session)).toEqual(replacement)
     expect(f.runtime.read(agent.session)?.diagnostic).toContain('RG_RESULT_SAVE_FAILED')
     expect(f.runtime.read(agent.session)?.task).toMatchObject({ active: null, lastWorker: null })
-    expect(agent.session.snapshotEvents().some(event => event.type === 'review-gated/result-confirmed')).toBe(false)
+    expect(agent.session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(false)
     expect(await git(f.root, 'rev-parse', 'HEAD')).toBe(sourceHead)
     expect(await readFile(join(f.root, 'tracked.txt'), 'utf8')).toBe('worker delivery\n')
   })
@@ -509,12 +511,14 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     f.ctx.logger.exporter({ export: (message) => {
       if (message.args[0] === 'RG role result could not be durably settled: %s') settled.resolve(undefined)
     } })
-    agent.session.append('review-gated/state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: replacement })
     firstRelease.resolve(undefined)
     await settled.promise
     expect(cancel).not.toHaveBeenCalled()
     await handle.dispose()
-    expect(f.runtime.read(agent.session)?.task).toEqual(replacement.task)
+    // The copied reservation carries no RG receipt, so the public read fails closed while the folded
+    // task still matches the replacement.
+    expect(f.ctx.sessionProjections.snapshot(agent.session, ['reviewGated']).values.reviewGated?.state?.task).toEqual(replacement.task)
     secondRelease.resolve(undefined)
   })
 
@@ -545,10 +549,14 @@ describe('local Git recovery edges', { timeout: 120_000 }, () => {
     const starting = f.track(f.runtime.startRole(agent, 'worker', gitHandoff, undefined, signal()))
     const outcome = starting.then(() => null, (error: unknown) => error)
     await entered.promise
-    agent.session.append('review-gated/state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: replacement })
     release.resolve(undefined)
-    expect(await outcome).toMatchObject({ code: 'RG_GIT_UNKNOWN' })
-    expect(f.runtime.read(agent.session)).toEqual(replacement)
+    const failure = await outcome
+    if (!(failure instanceof AggregateError)) throw new Error('Expected an aggregated startup failure')
+    expect(failure.errors.some(error => (error as { code?: string }).code === 'RG_GIT_UNKNOWN')).toBe(true)
+    // The injected replacement has no RG receipt, so the public read fails closed while the folded
+    // task still matches the replacement.
+    expect(f.ctx.sessionProjections.snapshot(agent.session, ['reviewGated']).values.reviewGated?.state).toEqual(replacement)
     expect(f.runtime.read(other.agent.session)).toEqual(replacement)
     otherRelease.resolve(undefined)
   })

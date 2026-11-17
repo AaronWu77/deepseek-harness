@@ -28,6 +28,7 @@ import type {
   SessionLineageTrace,
   SessionLogSnapshot,
   SessionRecord,
+  SessionSourceListing,
   SessionResultFilter,
   SessionSearchExecContext,
   SessionSearchHit,
@@ -82,6 +83,19 @@ export {
 export { assertSessionHeadersCompatible } from './sources.ts'
 export type { SessionObservation, SessionObservationOptions } from './observation.ts'
 
+const SESSION_QUERY_SERVICE = 'sessionQuery'
+
+/** Read unwrapped implementation descriptors; Cordis wraps methods when accessed. */
+function implementationDescriptor(instance: object, name: string): PropertyDescriptor | undefined {
+  let current: object | null = instance
+  while (current !== null) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, name)
+    if (descriptor !== undefined) return descriptor
+    current = Reflect.getPrototypeOf(current)
+  }
+  return undefined
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     sessionQuery: SessionQueryEngine
@@ -98,12 +112,15 @@ declare module '@deepseek-ai/cordis' {
 export abstract class SessionQueryEngine extends Service {
   static inject = ['sessions']
 
+  /** Process-local Query instance identity; never persist it or send it over the wire. */
+  readonly identity: symbol = Symbol(SESSION_QUERY_SERVICE)
+
   private readonly _readWindowMax: number
   private readonly _corpus: SessionCorpus
   private readonly _observations: SessionObservationReader
 
   constructor(ctx: Context, config: Config = {}) {
-    super(ctx, 'sessionQuery')
+    super(ctx, SESSION_QUERY_SERVICE)
     this._readWindowMax = config.readWindowMax ?? SESSION_QUERY_READ_WINDOW_MAX
     if (!Number.isInteger(this._readWindowMax) || this._readWindowMax < 0) {
       throw new SessionQueryError(
@@ -134,7 +151,7 @@ export abstract class SessionQueryEngine extends Service {
   /**
    * Observe one exact live or prepared Session without a persistence listing preflight.
    * @param sessionId - logical Session identity.
-   * @param options - cancellation and projection selection for this read.
+   * @param options - cancellation, projection selection, and shared-cache retention for this read.
    * @returns a caller-owned observation lease.
    */
   observeSession(
@@ -173,6 +190,37 @@ export abstract class SessionQueryEngine extends Service {
    */
   listSessions(signal?: AbortSignal): Promise<SessionRecord[]> {
     return this._corpus.listSessions(signal)
+  }
+
+  /**
+   * List records and stored metadata with their process-local source identities.
+   * The result is for Host use only and must not be persisted or sent over the wire.
+   * @param signal - optional cancellation for persistence listing.
+   * @returns the listing and identities of its Query, persistence, observation, and live-store sources.
+   * @throws {SessionQueryError} when a custom listSessions lacks a bound implementation or the live store changes during listing.
+   */
+  async listSessionsWithSource(signal?: AbortSignal): Promise<SessionSourceListing> {
+    signal?.throwIfAborted()
+    const bound = implementationDescriptor(this, 'listSessionsWithSource')
+    const boundIntercepted = Object.hasOwn(this.ctx.reflect.props, `${SESSION_QUERY_SERVICE}.listSessionsWithSource`)
+    const requiresDefaultList = !boundIntercepted && bound?.value === SessionQueryEngine.prototype.listSessionsWithSource
+    const assertDefaultList = () => {
+      const list = implementationDescriptor(this, 'listSessions')
+      const intercepted = Object.hasOwn(this.ctx.reflect.props, `${SESSION_QUERY_SERVICE}.listSessions`)
+      if (requiresDefaultList && (intercepted || list?.value !== SessionQueryEngine.prototype.listSessions)) {
+        throw new SessionQueryError(
+          'session-query: a custom listSessions requires a matching listSessionsWithSource implementation',
+          'SESSION_QUERY_SOURCE_CONFLICT',
+        )
+      }
+    }
+    assertDefaultList()
+    const queryIdentity = this.identity
+    const listing = await this._corpus.listSessionsWithSource(signal)
+    signal?.throwIfAborted()
+    assertDefaultList()
+    signal?.throwIfAborted()
+    return { ...listing, queryIdentity }
   }
 
   /**

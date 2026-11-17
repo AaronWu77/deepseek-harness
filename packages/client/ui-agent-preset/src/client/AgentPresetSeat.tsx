@@ -21,13 +21,17 @@ import {
 // Type-only: pulls the ui-conversation SlotMap merge (the hero seat).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AgentPresetSeatState } from './seat-store.ts'
-import { presetDisplayText } from './locales.ts'
+import { displayPreset, type PresetDisplayContribution } from './preset-display.ts'
 import { requiresCodingTools } from './settings-store.ts'
 import css from './AgentPresetSeat.module.css'
 
 /** Registration-side business face for the hero chip. */
 export interface AgentPresetSeatInjected {
+  /** Resolve translations with the current Client locale. */
+  resolvePresetDescription: (text: PresetDisplayContribution['description']) => string
   hooks: {
+    /** Registered descriptions; renderer subscribes to changes. */
+    presetDisplay: ObservableSnapshot<readonly PresetDisplayContribution[]>
     /** Shared Developer tools preference; off hides the PTC and Minimal menu choices. */
     developerTools: ObservableSnapshot<boolean>
     /** Seat snapshot bound by the renderer as useAgentPresetSeat. */
@@ -79,8 +83,10 @@ export type AgentPresetSeatProps =
  * @returns The chip and any pending selection refusal, or null outside the main view.
  */
 export function AgentPresetSeat({
-  sessionId, useSessionRetainInfo, load, select, dismissRefusal, introduced, useAgentPresetSeat, useDeveloperTools, t,
+  sessionId, useSessionRetainInfo, load, select, dismissRefusal, introduced, useAgentPresetSeat, useDeveloperTools,
+  usePresetDisplay, resolvePresetDescription, t,
 }: AgentPresetSeatProps) {
+  const descriptions = usePresetDisplay(value => value)
   const developerTools = useDeveloperTools(value => value)
   const state = useAgentPresetSeat(snapshot => snapshot)
   const main = useSessionRetainInfo(info => sessionId === undefined
@@ -112,7 +118,7 @@ export function AgentPresetSeat({
   }, [developerTools, options.length])
 
   const chosen = state.options.find(option => option.id === state.current)
-  const chosenText = chosen === undefined ? undefined : presetDisplayText(chosen, t)
+  const chosenText = chosen === undefined ? undefined : displayPreset(chosen, t, descriptions, resolvePresetDescription)
   const label = chosenText?.name ?? state.current
   const ready = state.options.length > 0 && state.current !== ''
 
@@ -165,7 +171,7 @@ export function AgentPresetSeat({
         open={open && options.length > 0}
         onClose={() => { setOpen(false) }}
         items={options.map((option) => {
-          const text = presetDisplayText(option, t)
+          const text = displayPreset(option, t, descriptions, resolvePresetDescription)
           return {
             id: option.id,
             // Name and description together: the id alone never says what a
@@ -205,7 +211,7 @@ export function AgentPresetSeat({
       {toast !== null && (
         <Toast
           key={toast.seq}
-          text={t('switchRefused', { name: presetDisplayText(toast.error.preset, t).name, reason: toast.error.reason })}
+          text={t('switchRefused', { name: displayPreset(toast.error.preset, t, descriptions, resolvePresetDescription).name, reason: toast.error.reason })}
           icon={<IconWarningOutlineRegular />}
           holdMs={REFUSAL_HOLD_MS}
           // The composer card, which is the content column this chip sits

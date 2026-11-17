@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { Session, SessionId, SessionLogOffset, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
 import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
-import type { SessionFormatEvent } from '@deepseek-ai/dsh-session-format'
+import type { SessionFormatArtifact, SessionFormatEvent, SessionFormatJsonValue } from '@deepseek-ai/dsh-session-format'
+import { assertReleasedV4Relationships } from '../src/index.ts'
+import { assertV4LifecycleRelationships } from '../src/relationships.ts'
 
 type Row = { type: string; data: Record<string, unknown>; surfaceOp?: unknown; sourceEventSeqs?: number[]; ignorable?: true }
 const row = (type: string, data: Record<string, unknown>): Row => ({ type, data })
@@ -214,5 +216,203 @@ describe('V4 protected system surface and malformed relationship inputs', () => 
       row('turn/end', { turn: 1, reason: { kind: 'completed' } }), row('session/end-seed', { inherited: true }),
     ]
     expect(() => reopen(inherited, 5, true)).toThrow(/does not match the open turn/)
+  })
+})
+
+type HistoryRow = {
+  type: string
+  data: SessionFormatJsonValue
+  surfaceOp?: SessionFormatJsonValue
+  sourceEventSeqs?: SessionFormatJsonValue
+  ignorable?: true
+}
+
+function historyArtifact(rows: readonly HistoryRow[]): SessionFormatArtifact {
+  return {
+    header: { version: 4, id: 'history', createdAt: 1, delegationDepth: 0, isSeeded: false },
+    inheritedEventCount: 0,
+    events: rows.map((candidate, seq): SessionFormatEvent => ({ ...candidate, seq, time: seq + 1 })),
+  }
+}
+
+function knownTypes(input: SessionFormatArtifact): Set<string> {
+  return new Set(input.events.map(event => event.type))
+}
+
+function decision(run: () => void): string {
+  try { run(); return 'accepted' } catch (error: unknown) {
+    if (!(error instanceof Error)) throw error
+    return `${error.name}: ${error.message}`
+  }
+}
+
+describe('V4 historical relationship lookups', () => {
+  it('reads earlier headers, title inputs, and command sources at their original indexes', () => {
+    const input = historyArtifact([
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'step/start', data: { turn: 1, step: 1 } },
+      { type: 'request/header', data: { header: {
+        config: { provider: 'mock', model: 'mock' },
+        tools: [{ name: 'read', description: 'Read', parameters: {} }],
+      } } },
+      { type: 'developer/message', surfaceOp: 'append', data: {
+        turn: 1, step: 1, headerSeq: 2,
+        message: { role: 'developer', content: [{ type: 'tool-addition', toolName: 'read' }] },
+      } },
+      { type: 'user/message', surfaceOp: 'append', data: { source: { kind: 'user' } } },
+      { type: 'session/title', data: { source: { kind: 'generated' }, messageSeqs: [4] } },
+      { type: 'command/run', data: { commandId: 'cmd' } },
+      { type: 'command/done', data: { commandId: 'cmd', kind: 'success', sourceEventSeq: 4 } },
+      { type: 'step/end', data: { turn: 1, step: 1 } },
+      { type: 'turn/end', data: { turn: 1 } },
+    ])
+    const known = knownTypes(input)
+    const before = JSON.stringify(input)
+    const reads: number[] = []
+    const events = new Proxy(input.events, { get(target, key, receiver) {
+      if (typeof key === 'string' && /^(0|[1-9]\d*)$/.test(key)) reads.push(Number(key))
+      const value: unknown = Reflect.get(target, key, receiver)
+      return value
+    } })
+    expect(() => { assertV4LifecycleRelationships({ ...input, events }, known) }).not.toThrow()
+    expect(reads).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 2, 4, 5, 4, 6, 7, 4, 8, 9])
+    expect(JSON.stringify(input)).toBe(before)
+  })
+
+  it('retains the known-type checks for header, title, and opaque command references', () => {
+    const header = historyArtifact([
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'step/start', data: { turn: 1, step: 1 } },
+      { type: 'request/header', data: { header: { config: { provider: 'mock' }, tools: [] } } },
+      { type: 'developer/message', surfaceOp: 'append', data: {
+        turn: 1, step: 1, headerSeq: 2, message: { content: [] },
+      } },
+    ])
+    const headerTypes = knownTypes(header)
+    headerTypes.delete('request/header')
+    expect(() => { assertV4LifecycleRelationships(header, headerTypes) }).toThrow('must reference a known request/header')
+    headerTypes.add('request/header')
+    expect(() => { assertV4LifecycleRelationships(header, headerTypes) }).not.toThrow()
+
+    const title = historyArtifact([
+      { type: 'user/message', surfaceOp: 'append', data: { source: { kind: 'user' } } },
+      { type: 'session/title', data: { source: { kind: 'generated' }, messageSeqs: [0] } },
+    ])
+    const titleTypes = knownTypes(title)
+    titleTypes.delete('user/message')
+    expect(() => { assertV4LifecycleRelationships(title, titleTypes) }).toThrow('must cite distinct earlier human user/message events')
+    titleTypes.add('user/message')
+    expect(() => { assertV4LifecycleRelationships(title, titleTypes) }).not.toThrow()
+
+    const command = historyArtifact([
+      { type: 'command/run', data: { commandId: 'cmd' } },
+      { type: 'plugin/unrecognized', ignorable: true, data: null },
+      { type: 'command/done', data: { commandId: 'cmd', kind: 'success', sourceEventSeq: 1 } },
+    ])
+    const commandTypes = knownTypes(command)
+    commandTypes.delete('plugin/unrecognized')
+    expect(() => { assertV4LifecycleRelationships(command, commandTypes) }).not.toThrow()
+    const invalid = historyArtifact([
+      { type: 'command/run', data: { commandId: 'cmd' } },
+      { type: 'command/done', data: { commandId: 'cmd', kind: 'success', sourceEventSeq: 0 } },
+    ])
+    expect(() => { assertV4LifecycleRelationships(invalid, knownTypes(invalid)) }).toThrow('command/done has invalid sourceEventSeq')
+  })
+
+  it('keeps whole-artifact field errors ahead of earlier lifecycle errors', () => {
+    const input = historyArtifact([
+      { type: 'turn/end', data: { turn: 1 } },
+      { type: 'developer/message', surfaceOp: 'append', data: {
+        turn: 1, step: 1, message: { role: 'user', content: [] },
+      } },
+    ])
+    const known = knownTypes(input)
+    expect(decision(() => { assertV4LifecycleRelationships(input, known) }))
+      .toBe('SessionFormatError: turn/end does not match the open turn with no open step')
+    expect(decision(() => { assertReleasedV4Relationships(input, known) }))
+      .toBe('SessionFormatError: format v4 developer/message requires turn, step, and a developer message')
+  })
+})
+
+describe('V4 array relationship decisions', () => {
+  const turnStart: HistoryRow = { type: 'turn/start', data: { turn: 1 } }
+  const stepStart: HistoryRow = { type: 'step/start', data: { turn: 1, step: 1 } }
+  const header: HistoryRow = { type: 'request/header', data: { header: {
+    config: { provider: 'mock' }, tools: [{ name: 'read', description: 'Read', parameters: {} }],
+  } } }
+  const developer = (headerSeq: number): HistoryRow => ({ type: 'developer/message', surfaceOp: 'append', data: {
+    turn: 1, step: 1, headerSeq, message: { content: [{ type: 'tool-addition', toolName: 'read' }] },
+  } })
+  const userMessage = (kind: string): HistoryRow => ({ type: 'user/message', surfaceOp: 'append', data: { source: { kind } } })
+  const title = (messageSeqs: number[]): HistoryRow => ({ type: 'session/title', data: {
+    source: { kind: 'generated' }, messageSeqs,
+  } })
+  const run: HistoryRow = { type: 'command/run', data: { commandId: 'cmd' } }
+  const done = (seq: number): HistoryRow => ({ type: 'command/done', data: { commandId: 'cmd', kind: 'success', sourceEventSeq: seq } })
+  const start: HistoryRow = { type: 'compaction/start', data: { compactionId: 'old', turn: null } }
+  const end: HistoryRow = { type: 'turn/end', data: { turn: 1 } }
+  const marker: HistoryRow = { type: 'session/end-seed', data: {} }
+  const cases: { label: string; rows: HistoryRow[]; omit?: string[]; expected: string }[] = [
+    { label: 'empty history', rows: [], expected: 'accepted' },
+    { label: 'header lookup', rows: [turnStart, stepStart, header, developer(2)], expected: 'accepted' },
+    { label: 'wrong header event', rows: [turnStart, stepStart, userMessage('user'), developer(2)], expected: 'SessionFormatError: developer/message headerSeq must reference an earlier request/header' },
+    { label: 'unknown header event', rows: [turnStart, stepStart, header, developer(2)], omit: ['request/header'], expected: 'SessionFormatError: developer/message headerSeq must reference a known request/header' },
+    { label: 'non-earlier header', rows: [turnStart, stepStart, developer(2)], expected: 'SessionFormatError: developer/message headerSeq must name an earlier event' },
+    { label: 'human title source', rows: [userMessage('user'), title([0])], expected: 'accepted' },
+    { label: 'nonhuman title source', rows: [userMessage('external'), title([0])], expected: 'SessionFormatError: session/title messageSeqs must cite distinct earlier human user/message events' },
+    { label: 'unknown title source', rows: [userMessage('user'), title([0])], omit: ['user/message'], expected: 'SessionFormatError: session/title messageSeqs must cite distinct earlier human user/message events' },
+    { label: 'duplicate title source', rows: [userMessage('user'), title([0, 0])], expected: 'SessionFormatError: session/title messageSeqs must cite distinct earlier human user/message events' },
+    { label: 'non-earlier title source', rows: [userMessage('user'), title([1])], expected: 'SessionFormatError: title messageSeqs must name an earlier event' },
+    { label: 'opaque command source', rows: [run, { type: 'extension/unknown', data: null, ignorable: true }, done(1)], omit: ['extension/unknown'], expected: 'accepted' },
+    { label: 'command source is a run', rows: [run, done(0)], expected: 'SessionFormatError: command/done has invalid sourceEventSeq' },
+    { label: 'non-earlier command source', rows: [run, done(1)], expected: 'SessionFormatError: command sourceEventSeq must name an earlier event' },
+    { label: 'future inherited marker', rows: [start, turnStart, end, marker], expected: 'accepted' },
+    { label: 'unknown inherited marker', rows: [start, turnStart, end, marker], omit: ['session/end-seed'], expected: 'SessionFormatError: turn/start crosses an open compaction' },
+    { label: 'future marker with invalid payload', rows: [start, turnStart, end, { type: 'session/end-seed', data: null }], expected: 'SessionFormatError: session/end-seed requires an object' },
+  ]
+
+  it.each(cases)('preserves $label', ({ rows, omit = [], expected }) => {
+    const input = historyArtifact(rows)
+    const known = knownTypes(input)
+    for (const type of omit) known.delete(type)
+    expect(decision(() => { assertV4LifecycleRelationships(input, known) })).toBe(expected)
+  })
+})
+
+describe('V4 orphan compaction summary', () => {
+  const start = (id: string): HistoryRow => ({ type: 'compaction/start', data: { compactionId: id, turn: null } })
+  const turn = (number: number): HistoryRow[] => [
+    { type: 'turn/start', data: { turn: number } },
+    { type: 'turn/end', data: { turn: number } },
+  ]
+  const marker: HistoryRow = { type: 'session/end-seed', data: {} }
+
+  it('keeps all orphan starts from multiple inherited boundaries', () => {
+    const input = historyArtifact([start('old'), ...turn(1), marker, start('new'), ...turn(2), marker])
+    expect(() => { assertV4LifecycleRelationships(input, knownTypes(input)) }).not.toThrow()
+    const unknownMarker = knownTypes(input)
+    unknownMarker.delete('session/end-seed')
+    expect(() => { assertV4LifecycleRelationships(input, unknownMarker) }).toThrow('turn/start crosses an open compaction')
+  })
+
+  it('does not apply an earlier marker to a later open compaction', () => {
+    const input = historyArtifact([start('old'), marker, start('new'), ...turn(1)])
+    expect(() => { assertV4LifecycleRelationships(input, knownTypes(input)) }).toThrow('turn/start crosses an open compaction')
+  })
+
+  it('recognizes future markers before checking the marker payload', () => {
+    const input = historyArtifact([start('old'), ...turn(1), { type: 'session/end-seed', data: null }])
+    expect(() => { assertV4LifecycleRelationships(input, knownTypes(input)) }).toThrow('session/end-seed requires an object')
+  })
+
+  it('honors whether a compaction end is part of the installed vocabulary', () => {
+    const input = historyArtifact([
+      start('old'), { type: 'compaction/end', data: { compactionId: 'other', turn: null, error: 'cancelled' } },
+      ...turn(1), marker,
+    ])
+    const known = knownTypes(input)
+    expect(() => { assertV4LifecycleRelationships(input, known) }).toThrow('compaction/end has no matching compaction/start')
+    known.delete('compaction/end')
+    expect(() => { assertV4LifecycleRelationships(input, known) }).not.toThrow()
   })
 })

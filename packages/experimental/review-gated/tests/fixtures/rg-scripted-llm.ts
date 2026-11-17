@@ -60,10 +60,12 @@ class RgScriptedAdapter extends LlmAdapter {
     if (worker || reviewer) {
       if (worker && reviewer) throw new Error('child prompt contains both role personas')
       if (system.includes(GUIDANCE)) throw new Error('child inherited the coordinator guidance')
-      const marker = worker ? 'WORKER_OK' : 'REVIEW_OK'
+      const budgetScenario = history.includes('RG_REVIEW_BUDGET')
+      const marker = worker ? 'WORKER_OK' : budgetScenario ? 'REVIEW_EVIDENCE_MISSING' : 'REVIEW_OK'
       const report = worker
         ? { kind: 'worker', outcome: 'completed', summary: marker, changes: [], validation: ['Inspected probe.txt'], unverified: [] }
-        : { kind: 'reviewer', verdict: 'pass', summary: marker, inspectedScope: ['probe.txt'], findings: [], validation: ['Inspected probe.txt'], unverified: [] }
+        : { kind: 'reviewer', verdict: budgetScenario ? 'inconclusive' : 'pass', summary: marker, inspectedScope: ['probe.txt'], findings: [],
+          validation: ['Inspected probe.txt'], unverified: budgetScenario ? ['Authenticated live-page acceptance is unavailable'] : [] }
       yield* toolCall(worker ? 'rg-worker-report' : 'rg-reviewer-report', 'run_code', {
         code: `console.log(await tools.list_agents({})); await tools.read({ file_path: "probe.txt" }); return await tools.structured_output(${JSON.stringify(report)});`,
         description: 'Submit the structured RG role report',
@@ -75,6 +77,24 @@ class RgScriptedAdapter extends LlmAdapter {
       throw new Error('coordinator prompt contains a role persona')
     }
 
+    if (history.includes('RG_REVIEW_BUDGET')) {
+      if (!calls.some(args => args.includes('budget-first-review'))) {
+        yield* toolCall('budget-first', 'run_code', {
+          code: '// budget-first-review\nawait tools.create_goal({ objective: "RG_REVIEW_BUDGET integrated acceptance" });\nreturn await tools.rg_reviewer({"handoff":{"objective":"RG_REVIEW_BUDGET integrated deliverable","acceptance":["Inspect probe.txt and report missing live acceptance"],"scope":["probe.txt"],"constraints":["Do not change files"],"facts":["Related fixture work is integrated"],"validation":["probe.txt was read; authenticated live-page acceptance remains unavailable"]}});',
+          description: 'Review the integrated deliverable with available evidence',
+        })
+      } else if (history.includes('REVIEW_EVIDENCE_MISSING') && !calls.some(args => args.includes('budget-final-review'))) {
+        yield* toolCall('budget-final', 'run_code', {
+          code: '// budget-final-review\nreturn await tools.rg_reviewer({"handoff":{"objective":"RG_REVIEW_BUDGET integrated deliverable","acceptance":["Inspect probe.txt and report missing live acceptance"],"scope":["probe.txt"],"constraints":["Do not change files"],"facts":["Related fixture work is integrated"],"validation":["probe.txt was read; authenticated live-page acceptance remains unavailable"]}});',
+          description: 'Use the remaining review attempt without extra confirmation',
+        })
+      } else {
+        yield* text(history.split('REVIEW_EVIDENCE_MISSING').length >= 3
+          ? 'RG_BUDGET_STOP: no concrete defect reported; live acceptance evidence is missing. No pass. Human decision needed.'
+          : 'Waiting for the independent review report.')
+      }
+      return
+    }
     if (history.includes('RG_MOUNT_ONLY')) { yield* text('MOUNT_OK'); return }
     if (!calls.some(args => args.includes('tools.rg_worker'))) {
       yield* toolCall('rg-worker-call', 'run_code', {

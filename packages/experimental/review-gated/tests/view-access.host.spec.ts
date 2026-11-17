@@ -1,3 +1,4 @@
+import { recordsOf } from './records.ts'
 /** Gateway authorization for RG view snapshots with retained claim input. */
 import { describe, expect, it } from 'vitest'
 import TypertRegistry from '../../../typert/registry/src/index.ts'
@@ -33,7 +34,9 @@ describe('RG view Gateway access', () => {
       expect(frame.value.claim.text).toBe(input.slice(0, 8192))
       expect(frame.value.claim.truncated).toBe(true)
       expect(Buffer.byteLength(JSON.stringify(frame.value.claim))).toBeLessThanOrEqual(51_200)
-      expect(agent.claimRecovery?.inputs[0]?.message).toMatchObject({ content: [{ text: input }] })
+      const recovered = recordsOf(agent.session.snapshotEvents())
+        .filter(record => record.type === 'plugin:review-gated/claim').at(-1)
+      expect(recovered?.data.inputs[0]?.message).toMatchObject({ content: [{ text: input }] })
     } finally { abort.abort(); await stream.return?.(); release.resolve(undefined); await agent.whenIdle() }
   })
 

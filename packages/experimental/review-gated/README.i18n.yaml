@@ -3,14 +3,14 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/review-gated/README.md
 /:
-  en: 5d58b5e4f79aeb79
-  zh: 7baaecc13cd41eba
+  en: 84bf3c37a211d97b
+  zh: 981b98afa485c5f0
 /deepseek-ai-dsh-experimental-review-gated:
   en: 2aa647fc733eb899
   zh: ec9bf6c9ef26e298
 /deepseek-ai-dsh-experimental-review-gated/summary:
-  en: 0d76f812b4777acf
-  zh: ec544d7f9350fdb1
+  en: 54dab2ba347da505
+  zh: 24283471da56ad65
 /deepseek-ai-dsh-experimental-review-gated/table-of-contents:
   en: 23b74c300207c7e7
   zh: 4770cb26861ae711
@@ -18,20 +18,20 @@
   en: bbff250eba0f1b89
   zh: 0a618f05cc88ee2b
 /deepseek-ai-dsh-experimental-review-gated/use-this-package/configure-before-starting:
-  en: 45e436cf9d69805b
-  zh: a3b546c3540f8de8
+  en: cf7a9a4b506c17d4
+  zh: bae5d8a7bf434e72
 /deepseek-ai-dsh-experimental-review-gated/use-this-package/local-git-delivery:
-  en: 9278c7fe3e824a30
-  zh: 57f99a59c4555028
+  en: 3ea6991365dc7979
+  zh: 49ff2736e528eda2
 /deepseek-ai-dsh-experimental-review-gated/use-this-package/work-and-review:
-  en: f9e7c75a905deb2e
-  zh: 892921fed7fe89c4
+  en: 5d0a8dc0e384defe
+  zh: 75ec476a9d304a34
 /deepseek-ai-dsh-experimental-review-gated/source-and-attribution:
   en: 64cec4953c871605
   zh: 2b734c7898c259c8
 /deepseek-ai-dsh-experimental-review-gated/understand-the-implementation:
-  en: 5f87a9ed1195cf6f
-  zh: 721643908d1e7507
+  en: d6f2b61382993876
+  zh: 15a7dd66b3045b32
 /deepseek-ai-dsh-experimental-review-gated/further-exploration:
   en: 0bd4a03c00120cb6
   zh: c87ee25d8c3b09c4
@@ -51,8 +51,8 @@
   en: 2324edf65ab72f48
   zh: df32a895e8b99cef
 /deepseek-ai-dsh-experimental-review-gated/known-limitations-and-deferred-work:
-  en: e41ff78a9693bb2a
-  zh: d9d65bc6c4407584
+  en: 821e4ecc7476158c
+  zh: 623a8b0dd28a8ba2
 /deepseek-ai-dsh-experimental-review-gated/known-limitations-and-deferred-work/dev-note:
   en: f7e4e09453e30b12
   zh: 84e2579cc4cbb9d8

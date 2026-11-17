@@ -1,3 +1,4 @@
+import { appendRecord, recordsOf } from './records.ts'
 /** Cold-view evidence guards over recorded Session logs and real protected claims. */
 import { SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
 import { describe, expect, it } from 'vitest'
@@ -16,7 +17,7 @@ describe('RG cold view guards', { timeout: 120_000 }, () => {
     const state = f.runtime.read(agent.session)
     if (state?.task == null) throw new Error('Expected a task')
     // A prepared direct task whose recorded claim intent no longer exists cannot authorize the task.
-    agent.session.append('review-gated/direct-task-prepared', { version: 1, intentSeq: 999_999 as never,
+    appendRecord(agent.session, 'plugin:review-gated/direct-task-prepared', { version: 1, intentSeq: 999_999 as never,
       messageId: state.task.originMessageId, state: { ...state, task: { ...state.task, objective: 'rewritten' } } })
     const id = agent.id
     await handle.dispose()
@@ -46,7 +47,8 @@ describe('RG cold view guards', { timeout: 120_000 }, () => {
       refused.resolve(undefined)
       await refused.promise
     } finally { off() }
-    const settled = agent.session.snapshotEvents().filter(event => event.type === 'agent/claim/settled').at(-1)
+    const settled = recordsOf(agent.session.snapshotEvents())
+      .filter(record => record.type === 'plugin:review-gated/claim-settled').at(-1)
     expect(settled).toMatchObject({ data: { outcome: 'rejected' } })
     expect(f.runtime.statusOf(agent.session)).toBe('unknown')
   })

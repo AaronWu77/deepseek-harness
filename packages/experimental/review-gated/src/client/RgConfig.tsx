@@ -93,6 +93,8 @@ export function RgConfig(props: RgConfigProps) {
     <SettingsForm state={state} labels={{ unavailable: t('unavailable'), readOnly: t('readOnly'),
       saveFailed: t('saveFailed'), save: t('save'), saving: t('saving') }}
     onSave={props.save} onDiscard={props.discard} discardOnUnmount={false}>
+      {state.invalidDocument ? <p className={css.error} role="alert">{t('invalidDocument')}</p> : null}
+      {state.validationPaths.length > 0 ? <p className={css.error} role="alert">{t('invalidSettings')} {state.validationPaths.join(', ')}</p> : null}
       <p className={css.notice}>{t('poolHint')}</p>
       <p className={css.notice}>{t('effectiveHint')}</p>
       {settings !== null && !state.configured ? <p className={css.notice}>{t('notConfigured')}</p> : null}

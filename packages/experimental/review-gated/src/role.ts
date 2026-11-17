@@ -6,6 +6,7 @@ import { z } from 'zod'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from './runtime.ts'
 import { RgError } from './errors.ts'
+import { reviewWorkflow } from './review-workflow.ts'
 import { handoffSchema } from './schemas.ts'
 
 /** Cordis role contribution. */
@@ -32,44 +33,58 @@ const MUTATING_TOOLS = ['write', 'edit', 'apply_patch', 'str_replace_editor']
 
 const mainGuidance = `# RG: work and independent review
 
-Keep the human task, clarifications, progress, and delivery in this conversation. Answer ordinary questions directly. For substantive changes, delegate only useful bounded work with rg_worker, integrate and validate the result, then normally request a fresh rg_reviewer. You may work directly; do not spawn roles merely for ceremony. A direct human request to skip review is allowed and must be reported.
+Keep one RG task for the human's complete deliverable, including investigation, design, implementation, fixes, and validation. Clarifications and intermediate steps do not create fresh budgets. Investigate and prepare proposals directly when useful. Honor any request for design confirmation before implementation. Routine drafts do not need review; a design that is the final deliverable or a human-requested intermediate review may be reviewed. A human request to skip review is allowed; disclose the unreviewed delivery.
 
-Use rg_models to inspect each role's exact candidates and configured reasoning. Only choose listed provider/model pairs; omitted selection uses that role's frozen default. The role budget is machine-counted, includes failed and cancelled accepted attempts, and cannot be reset by the model. Use rg_status to read remaining attempts and committed results.
+Workers are optional. Group related changes, integrate their results, and run available acceptance checks before independent delivery review. Do not pair every file or intermediate artifact with a worker and reviewer. With two review attempts, plan for initial acceptance and a necessary repair-and-re-review. Check rg_status for remaining attempts and committed results; when only one review remains, collect available evidence before using it.
 
-Every handoff must contain original requirements and clarifications, acceptance criteria, exact file/directory scope, constraints preserving user work, discovered facts, and actual validation evidence or commands to perform. Reviewers inspect actual files independently rather than trust worker summaries. Do not copy secrets or irrelevant conversation history.
+Use rg_models to inspect exact role candidates and reasoning. Choose only listed provider/model pairs; omission uses the frozen default. Accepted failed or cancelled attempts still consume budget. Do not split the deliverable or reset or expand budgets to bypass a limit.
 
-Both role tools start one-shot children with no parent conversation. A child id means started, not completed or passed. Continue independent read-only work while it runs, and stop your turn when only waiting remains; the committed result wakes you. Do not poll or send follow-up work to a completed role; each new attempt consumes budget. Write tasks and review are serial. During a role run, do not mutate its workspace.
+Every handoff includes requirements and clarifications, acceptance criteria, exact scope, constraints preserving user work, discovered facts, and validation. For reviewers, include actual checks and known gaps, not just future commands. Reviewers inspect the files independently, not just worker summaries. Do not copy secrets or irrelevant history.
 
-Evaluate findings against requirements and evidence. Fix substantiated defects within budget, and use a fresh reviewer after changes. An old pass applies only to its inspected scope/version; stale, missing, failed, cancelled, or inconclusive reports are not passes. Recheck review scope with rg_status before delivery.
+Role tools start one-shot children without parent history. An id means started, not completed or passed. Continue independent read-only work while a role runs; end your turn when only waiting remains and its committed result will wake you. Do not poll, mutate its workspace, or send follow-up work to a completed role. Roles run serially.
 
-Final delivery states actual changes, validation, reviewer-reported outcome and inspected scope, and material unverified areas. Review is not proof of correctness or a permission grant. Respect safety, approvals, and plan mode. If budget is exhausted, report unresolved work and ask the human whether to begin a new task; never silently expand budget or claim a review that did not happen.`
+Concrete defects belong in findings; unavailable validation belongs in unverified. Missing evidence is not a defect or a pass. Fix substantiated defects and gather available evidence before re-reviewing the integrated result. A pass applies only to its inspected scope/version; stale, missing, failed, cancelled, and inconclusive reports are not passes. Recheck scope with rg_status before delivery.
+
+Final delivery states actual changes, validation, reviewer outcome and inspected scope, and unverified areas. Review does not grant permission or prove correctness; respect safety, approvals, and plan mode. If review budget is exhausted without a current pass, report completed work, concrete findings, and missing evidence, then wait for the human to decide. RG stops goal auto-continuation at the turn boundary without completing the goal.`
 
 /** Install scoped role behavior without replacing the PTC executor.
  * @param ctx - owning preset scope.
  * @param config - fixed role identity.
  */
 export function apply(ctx: Context, config: Config): void {
-  ctx.on('agent/pre-step', async ({ agent, modelSelection, signal, messages }, next) => {
+  ctx.on('agent/pre-step', async ({ agent, modelSelection, signal, messages, turn, step }, next) => {
     const runtime = ctx.get('reviewGated')
     if (runtime === undefined) throw new RgError('RG_NOT_READY', 'RG is disabled or unavailable. Re-enable the plugin before continuing this Session.')
-    const admissionContext = { signal, messages }
+    // The runtime's child pre-step wrapper awaits the owned activation receipt before checking authority.
+    if (config.role !== 'main') return next()
+    const admissionContext = { signal, messages, turn, step }
     const canProceed = () => {
       try { runtime.assertRequest(agent, modelSelection, admissionContext); return true } catch (error) {
+        const claim = runtime.claimOf(agent.session)
         if (error instanceof RgError && error.code === 'RG_BUSY' && !signal.aborted
-          && agent.claimProtectionStatus === 'saving' && agent.claimRecovery != null) return false
+          && claim?.phase === 'intent' && !claim.closed && claim.turn === turn && claim.step === step) return false
         throw error
       }
     }
     if (!canProceed()) return { kind: 'reject' }
-    // The loop flushes the claim intent before this waterfall and the admitted
-    // settlement afterwards, both before the request, so a second checkpoint
-    // here would only repeat that barrier.
+    // RG owns the flushed intent around this waterfall and the settlement before model entry.
     return next()
   })
   ctx.effect(() => ctx.systemPrompt.section({ name: `review-gated:${config.role}`,
     order: ctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
     text: config.role === 'main' ? mainGuidance
-      : 'This RG role is one-shot and PTC-only. Inspect the assigned requirements and workspace. Report actual validation and unverified areas. Submit the final report by calling tools.structured_output inside run_code; never call structured_output directly. Do not delegate further or assume completion grants permission to deliver.' }))
+      : 'This RG role is one-shot and PTC-only. Inspect the original human deliverable as well as the assigned scope. Report actual validation and unverified areas. A reviewer reports concrete defects in findings and unavailable evidence in unverified; do not invent a defect to describe an inaccessible page, or turn missing evidence into a pass. Submit the final report by calling tools.structured_output inside run_code; never call structured_output directly. Do not delegate further or assume completion grants permission to deliver.' }))
+  // Pristine guards cover direct and nested PTC dispatch of the shipped delegation tools.
+  // Arbitrary Service callers bypass this pre-allocation denial; the runtime rejects local
+  // bypass children at pre-step and validates every RG-owned start before calling the manager.
+  ctx.effect(() => ctx.tools.guard((exec) => {
+    if (exec.name === 'send_message') return 'RG_UNAUTHORIZED_START: RG roles do not accept follow-up messages. Start a fresh role within the remaining budget.'
+    if (exec.name === 'subagent' || exec.name.startsWith('subagent_') || exec.name === 'workflow'
+      || (config.role !== 'main' && (exec.name === 'rg_worker' || exec.name === 'rg_reviewer'))) {
+      return 'RG_UNAUTHORIZED_START: Use rg_worker or rg_reviewer from the RG main Agent; roles cannot delegate further.'
+    }
+    return undefined
+  }))
   // A reviewer inspects; it does not edit. This denial is enforcement, not
   // guidance: it holds for direct calls and for nested PTC dispatches alike.
   if (config.role === 'reviewer') {
@@ -85,7 +100,9 @@ export function apply(ctx: Context, config: Config): void {
   }))
   for (const role of ['worker', 'reviewer'] as const) {
     const definition: ToolDefinition = {
-      name: `rg_${role}`, description: `Start one fresh RG ${role} using a complete handoff and an authorized role model. The returned id is only a startup receipt; formal completion arrives later.`,
+      name: `rg_${role}`, description: role === 'reviewer'
+        ? 'Start one independent delivery or follow-up review after integration and available validation. Include actual validation and known gaps in the handoff; preserve capacity for necessary re-review. Intermediate review is only for a human-requested review. The id is a startup receipt, not a pass.'
+        : 'Start useful bounded implementation work with a complete handoff and an authorized role model. Group related changes; a worker does not automatically need its own reviewer. The id is only a startup receipt; formal completion arrives later.',
       parameters: { type: 'object', additionalProperties: false, required: ['handoff'], properties: { handoff: handoffParameters, provider: text, model: text } },
       output: { schema: { type: 'object', additionalProperties: false, required: ['kind', 'subagentId', 'runId'],
         properties: { kind: { type: 'string', const: 'activation' }, subagentId: text, runId: text } },
@@ -121,15 +138,14 @@ export function apply(ctx: Context, config: Config): void {
       if (exec.agent === undefined) throw new RgError('RG_NOT_READY', 'RG status requires an Agent.')
       const runtime = ctx.get('reviewGated')
       if (runtime === undefined) throw new RgError('RG_NOT_READY', 'Enable RG before reading its current task.')
-      const claimStatus = exec.agent.claimProtectionStatus
-      const claimRecovery = exec.agent.claimRecovery
-      if (claimStatus === undefined) throw new RgError('RG_NOT_READY', 'Protected input claims are unavailable. Inspect the Session before continuing.')
-      if (claimStatus !== null || claimRecovery != null) return runtime.claimReport(exec.agent.session, claimStatus, claimRecovery ?? null)
       const claim = runtime.claimOf(exec.agent.session)
-      if (claim != null) return runtime.claimReport(exec.agent.session, claimStatus, claim)
       if (claim === undefined) throw new RgError('RG_NOT_READY', 'The input claim record is unavailable. Inspect the Session before continuing.')
+      const status = runtime.statusOf(exec.agent.session)
+      if (status !== 'ready' || claim !== null) return runtime.claimReport(exec.agent.session, status === 'ready' ? null : status, claim)
       const state = await runtime.recheck(exec.agent, exec.signal)
       const git = runtime.readGit(exec.agent.session)
-      return git === null ? state : { state, localGitDelivery: git }
+      if (state === null) return null
+      const workflow = state.task === null || state.policy === null ? null : reviewWorkflow(state.task, state.policy)
+      return git === null ? { ...state, workflow } : { state, localGitDelivery: git, workflow }
     } }))
 }

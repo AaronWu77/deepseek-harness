@@ -1,3 +1,4 @@
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
 /** Real AgentLoop, preset, JSONL, subprocess and retained-worktree fixture for local delivery. */
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -157,7 +158,7 @@ export async function gitRuntimeFixture(
     if (predicate(current)) return Promise.resolve(current)
     return new Promise<RgSessionState | null>((resolve) => {
       const off = ctx.on('session/event', (session, event) => {
-        if (session !== agent.session || (event.type !== 'review-gated/state' && event.type !== 'review-gated/result-confirmed')) return
+        if (session !== agent.session || (pluginRecordOf(event)?.type !== 'plugin:review-gated/state' && pluginRecordOf(event)?.type !== 'plugin:review-gated/result-confirmed')) return
         const state = ctx.reviewGated.read(session)
         if (predicate(state)) { off(); resolve(state) }
       })

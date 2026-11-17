@@ -1,3 +1,4 @@
+import { appendRecord, recordsOf } from './records.ts'
 /** Local Git save barriers publish saving until the exact operation settles. */
 import { describe, expect, it, vi } from 'vitest'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -10,7 +11,7 @@ describe('RG Git view durability', { timeout: 120_000 }, () => {
     const f = await gitRuntimeFixture()
     const { agent } = await f.task()
     const calls = f.adapter.calls.length
-    const baseline = agent.session.snapshotEvents().filter(event => event.type === 'agent/claim/intent').length
+    const baseline = recordsOf(agent.session.snapshotEvents()).filter(record => record.type === 'plugin:review-gated/claim').length
     const entered = f.gate()
     const release = f.gate()
     const spawn = f.ctx.subprocess.spawn.bind(f.ctx.subprocess)
@@ -23,7 +24,7 @@ describe('RG Git view durability', { timeout: 120_000 }, () => {
       }), terminate: () => { child.terminate() }, waitForExit: () => child.waitForExit() } : child
     })
     const off = f.ctx.on('session/flush', (session) => {
-      if (session === agent.session && session.snapshotEvents().filter(event => event.type === 'agent/claim/intent').length > baseline) {
+      if (session === agent.session && recordsOf(session.snapshotEvents()).filter(record => record.type === 'plugin:review-gated/claim').length > baseline) {
         throw new Error('claim intent save failed')
       }
     })
@@ -37,12 +38,13 @@ describe('RG Git view durability', { timeout: 120_000 }, () => {
       const input = createUserMessage({ content: [{ type: 'text', text: 'Input during Git inspection' }], source: { kind: 'user' } })
       agent.followup(input)
       await agent.whenIdle()
-      expect(agent.claimProtectionStatus).toBe('unknown')
-      const events = agent.session.snapshotEvents()
-      const intent = events.find(event => event.type === 'agent/claim/intent' && event.data.inputs.some(item => item.message.id === input.id))
-      if (intent?.type !== 'agent/claim/intent') throw new Error('Expected the uncertain claim intent')
+      expect(f.runtime.statusOf(agent.session)).toBe('unknown')
+      const records = recordsOf(agent.session.snapshotEvents())
+      const intent = records.find(record => record.type === 'plugin:review-gated/claim' && record.data.inputs.some(item => item.message.id === input.id))
+      if (intent?.type !== 'plugin:review-gated/claim') throw new Error('Expected the uncertain claim intent')
       expect(intent.data.inputs.map(item => item.message)).toContainEqual(input)
-      expect(events.some(event => event.type === 'agent/claim/settled' && event.data.intentSeq === intent.seq)).toBe(false)
+      expect(f.runtime.claimOf(agent.session)).toMatchObject({ intentSeq: intent.seq, phase: 'intent', closed: true })
+      expect(records.some(record => record.type === 'plugin:review-gated/claim-settled' && record.data.intentSeq === intent.seq)).toBe(false)
       expect(f.adapter.calls).toHaveLength(calls)
       expect((await stream.next()).value).toMatchObject({ status: 'unknown' })
       off()
@@ -108,16 +110,18 @@ describe('RG Git view durability', { timeout: 120_000 }, () => {
       for (const input of inputs) agent.followup(input)
       await agent.whenIdle()
       expect(f.adapter.calls).toHaveLength(calls)
-      expect(agent.claimProtectionStatus).toBeNull()
+      expect(f.runtime.statusOf(agent.session)).toBe('saving')
+      expect(f.runtime.claimOf(agent.session)).toMatchObject({ phase: 'rejected', closed: true })
       await f.ctx.sessionPersistence.flush()
       const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
       try {
         const events = (await stored.read()).events
+        const records = recordsOf(events)
         for (const input of inputs) {
-          const claim = events.find(event => event.type === 'agent/claim/intent' && event.data.inputs.some(item => item.message.id === input.id))
-          if (claim?.type === 'agent/claim/intent') {
+          const claim = records.find(record => record.type === 'plugin:review-gated/claim' && record.data.inputs.some(item => item.message.id === input.id))
+          if (claim?.type === 'plugin:review-gated/claim') {
             expect(claim.data.inputs.map(item => item.message)).toContainEqual(input)
-            expect(events.some(event => event.type === 'agent/claim/settled' && event.data.intentSeq === claim.seq && event.data.outcome === 'rejected')).toBe(true)
+            expect(records.some(record => record.type === 'plugin:review-gated/claim-settled' && record.data.intentSeq === claim.seq && record.data.outcome === 'rejected')).toBe(true)
           } else {
             expect(agent.inbox.nextTurn).toContainEqual(input)
             expect(events.some(event => event.type === 'agent/inbox/spliced' && event.data.inserted.some(item => JSON.stringify(item) === JSON.stringify(input)))).toBe(true)
@@ -126,6 +130,7 @@ describe('RG Git view durability', { timeout: 120_000 }, () => {
       } finally { await stored.close() }
       release.resolve(undefined)
       await operation
+      expect(f.runtime.statusOf(agent.session)).toBe('ready')
       const after = createUserMessage({ content: [{ type: 'text', text: 'Continue after authorization' }], source: { kind: 'user' } })
       agent.followup(after)
       await agent.whenIdle()
@@ -154,12 +159,14 @@ describe('RG Git view durability', { timeout: 120_000 }, () => {
       await entered.promise
       const state = f.runtime.read(agent.session)
       if (state?.task == null) throw new Error('Expected the authorized task')
-      agent.session.append('review-gated/state', { version: 1, state: { ...state,
+      appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state,
         task: { ...state.task, objective: 'Changed while saving' } } })
       expect((await stream.next()).value).toMatchObject({ status: 'saving' })
       off()
       release.resolve(undefined)
-      expect(await outcome).toMatchObject({ code: 'review-gated/refused', details: { reason: 'RG_GIT_CHANGED' } })
+      // Changing the objective withdraws the task receipt, so the save refuses with the receipt
+      // failure rather than the generic grant-changed code.
+      expect(await outcome).toMatchObject({ code: 'review-gated/refused', details: { reason: 'RG_NOT_READY' } })
       expect((await stream.next()).value).toMatchObject({ status: 'unknown' })
       expect(await git(f.root, 'status', '--porcelain')).toBe(before)
     } finally { off(); release.resolve(undefined); abort.abort(); await stream.return?.() }

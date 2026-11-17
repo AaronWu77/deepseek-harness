@@ -16,7 +16,7 @@ This reference lists active Host and repository-support deviations from official
 - [Summary](#summary)
 - [Ownership map](#ownership-map)
 - [Review-Gated presets](#review-gated-presets)
-- [Local one-shot activation](#local-one-shot-activation)
+- [Role activation](#role-activation)
 - [Preservation registry](#preservation-registry)
 - [Upstream behavior not counted as customization](#upstream-behavior-not-counted-as-customization)
 
@@ -46,15 +46,13 @@ Out-of-tree plugins selected in a profile are separate installations, not edits 
 <a id="review-gated-presets"></a>
 ## Review-Gated presets
 
-The optional [Review-Gated bundle](../packages/experimental/review-gated/README.md) keeps delivery in one main conversation with optional managed one-shot workers and reviewers. Its single Host settings document starts unconfigured; new RG Sessions freeze role model pools, defaults, reasoning choices, reviewer inheritance, and attempt limits. Each role defaults to two accepted attempts per human task; failure or cancellation does not refund them. Structured PTC reports and scope rechecks determine recorded review status.
+The optional [Review-Gated bundle](../packages/experimental/review-gated/README.md) keeps delivery in one main conversation with optional managed workers and reviewers. Its single Host settings document starts unconfigured; new RG Sessions freeze role model pools, defaults, reasoning choices, reviewer inheritance, and attempt limits. Each role defaults to two accepted attempts per human task; failure or cancellation does not refund them. Structured PTC reports and scope rechecks determine recorded review status.
 
-Only RG is selectable; role presets require reserved child starts. The local [preset registry extension](../packages/preset/agent-preset-registry/README.md#understand-the-implementation) initializes consumers after a blank-session selection commits. Main may work directly. Review is neither a delivery gate nor a permission grant, and reviewer read-only behavior is guidance. Existing Host approvals and depth limits still apply. Legacy RG Sessions gain no automatic authorization; see the [upgrade guide](upgrade-guide/v0.2.2-rc.1/rg-model-pools/guide.md). Installing the bundle does not convert ordinary Sessions.
+Every declared preset appears in the roster; RG refuses a role preset start that has no RG-owned reservation. Main may work directly. Review is neither a delivery gate nor a permission grant, and reviewer read-only behavior is guidance. Existing Host approvals and depth limits still apply. Legacy RG Sessions gain no automatic authorization; see the [upgrade guide](upgrade-guide/v0.2.2-rc.1/rg-model-pools/guide.md). Installing the bundle does not convert ordinary Sessions.
 
-## Local one-shot activation
+## Role activation
 
-The customized Host includes a local extension to [Subagent](subsystems/subagent.md) for Review-Gated roles. Explicit `lifecycle: 'one-shot'` dispatches detached provider preparation while the existing manager owns real local child creation, permissions, working directory, preset composition, execution and cleanup. The child uses the existing one-shot descriptor and catalog formats and cannot accept follow-up input or cold resume. The extension does not change default dispatch, continuable activation or external provider execution.
-
-The behavioral owner is local-one-shot.spec.ts, with adjacent external activation, policy, preset and directory regressions. Retire this deviation when upstream provides equivalent public local-one-shot activation and the Review-Gated role and package suites pass against it without the extension. The upstream package version does not identify this local extension. Its presence does not require the Review-Gated plugin to be loaded.
+Review-Gated roles use the upstream continuable local activation. The role, not the Host, owns single-use behavior: it disposes the child after its structured result and refuses follow-up input, so no local activation extension remains in the Host.
 
 ## Preservation registry
 

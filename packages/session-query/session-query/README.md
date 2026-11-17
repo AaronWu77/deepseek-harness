@@ -32,6 +32,7 @@ Use `ctx.sessionQuery` from application code when you need to read or search ses
 | Operation | What you get |
 |---|---|
 | `listSessions()` | Every logical session, newest first, with `live` and `persisted` availability flags and optional `formatStatus` |
+| `listSessionsWithSource()` | Host-only records and stored metadata bound to process-local source identities |
 | `readSession(id)` | The complete replay-validated raw event log, without making the session live |
 | `filterSessions(filters)` | Sessions matching ANDed metadata and availability predicates |
 | `filterEvents(id, filters)` | Semantic event documents matching metadata and literal-text predicates |
@@ -42,7 +43,9 @@ Use `ctx.sessionQuery` from application code when you need to read or search ses
 | `traceEvent(request)` | One event's positional replacements and cited source-event relationships |
 | `searchSessions(request)` / `searchEvents(request)` | Full-text search pages, implemented by the mounted backend |
 
-Body-free records expose only `SessionHeader.isSeeded`. Reads that return event bodies (`readSession`, `readSurface`, `readEvent`) and retained `SessionObservation` values also carry the exact `inheritedEventCount`, so callers can distinguish inherited and owned events without inferring a cut from the log.
+Body-free records expose only `SessionHeader.isSeeded`. Reads that return event bodies (`readSession`, `readSurface`, `readEvent`) and retained `SessionObservation` values also carry the exact `inheritedEventCount`, so callers can distinguish inherited and owned events without inferring a cut from the log. A prepared observation carries the process-local `persistenceIdentity` of the instance whose pre-read `stat` produced its `revision`; compare that revision only for the same instance and session id, revalidate it when freshness matters, and never persist or send the identity over the wire. Live observations omit both fields. Older Query versions omit `persistenceIdentity`, so a caller must treat an absent identity as unverifiable.
+
+`listSessionsWithSource()` returns logical records, location-free stored metadata, and the identities of the Query, listing persistence, observation persistence, and live Session store used or resolved during the read. Stored metadata preserves backend order and duplicate ids; an empty list still has an identity when persistence is bound. Compare revisions only for the same Session id and persistence identity, and revalidate sources when freshness matters: the combined corpus is not an atomic snapshot. A provider that overrides `listSessions()` must also implement the bound method; otherwise it fails with `SESSION_QUERY_SOURCE_CONFLICT`. This result and its identities are Host-only; do not persist or transmit them.
 
 ### Filters
 
@@ -107,7 +110,7 @@ The decision history lives in the [unified service decision](../../../.agents/no
 
 ### Observation cache
 
-`observeSession` builds point observations without a listing preflight. A live observation fixes its cut as the current log length and materializes `events` on first read, so header-, cursor-, or projection-only consumers never copy the log; the log only appends, so a late first read still yields exactly that prefix. The cold path stats the stored session first and consults its own bounded cache keyed by the persistence instance and the `stat` revision: an unchanged revision reuses the restored unpublished Session without re-reading the log; a changed revision, or a replaced persistence instance, reloads through the handle seam and replaces the entry. The cache holds `preparedSessionCacheSize` entries with least-recently-used eviction, entries pinned by active observation leases are never evicted, and a session that goes live mid-read retries the live path.
+`observeSession` builds point observations without a listing preflight. A live observation fixes its cut as the current log length and materializes `events` on first read, so header-, cursor-, or projection-only consumers never copy the log; the log only appends, so a late first read still yields exactly that prefix. The cold path stats the stored session first and consults its own bounded cache keyed by the persistence instance and the `stat` revision: an unchanged revision reuses the restored unpublished Session without re-reading the log; a changed revision, or a replaced persistence instance, reloads through the handle seam and replaces the entry. The cache holds `preparedSessionCacheSize` entries with least-recently-used eviction, entries pinned by active observation leases are never evicted, and a session that goes live mid-read retries the live path. With `cachePolicy: 'transient'`, an observation can reuse an existing cache entry but does not add a newly prepared Session; its lease still owns the read until disposal. This option does not limit the memory needed to decode one Session or caches in the persistence provider.
 
 ### Reads and traces
 

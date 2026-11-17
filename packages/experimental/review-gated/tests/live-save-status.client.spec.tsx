@@ -18,14 +18,14 @@ describe('RG status server rendering', () => {
   it('hides ready and pass facts while a Host result is saving', () => {
     expect(typeof window).toBe('undefined')
     const html = renderStatus('saving')
-    expect(html).toContain(en.saving)
+    expect(html).toContain(en.recoveryProcessing)
     expect(html).not.toContain(en.reportedPass)
     expect(html).not.toContain('<button')
   })
 
   it('hides task facts when the Host outcome is unknown', () => {
     const html = renderStatus('unknown')
-    expect(html).toContain(en.statusUnknown)
+    expect(html).toContain(en.recoveryUnavailable)
     expect(html).not.toContain(en.reportedPass)
     expect(html).not.toContain('<button')
     expect(renderStatus('ready')).toContain(en.reportedPass)

@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   SessionAlreadyExistsError,
@@ -25,6 +25,12 @@ import {
 } from '../src/index.ts'
 import type { SessionLocation } from '../src/index.ts'
 import { meta } from './contract.ts'
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'test/storage-unknown': { value: string }
+  }
+}
 
 const LOCATION: SessionLocation = { kind: 'jsonl', path: '/store/session.jsonl' }
 
@@ -107,6 +113,38 @@ describe('validateStoredEvents', () => {
     const validated = validateStoredEvents(m, events)
     expect(validated).toBe(events)
     expect(Object.isFrozen(validated[1]!.data)).toBe(true)
+  })
+
+  it('retains the original array, events and nested messages after adoption', () => {
+    const first = userMessage(0)
+    const second = userMessage(1)
+    if (first.type !== 'user/message' || second.type !== 'user/message') throw new Error('expected user messages')
+    const firstMessage = first.data
+    const secondMessage = second.data
+    const firstContent = firstMessage.content
+    const firstBlock = firstContent[0]
+    const extension: SessionEvent<'test/storage-unknown'> = {
+      type: 'test/storage-unknown', seq: SessionSeq(2), time: 3, data: { value: 'synthetic' }, ignorable: true,
+    }
+    const extensionData = extension.data
+    const events = [first, second, extension]
+    const result = validateStoredEvents(meta('original-aliases'), events)
+    expect(result).toBe(events)
+    expect(result[0]).toBe(first)
+    expect(result[1]).toBe(second)
+    expect(result[2]).toBe(extension)
+    expect(extension.data).toBe(extensionData)
+    expect(Object.isFrozen(extensionData)).toBe(false)
+    expect(first.data).toBe(firstMessage)
+    expect(second.data).toBe(secondMessage)
+    expect(first.data.content).toBe(firstContent)
+    expect(first.data.content[0]).toBe(firstBlock)
+    expect(Object.isFrozen(events)).toBe(false)
+    expect(Object.isFrozen(first)).toBe(false)
+    expect(Object.isFrozen(firstMessage)).toBe(true)
+    expect(Object.isFrozen(secondMessage)).toBe(true)
+    expect(Object.isFrozen(firstContent)).toBe(true)
+    expect(Object.isFrozen(firstBlock)).toBe(true)
   })
 
   it('adopts a merge-extended turn/end reason outside the closed built-in set', () => {
@@ -197,6 +235,133 @@ describe('validateStoredEvents', () => {
     expect((failure as Error).cause).toBeInstanceOf(Error)
   })
 
+  it.each(['unknown required', 'retired fallback'] as const)(
+    'refuses a late %s before touching an earlier event for adoption', (kind) => {
+      const reason = new Error('early adoption was attempted')
+      const original = userMessage(0)
+      let adoptionReads = 0
+      const first = new Proxy(original, { get(target, key, receiver) {
+        if (key === 'data') { adoptionReads++; throw reason }
+        const value: unknown = Reflect.get(target, key, receiver)
+        return value
+      } })
+      const unknown: SessionEvent<'test/storage-unknown'> = {
+        type: 'test/storage-unknown', seq: SessionSeq(1), time: 2, data: { value: 'synthetic' },
+      }
+      const current: SessionEvent<'request/header'> = {
+        type: 'request/header', seq: SessionSeq(1), time: 2,
+        data: { reason: 'initial', header: { config: { provider: 'mock', model: 'mock' } } },
+      }
+      const retired: SessionEvent<'request/header'> = { ...current, data: new Proxy(current.data, {
+        get(target, key, receiver) {
+          if (key === 'reason') return 'fallback'
+          const value: unknown = Reflect.get(target, key, receiver)
+          return value
+        },
+      }) }
+      const events = [first, kind === 'unknown required' ? unknown : retired]
+      let failure: unknown
+      try { validateStoredEvents(meta('phase-order'), events, LOCATION) } catch (error: unknown) { failure = error }
+      expect(failure).toBeInstanceOf(SessionFormatUnsupportedError)
+      if (!(failure instanceof SessionFormatUnsupportedError)) throw failure
+      expect(failure.location).toBe(LOCATION)
+      const detail = kind === 'unknown required'
+        ? 'contains event type "test/storage-unknown" (seq 1) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness'
+        : 'contains a request/header event (seq 1) with the unsupported legacy reason "fallback"; refusing to interpret the log — it was written by a retired pre-release harness'
+      expect(failure.message).toBe(`session "phase-order" ${detail} (raw log: ${LOCATION.path})`)
+      expect(adoptionReads).toBe(0)
+      expect(Object.isFrozen(original.data)).toBe(false)
+      expect(events[0]).toBe(first)
+    },
+  )
+
+  it('preserves the event getter order and wraps an adoption error with its exact cause', () => {
+    const reason = new Error('synthetic adoption failure')
+    const seen: string[] = []
+    const original = userMessage(0)
+    const event = new Proxy(original, { get(target, key, receiver) {
+      if (key === 'type') seen.push('type')
+      if (key === 'data') { seen.push('data'); throw reason }
+      const value: unknown = Reflect.get(target, key, receiver)
+      return value
+    } })
+    let failure: unknown
+    try { validateStoredEvents(meta('getter-order'), [event]) } catch (error: unknown) { failure = error }
+    expect(seen).toEqual(['type', 'type', 'data'])
+    expect(failure).toBeInstanceOf(SessionPersistenceCorruptionError)
+    if (!(failure instanceof SessionPersistenceCorruptionError)) throw failure
+    expect(failure.message).toBe('stored session "getter-order" failed validation: Error: synthetic adoption failure')
+    expect(failure.cause).toBe(reason)
+  })
+
+  it('propagates an admission getter error without corruption wrapping', () => {
+    const reason = new Error('synthetic admission failure')
+    const event = new Proxy(userMessage(0), { get(target, key, receiver) {
+      if (key === 'type') throw reason
+      const value: unknown = Reflect.get(target, key, receiver)
+      return value
+    } })
+    let failure: unknown
+    try { validateStoredEvents(meta('admission-error'), [event]) } catch (error: unknown) { failure = error }
+    expect(failure).toBe(reason)
+  })
+
+  it('preserves in-place event identity and partial freezing when later adoption fails', () => {
+    const first = userMessage(0)
+    const later = userMessage(1)
+    const message = first.data
+    const reason = new Error('synthetic later failure')
+    const second = new Proxy(later, { get(target, key, receiver) {
+      if (key === 'data') throw reason
+      const value: unknown = Reflect.get(target, key, receiver)
+      return value
+    } })
+    const events = [first, second]
+    let failure: unknown
+    try { validateStoredEvents(meta('partial-adoption'), events) } catch (error: unknown) { failure = error }
+    expect(failure).toBeInstanceOf(SessionPersistenceCorruptionError)
+    if (!(failure instanceof SessionPersistenceCorruptionError)) throw failure
+    expect(failure.cause).toBe(reason)
+    expect(events[0]).toBe(first)
+    expect(events[1]).toBe(second)
+    expect(first.data).toBe(message)
+    expect(Object.isFrozen(message)).toBe(true)
+    expect(Object.isFrozen(later.data)).toBe(false)
+    expect(Object.isFrozen(first)).toBe(false)
+  })
+
+  it('wraps second-pass iterator and assignment errors, preserving prior adoption', () => {
+    const iterateError = new Error('synthetic entries failure')
+    const untouched = userMessage(0)
+    const blockedIterator = new Proxy([untouched], { get(target, key, receiver) {
+      if (key === 'entries') throw iterateError
+      const value: unknown = Reflect.get(target, key, receiver)
+      return value
+    } })
+    let failure: unknown
+    try { validateStoredEvents(meta('entries-error'), blockedIterator) } catch (error: unknown) { failure = error }
+    expect(failure).toBeInstanceOf(SessionPersistenceCorruptionError)
+    if (!(failure instanceof SessionPersistenceCorruptionError)) throw failure
+    expect(failure.message).toBe('stored session "entries-error" failed validation: Error: synthetic entries failure')
+    expect(failure.cause).toBe(iterateError)
+    expect(Object.isFrozen(untouched.data)).toBe(false)
+
+    const assignError = new Error('synthetic assignment failure')
+    const adopted = userMessage(0)
+    const blockedAssignment = new Proxy([adopted], { set(target, key, value: unknown, receiver) {
+      if (key === '0') throw assignError
+      return Reflect.set(target, key, value, receiver)
+    } })
+    failure = undefined
+    try { validateStoredEvents(meta('assignment-error'), blockedAssignment) } catch (error: unknown) { failure = error }
+    expect(failure).toBeInstanceOf(SessionPersistenceCorruptionError)
+    if (!(failure instanceof SessionPersistenceCorruptionError)) throw failure
+    expect(failure.message).toBe('stored session "assignment-error" failed validation: Error: synthetic assignment failure')
+    expect(failure.cause).toBe(assignError)
+    expect(Object.isFrozen(adopted.data)).toBe(true)
+    expect(blockedAssignment[0]).toBe(adopted)
+  })
+
   it('passes an adoption-side format refusal through unwrapped', () => {
     // The adoption step may itself refuse a record as unsupported rather than
     // damaged; such a refusal must reach the caller as-is, never rebranded as
@@ -212,6 +377,9 @@ describe('validateStoredEvents', () => {
       },
     } as unknown as SessionEvent
     expect(() => validateStoredEvents(m, [trap])).toThrow(passthrough)
+    let failure: unknown
+    try { validateStoredEvents(m, [trap]) } catch (error: unknown) { failure = error }
+    expect(failure).toBe(passthrough)
   })
 })
 

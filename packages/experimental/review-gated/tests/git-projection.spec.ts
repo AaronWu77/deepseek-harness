@@ -1,3 +1,4 @@
+import { appendRecord } from './records.ts'
 /** Pure local-Git replay over real Session, projection registry, and durable JSON parsing. */
 import { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -54,12 +55,12 @@ describe('local Git projection', () => {
   it('replays grants and candidates and matches checkpoint-plus-suffix restoration without I/O', async () => {
     const f = await registry()
     const session = f.ctx.sessions.create(SessionId('rg-git-replay'))
-    session.append('review-gated/git-state', { version: 1, state: grant() })
-    session.append('review-gated/git-state', { version: 1, state: { ...grant(), status: 'preparing', workspace } })
+    appendRecord(session, 'plugin:review-gated/git-state', { version: 1, state: grant() })
+    appendRecord(session, 'plugin:review-gated/git-state', { version: 1, state: { ...grant(), status: 'preparing', workspace } })
     const checkpoint = f.ctx.sessionProjections.checkpoint(session)
     const cut = SessionLogOffset(session.snapshotEvents().length)
     const before = gitProjectionDefinition.stateSchema.parse(f.handle.stateOf(session))
-    session.append('review-gated/git-state', { version: 1, state: completed() })
+    appendRecord(session, 'plugin:review-gated/git-state', { version: 1, state: completed() })
     const unrelated = session.append('request/header', { header: { config: { provider: 'fixture', model: 'main' } }, reason: 'resume' })
     const current = f.handle.stateOf(session)
     expect(foldGitState(current, unrelated)).toBe(current)
@@ -74,7 +75,7 @@ describe('local Git projection', () => {
     expect(gitProjectionDefinition.wire.view(current)).toBe(current.value)
     expect(f.ctx.get('subprocess')).toBeUndefined()
     expect(f.ctx.get('worktrees')).toBeUndefined()
-    session.append('review-gated/git-state', { version: 1, state: null })
+    appendRecord(session, 'plugin:review-gated/git-state', { version: 1, state: null })
     expect(f.handle.stateOf(session)).toEqual(empty())
   })
 
@@ -96,9 +97,9 @@ describe('local Git projection', () => {
     for (const data of [{ version: 2, state: null }, { version: 1, state: { ...grant(), source: { ...source, headOid: 'short' } } },
       { version: 1, state: grant(), unexpected: true }]) {
       const events = durable([
-        { type: 'review-gated/git-state', seq: 0, time: 1, ignorable: true, data },
-        { type: 'review-gated/git-state', seq: 1, time: 2, ignorable: true, data: { version: 1, state: grant() } },
-        { type: 'review-gated/git-state', seq: 2, time: 3, ignorable: true, data: { version: 1, state: null } },
+        { type: 'plugin:review-gated/git-state', seq: 0, time: 1, ignorable: true, data },
+        { type: 'plugin:review-gated/git-state', seq: 1, time: 2, ignorable: true, data: { version: 1, state: grant() } },
+        { type: 'plugin:review-gated/git-state', seq: 2, time: 3, ignorable: true, data: { version: 1, state: null } },
       ])
       const first = events[0]
       const second = events[1]
@@ -136,13 +137,13 @@ it('poisons malformed cross-references and refuses a semantically invalid checkp
     { ...state, binding: { ...review, role: 'worker', checkout: candidate.inspection } },
   ]
   const session = f.ctx.sessions.create(SessionId('git-crossref-checkpoint'))
-  session.append('review-gated/git-state', { version: 1, state })
+  appendRecord(session, 'plugin:review-gated/git-state', { version: 1, state })
   const checkpoint = f.ctx.sessionProjections.checkpoint(session)
   const row = checkpoint.reviewGatedGit
   if (row === undefined) throw new Error('A registered projection must publish its checkpoint row.')
   for (const value of invalid) {
     expect(gitStateSchema.safeParse(value).success).toBe(false)
-    const events = durable([{ type: 'review-gated/git-state', seq: 0, time: 1, ignorable: true, data: { version: 1, state: value } }])
+    const events = durable([{ type: 'plugin:review-gated/git-state', seq: 0, time: 1, ignorable: true, data: { version: 1, state: value } }])
     expect(events.reduce(foldGitState, empty()).failure).toContain('RG_GIT_STATE_INVALID')
     expect(() => f.ctx.sessionProjections.restore({ ...checkpoint, reviewGatedGit: { ...row, val: { value, failure: null } } },
       session.snapshotEvents(), SessionLogOffset(0), session.header, SessionLogOffset(0))).toThrow()

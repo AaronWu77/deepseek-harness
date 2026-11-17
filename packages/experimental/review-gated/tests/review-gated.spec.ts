@@ -37,7 +37,9 @@ describe('RG scoped role contribution', () => {
     expect(prompt).toContain('Selected PTC persona.')
     expect(prompt).toContain('Existing tool guidance.')
     expect(prompt).toContain('# RG: work and independent review')
-    expect(prompt).toContain('machine-counted')
+    // The guidance keeps the non-refundable budget rule; the wording names the
+    // rejected attempts instead of the counting mechanism.
+    expect(prompt).toContain('Accepted failed or cancelled attempts still consume budget.')
     expect(prompt).toContain('one-shot children')
     expect(assembly.sections.filter(section => section.name === 'review-gated:main')).toHaveLength(1)
     expect(ctx.tools.definitions(key).map(tool => tool.name)).toEqual(['rg_worker', 'rg_reviewer', 'rg_models', 'rg_status'])
@@ -120,41 +122,38 @@ describe('RG scoped role contribution', () => {
     const input = { calls: [{ type: 'tool-call' as const, id: ToolCallId('rg_status'), name: 'rg_status', arguments: '{}' }],
       signal: new AbortController().signal }
     // No Agent at all is already covered; these branches need one with RG composed.
-    const agent = { session: ctx.sessions.create(SessionId('rg-status-agent')), claimProtectionStatus: 'saving' as const,
-      claimRecovery: { intentSeq: 1, target: 'next-turn' as const, turn: 1, step: 1, inputs: [] } }
+    const agent = { session: ctx.sessions.create(SessionId('rg-status-agent')) }
     const reports: unknown[] = []
     let recorded: unknown = null
+    let status: 'ready' | 'saving' | 'unknown' = 'saving'
     const runtime = {
       // The main-role mutation guard reads RG state on every tool call.
       read: () => null,
-      claimReport: (_session: unknown, status: unknown, claim: unknown) => {
+      claimReport: (_session: unknown, reported: unknown, claim: unknown) => {
         reports.push(claim)
-        return { claimStatus: status, claim }
+        return { claimStatus: reported, claim }
       },
       claimOf: () => recorded,
+      statusOf: () => status,
     }
     const child = ctx.extend({})
     child.provide('reviewGated', runtime)
-    // The status tool reads only these two Agent capabilities, so a partial
-    // stand-in covers the branches without fabricating a full Agent.
+    // The status tool reads only the projection claim and the shared readiness answer.
     const run = async (target: object) =>
       (await child.tools.execute({ ...input, agent: target as never })).results[0]?.result
-    // A live saving claim is reported without consulting the projection.
+    // A saving Session reports its readiness instead of the claim preview.
     expect(JSON.stringify(await run(agent))).toContain('"claimStatus":"saving"')
-    // A settled claim with no live recovery reads the projection instead.
+    // A ready Session reports the settled claim without a status word.
+    status = 'ready'
     recorded = { intentSeq: 1, target: 'next-turn', turn: 1, step: 1, inputs: [], phase: 'rejected' }
-    expect(JSON.stringify(await run({ session: agent.session, claimProtectionStatus: null, claimRecovery: null })))
-      .toContain('"claimStatus":null')
-    expect(reports).toHaveLength(2)
-    // A live recovery without a saving status still takes the recovery branch.
-    expect(JSON.stringify(await run({ session: agent.session, claimProtectionStatus: null, claimRecovery: {
-      intentSeq: 2, target: 'next-turn', turn: 1, step: 1, inputs: [] } }))).toContain('"claimStatus":null')
-    // No live claim and no projection fails closed rather than reporting ready.
+    expect(JSON.stringify(await run(agent))).toContain('"claimStatus":null')
+    // An unknown Session reports the uncertainty and the retained claim evidence.
+    status = 'unknown'
+    expect(JSON.stringify(await run(agent))).toContain('"claimStatus":"unknown"')
+    expect(reports).toHaveLength(3)
+    // No projection claim fails closed rather than reporting ready.
     recorded = undefined
-    expect(JSON.stringify(await run({ session: agent.session, claimProtectionStatus: null, claimRecovery: null })))
-      .toContain('The input claim record is unavailable')
-    // A missing protected-claim capability fails closed before any report.
-    expect(JSON.stringify(await run({ session: agent.session }))).toContain('Protected input claims are unavailable')
+    expect(JSON.stringify(await run(agent))).toContain('The input claim record is unavailable')
   })
 
   it.each(['main', 'worker', 'reviewer'] as const)('accepts fixed role %s', (role) => {

@@ -15,6 +15,10 @@
       name: ../../../packages/test-support/session-snapshot/tests/fixtures/parent-agent-preset.ts
       config:
         presets: [rg]
+# Search availability is external-provider dependent and is not an input to the RG scenario.
+- id: tool-web
+  config:
+    search: false
 # Shell execution and confinement are not inputs to this portable PTC scenario.
 - id: tool-fs
   config:

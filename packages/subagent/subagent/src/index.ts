@@ -13,7 +13,7 @@
  *
  * `startActivation` establishes every child under the activation manager, which
  * owns execution, result delivery, and resource release. Local providers seed
- * continuable or one-shot Agents; external providers return a single execution handle.
+ * resumable Agents; external providers return a single execution handle.
  * `sendMessage` steers between adjacent local Agents without exposing
  * whether a child is resident. Discovery combines real child Sessions with
  * parent-owned records for external executions.
@@ -54,8 +54,6 @@ import type {
 import type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
-  LocalOneShotCreateRequest,
-  LocalOneShotCreateSpec,
   SubagentCapabilities,
   SubagentActivation,
   SubagentActivationSpec,
@@ -65,7 +63,6 @@ import type {
   SubagentRunInfo,
   SubagentSendMessageOptions,
   SubagentStartRequest,
-  SubagentStartGuard,
 } from './types.ts'
 import { SubagentError } from './error.ts'
 import { assertSubagentMaxDepth } from './depth.ts'
@@ -87,8 +84,6 @@ export { SubagentRunId } from './types.ts'
 export type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
-  LocalOneShotCreateRequest,
-  LocalOneShotCreateSpec,
   SubagentCapabilities,
   SubagentActivation,
   SubagentActivationSpec,
@@ -98,7 +93,6 @@ export type {
   SubagentRun,
   SubagentSendMessageOptions,
   SubagentStartRequest,
-  SubagentStartGuard,
   ResolvedSubagentStartRequest,
   SubagentStopReason,
   SubagentStopReasonMap,
@@ -112,7 +106,6 @@ export type {
   ContinuableSubagentDescriptorData,
   ContinuableSubagentDescriptorInput,
   OneShotSubagentDescriptorData,
-  OneShotSubagentDescriptorInput,
   SubagentDescriptorData,
 } from './descriptor.ts'
 export { STRUCTURED_OUTPUT_TOOL } from './structured.ts'
@@ -204,10 +197,7 @@ export class SubagentRuntime extends TypertRemoteService {
     maxActiveSubagents: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(8).volatile(),
   })
   static inject = ['workingDirectory', 'sessionProjections']
-  /** Local one-shot creation and lifecycle hooks are available on this manager implementation. */
-  readonly supportsLocalOneShot: true = true
   private providers = new Map<string, SubagentProvider>()
-  private readonly startGuards = new Set<{ check: SubagentStartGuard }>()
   private manager: SubagentManager | undefined
   /**
    * The contained lifecycle-edge publisher. Built here because scoped dispatch
@@ -226,7 +216,6 @@ export class SubagentRuntime extends TypertRemoteService {
           return provider.start(request)
         },
         prepareContinuable: (name, request) => this.prepareContinuable(name, request),
-        prepareLocalOneShot: (name, request, managedSignal) => this.prepareLocalOneShot(name, request, managedSignal),
         observeActivation: (provider, childId, parent) => this.observeActivation(provider, childId, parent),
       }, () => this.config.maxActiveSubagents.get())
       this.manager = manager
@@ -281,17 +270,7 @@ export class SubagentRuntime extends TypertRemoteService {
    */
   async startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation> {
     const provider = this.expectProvider(spec.provider)
-    const oneShot = spec.lifecycle === 'one-shot'
-    if (oneShot && provider.prepareLocalOneShot === undefined) {
-      throw new SubagentError('local one-shot activation requires prepareLocalOneShot', 'UNSUPPORTED_CAPABILITY')
-    }
-    if (!oneShot && provider.prepareContinuable === undefined && provider.start === undefined) {
-      throw new SubagentError('local one-shot providers require explicit one-shot lifecycle', 'UNSUPPORTED_CAPABILITY')
-    }
-    if (spec.lifecycle === 'continuable' && provider.prepareContinuable === undefined) {
-      throw new SubagentError('continuable activation requires prepareContinuable', 'UNSUPPORTED_CAPABILITY')
-    }
-    if (spec.childId !== undefined && !oneShot && provider.prepareContinuable === undefined) {
+    if (spec.childId !== undefined && provider.prepareContinuable === undefined) {
       throw new SubagentError('reserved child ids require a local backend', 'UNSUPPORTED_CAPABILITY')
     }
     assertSubagentMaxDepth(spec.request.maxDepth)
@@ -301,27 +280,9 @@ export class SubagentRuntime extends TypertRemoteService {
       throw new SubagentError('subagent creation requires the exact live parent agent', 'UNAUTHORIZED')
     }
     if (spec.request.outputSchema !== undefined) assertObjectJsonSchema(spec.request.outputSchema)
-    for (const guard of [...this.startGuards]) guard.check(spec)
-    return !oneShot && provider.prepareContinuable === undefined
+    return provider.prepareContinuable === undefined
       ? manager.startExternal(spec)
       : manager.startLocal(spec)
-  }
-
-  /**
-   * Register a synchronous, rejection-only check at the actual activation start.
-   * Every current guard inspects the immutable specification before the manager
-   * reserves resources. A throw prevents local and external provider execution.
-   * Removing a guard affects later starts, not activations already admitted.
-   * @param check - synchronous callback that throws to reject and otherwise returns.
-   * @returns the effect disposer that removes this exact registration.
-   */
-  guardStarts(check: SubagentStartGuard): () => void {
-    // oxlint-disable-next-line typescript/no-misused-promises -- synchronous effect disposer
-    return this.ctx.effect(() => {
-      const entry = { check }
-      this.startGuards.add(entry)
-      return () => { this.startGuards.delete(entry) }
-    }, 'subagents.guardStarts()')
   }
 
   /**
@@ -580,15 +541,15 @@ export class SubagentRuntime extends TypertRemoteService {
   /**
    * Register a provider under its name. Registration is effect-scoped and HMR
    * safe; removing a provider blocks new starts but does not revoke runs that
-   * were already returned to their holders. Providers without `start`, `prepareContinuable`,
-   * or `prepareLocalOneShot` are rejected with UNSUPPORTED_CAPABILITY before registration.
+   * were already returned to their holders. Providers without either execution
+   * method are rejected with UNSUPPORTED_CAPABILITY before registration.
    * @param provider - the trusted provider implementation.
    * @returns the exact Cordis effect disposer.
    */
   registerProvider(provider: SubagentProvider): () => void {
     const name = provider.name
-    if (provider.start === undefined && provider.prepareContinuable === undefined && provider.prepareLocalOneShot === undefined) {
-      throw new SubagentError(`subagent provider "${name}" must implement start, prepareContinuable or prepareLocalOneShot`, 'UNSUPPORTED_CAPABILITY')
+    if (provider.start === undefined && provider.prepareContinuable === undefined) {
+      throw new SubagentError(`subagent provider "${name}" must implement start or prepareContinuable`, 'UNSUPPORTED_CAPABILITY')
     }
     // oxlint-disable-next-line typescript/no-misused-promises -- synchronous disposer
     return this.ctx.effect(function* (this: SubagentRuntime) {
@@ -634,19 +595,6 @@ export class SubagentRuntime extends TypertRemoteService {
   ): Promise<ContinuableCreateSpec> {
     const provider = this.expectProvider(name) as SubagentProvider & Required<Pick<SubagentProvider, 'prepareContinuable'>>
     return provider.prepareContinuable(request)
-  }
-
-  /** Dispatch detached one-shot preparation after capability validation. */
-  private prepareLocalOneShot(
-    name: string,
-    request: LocalOneShotCreateRequest,
-    managedSignal: AbortSignal,
-  ): Promise<LocalOneShotCreateSpec> {
-    const provider = this.expectProvider(name)
-    if (provider.prepareLocalOneShot === undefined) {
-      throw new SubagentError('provider does not support local one-shot preparation', 'UNSUPPORTED_CAPABILITY')
-    }
-    return provider.prepareLocalOneShot(request, managedSignal)
   }
 
   /** Look up a provider for dispatch or fail loud. */

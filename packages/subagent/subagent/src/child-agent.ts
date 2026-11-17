@@ -157,8 +157,6 @@ export function childSessionMeta(
 export interface ChildComposition {
   /** Independently mounted preset; omission shares the parent's standing generation. */
   readonly agentPreset?: string | undefined
-  /** A trusted one-shot setup mounts its own preset instead of inheriting the parent. */
-  readonly inheritPreset?: false
   /** Historical descriptor persona reapplied only during cold resume. */
   readonly persona?: string | undefined
   /** Historical descriptor tool restriction reapplied only during cold resume. */
@@ -199,7 +197,7 @@ export function applyChildComposition(
       applyChildOverrides(childCtx, composition)
     })
   }
-  if (composition.inheritPreset !== false) childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
+  childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
   applyChildOverrides(childCtx, composition)
 }
 

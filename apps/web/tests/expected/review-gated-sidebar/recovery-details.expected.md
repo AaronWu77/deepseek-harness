@@ -1,0 +1,8 @@
+- status:
+  - text: 这条消息的处理结果尚未确认
+  - paragraph: 请先检查对话和工作区，暂勿重复发送
+- button "收起输入" [expanded]
+- region "原始消息":
+  - heading "原始消息" [level=4]
+  - text: Use rg_worker, then rg_reviewer, and report both result markers.
+  - paragraph: 任务可能已经执行过，请核对对话和工作区，不要自动重发这条消息。

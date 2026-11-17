@@ -1,0 +1,6 @@
+- listitem:
+  - 'button "设为新任务默认: RG"':
+    - text: RG 自定义
+    - code: rg
+    - text: 在同一会话中处理任务，按需委派执行者，并由独立审查者检查结果。
+  - 'button "查看配置: RG"': 查看配置

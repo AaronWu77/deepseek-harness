@@ -384,7 +384,7 @@ Exact reads, filters, and traces are backend-independent concrete behavior. A ba
 /**
  * Observe one exact live or prepared Session without a persistence listing preflight.
  * @param sessionId - logical Session identity.
- * @param options - cancellation and projection selection for this read.
+ * @param options - cancellation, projection selection, and shared-cache retention for this read.
  * @returns a caller-owned observation lease.
  */
 observeSession( sessionId: SessionId, options: SessionObservationOptions = {}, ): Promise<SessionObservation>
@@ -411,6 +411,15 @@ abstract searchEvents( request: SessionEventSearchRequest, exec?: SessionSearchE
  * @returns deterministic newest-first cloned session records.
  */
 listSessions(signal?: AbortSignal): Promise<SessionRecord[]>
+
+/**
+ * List records and stored metadata with their process-local source identities.
+ * The result is for Host use only and must not be persisted or sent over the wire.
+ * @param signal - optional cancellation for persistence listing.
+ * @returns the listing and identities of its Query, persistence, observation, and live-store sources.
+ * @throws {SessionQueryError} when a custom listSessions lacks a bound implementation or the live store changes during listing.
+ */
+async listSessionsWithSource(signal?: AbortSignal): Promise<SessionSourceListing>
 
 /**
  * Read and replay-validate one complete logical session log without making it live.

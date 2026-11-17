@@ -260,6 +260,17 @@ interface SurfaceFoldState {
   projections: Set<SessionMessageProjection>
 }
 
+/** Borrowed contiguous event window and absolute-sequence lookup. */
+interface SurfaceHistory {
+  readonly events: readonly SessionEvent[]
+  readonly baseSeq: SessionLogOffset
+  eventAt(seq: number): SessionEvent | undefined
+}
+
+function arraySurfaceHistory(events: readonly SessionEvent[], baseSeq: SessionLogOffset): SurfaceHistory {
+  return { events, baseSeq, eventAt: seq => events[seq - baseSeq] }
+}
+
 /** A validated replacement transition that has not mutated fold state yet. */
 interface SurfaceReplacePlan extends SurfaceFoldReplacement {
   kind: 'replace'
@@ -367,14 +378,13 @@ function assertSourceEventReferences(
 /** Resolve tool additions against their immutable historical request header. */
 function assertDeveloperHeader(
   event: SessionEvent,
-  events: readonly SessionEvent[],
-  baseSeq: SessionLogOffset,
+  history: SurfaceHistory,
 ): void {
   if (event.type !== 'developer/message') return
   validateSessionEventData(event, `developer/message at seq ${event.seq}`)
   if (event.data.headerSeq === undefined) return
   const headerSeq = event.data.headerSeq
-  const headerEvent = events[headerSeq - baseSeq]
+  const headerEvent = history.eventAt(headerSeq)
   if (headerSeq >= event.seq || headerEvent?.type !== 'request/header') {
     throw new Error('developer/message headerSeq must reference an earlier request/header')
   }
@@ -456,15 +466,14 @@ function isDeepEqualJson(a: unknown, b: unknown): boolean {
 function assertToolResultRewrite(
   event: SessionEvent,
   shadowedSeqs: readonly SessionSeq[],
-  events: readonly SessionEvent[],
-  baseSeq: SessionLogOffset,
+  history: SurfaceHistory,
 ): void {
   if (event.type !== 'tool/result') return
   if (shadowedSeqs.length !== 1) {
     throw new Error('tool/result surface replacement must rewrite exactly one current node')
   }
   for (const originalSeq of shadowedSeqs) {
-    const original = events[originalSeq - baseSeq]
+    const original = history.eventAt(originalSeq)
     if (original?.type !== 'tool/result') {
       throw new Error('tool/result surface replacement must target a current tool/result')
     }
@@ -495,11 +504,10 @@ function assertSystemHeadRewrite(
   state: SurfaceFoldState,
   startIdx: number,
   shadowedSeqs: readonly SessionSeq[],
-  events: readonly SessionEvent[],
-  baseSeq: SessionLogOffset,
+  history: SurfaceHistory,
 ): void {
   if (startIdx !== 0) return
-  const head = events[state.nodes[0] as number - baseSeq]
+  const head = history.eventAt(state.nodes[0] as number)
   if (head?.type !== 'system/message') return
   if (event.type !== 'system/message' || shadowedSeqs.length !== 1) {
     throw new Error('surface replace: node 0 holds the system prompt and may be rewritten only by a system/message over exactly that node')
@@ -511,19 +519,18 @@ function planSurfaceEvent(
   state: SurfaceFoldState,
   event: SessionEvent,
   expectedSeq: SessionSeq,
-  events: readonly SessionEvent[],
-  baseSeq: SessionLogOffset,
+  history: SurfaceHistory,
   projections: readonly SessionMessageProjection[],
 ): SurfacePlan | undefined {
   if (event.seq !== expectedSeq) {
     throw new Error(`session event seq ${event.seq} is not contiguous; expected ${expectedSeq}`)
   }
   const surfaceOp = validateSurfaceMetadata(event)
-  assertDeveloperHeader(event, events, baseSeq)
+  assertDeveloperHeader(event, history)
   const projection = projections.find(item => item.type === event.type)
   if (projection !== undefined) {
     return { kind: 'project', projection, messages: projection.project(event, {
-      nodes: state.nodes, events, baseSeq, messages: state.projectedMessages,
+      nodes: state.nodes, events: history.events, baseSeq: history.baseSeq, messages: state.projectedMessages,
     }) }
   }
   if (MESSAGE_PROJECTION_EVENT_TYPES.has(event.type)) {
@@ -535,8 +542,8 @@ function planSurfaceEvent(
   }
   const range = replacementRange(state, surfaceOp)
   assertSourceEventReferences(event, range.shadowedSeqs)
-  assertToolResultRewrite(event, range.shadowedSeqs, events, baseSeq)
-  assertSystemHeadRewrite(event, state, range.startIdx, range.shadowedSeqs, events, baseSeq)
+  assertToolResultRewrite(event, range.shadowedSeqs, history)
+  assertSystemHeadRewrite(event, state, range.startIdx, range.shadowedSeqs, history)
   return {
     kind: 'replace',
     seq: event.seq,
@@ -551,11 +558,10 @@ function applySurfaceEvent(
   state: SurfaceFoldState,
   event: SessionEvent,
   expectedSeq: SessionSeq,
-  events: readonly SessionEvent[],
-  baseSeq: SessionLogOffset,
+  history: SurfaceHistory,
   projections: readonly SessionMessageProjection[],
 ): SurfaceFoldReplacement | undefined {
-  const plan = planSurfaceEvent(state, event, expectedSeq, events, baseSeq, projections)
+  const plan = planSurfaceEvent(state, event, expectedSeq, history, projections)
   return applySurfacePlan(state, plan)
 }
 
@@ -593,14 +599,14 @@ function applySurfacePlan(
  */
 export function foldSurface(events: readonly SessionEvent[], projections: readonly SessionMessageProjection[] = []): SurfaceFoldResult {
   const state = createFoldState()
+  const history = arraySurfaceHistory(events, SessionLogOffset(0))
   const replacements: SurfaceFoldReplacement[] = []
   for (const [index, event] of events.entries()) {
     const replacement = applySurfaceEvent(
       state,
       event,
       SessionSeq(index),
-      events,
-      SessionLogOffset(0),
+      history,
       projections,
     )
     if (replacement !== undefined) replacements.push(replacement)
@@ -612,6 +618,8 @@ export function foldSurface(events: readonly SessionEvent[], projections: readon
 export class SurfaceManager implements SessionSurface {
   /** Shared transition state; replacement history is not retained. */
   private _state = createFoldState()
+  /** Historical lookups against the borrowed log window. */
+  private readonly _history: SurfaceHistory
   /** Last processed absolute seq. */
   private _lastProcessedSeq: SessionSeqCursor
   /** Candidate already validated by `validateNext`, pending exact log admission. */
@@ -627,6 +635,7 @@ export class SurfaceManager implements SessionSurface {
     private readonly baseSeq: SessionLogOffset = SessionLogOffset(0),
     private readonly projections: readonly SessionMessageProjection[] = [],
   ) {
+    this._history = arraySurfaceHistory(log, baseSeq)
     this._lastProcessedSeq = baseSeq === 0 ? -1 : SessionSeq(baseSeq - 1)
   }
 
@@ -641,7 +650,7 @@ export class SurfaceManager implements SessionSurface {
     this._pendingPlan = {
       event,
       expectedSeq,
-      plan: planSurfaceEvent(this._state, event, expectedSeq, this.log, this.baseSeq, this.projections),
+      plan: planSurfaceEvent(this._state, event, expectedSeq, this._history, this.projections),
     }
   }
 
@@ -688,7 +697,7 @@ export class SurfaceManager implements SessionSurface {
       if (pending?.event === event && pending.expectedSeq === seq) {
         applySurfacePlan(this._state, pending.plan)
       } else {
-        applySurfaceEvent(this._state, event, SessionSeq(seq), this.log, this.baseSeq, this.projections)
+        applySurfaceEvent(this._state, event, SessionSeq(seq), this._history, this.projections)
       }
       if (pending !== undefined && pending.expectedSeq <= seq) this._pendingPlan = undefined
       this._lastProcessedSeq = SessionSeq(seq)

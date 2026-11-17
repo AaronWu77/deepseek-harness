@@ -5,7 +5,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import { unsupportedModel, unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SESSION_FLUSH_DURABLE, SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import type { CreateSessionOptions, SessionEvent } from '@deepseek-ai/dsh-session'
 import { SessionPersistenceRevision, type SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 import Storage, { type KvUnit, type KvUnitDescriptor, type StorageBackend } from '@deepseek-ai/dsh-storage'
@@ -115,10 +115,10 @@ export async function harness(options: {
   }
   const flush = vi.fn(async () => {})
   const storedSessions = new Map<SessionId, readonly SessionEvent[]>()
-  if (options.sessionWriter !== false) ctx.on('session/flush', async (session): Promise<typeof SESSION_FLUSH_DURABLE> => {
+  if (options.sessionWriter !== false) ctx.on('session/flush', async (session): Promise<void> => {
     await flush()
     storedSessions.set(session.id, structuredClone(session.snapshotEvents()))
-    return SESSION_FLUSH_DURABLE
+    return
   })
   ctx.provide('sessionPersistence', { stat } as never)
   await options.beforeService?.(ctx, facility)

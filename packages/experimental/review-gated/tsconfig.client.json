@@ -8,8 +8,10 @@
   "include": [
     "src/client",
     "src/types.ts",
+    "src/review-workflow.ts",
     "src/git-types.ts",
-    "src/settings-schema.ts"
+    "src/settings-schema.ts",
+    "src/settings-document.ts"
   ],
   "references": [
     {
@@ -50,6 +52,9 @@
     },
     {
       "path": "../../client/ui-session"
+    },
+    {
+      "path": "../../client/ui-sidebar-right"
     },
     {
       "path": "../../core/session"

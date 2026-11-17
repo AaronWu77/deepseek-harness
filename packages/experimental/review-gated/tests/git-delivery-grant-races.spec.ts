@@ -1,3 +1,4 @@
+import { appendRecord } from './records.ts'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -25,7 +26,7 @@ describe('local Git grant publication and task replacement', { timeout: 120_000 
     const authorization = f.track(f.runtime.authorizeLocalGit(agent, ['tracked.txt'], signal()))
     const outcome = authorization.then(() => null, (error: unknown) => error)
     await entered.promise
-    agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     release.resolve(undefined)
     expect(await outcome).toMatchObject({ code: 'review-gated/refused', details: { reason: 'RG_GIT_CHANGED' } })
     expect(f.runtime.readGit(agent.session)).toEqual(replacement)
@@ -55,7 +56,7 @@ describe('local Git grant publication and task replacement', { timeout: 120_000 
     await entered.promise
     const state = f.runtime.readGit(agent.session)
     if (state?.binding == null) throw new Error('Allocation requires an owned reservation.')
-    agent.session.append('review-gated/git-state', { version: 1, state: { ...state, diagnostic: 'Concurrent owner update' } })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: { ...state, diagnostic: 'Concurrent owner update' } })
     release.resolve(undefined)
     expect(await outcome).toMatchObject({ code: 'RG_GIT_CHANGED' })
     expect(f.runtime.readGit(agent.session)).toMatchObject({ status: 'failed', binding: null,
@@ -74,7 +75,7 @@ describe('local Git grant publication and task replacement', { timeout: 120_000 
     const otherGrant = await f.runtime.authorizeLocalGit(other.agent, ['tracked.txt'], signal())
     const replacement = mismatch === 'task' ? otherGrant : { ...grant, configurationHash: otherGrant.configurationHash + '-previous' }
     const index = await readFile(join(f.root, '.git', 'index'))
-    agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+    appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     const provision = vi.spyOn(f.ctx.worktrees, 'provision')
     await expect(f.runtime.startRole(agent, 'worker', gitHandoff, undefined, signal()))
       .rejects.toMatchObject({ code: 'RG_GIT_AUTH_REQUIRED' })

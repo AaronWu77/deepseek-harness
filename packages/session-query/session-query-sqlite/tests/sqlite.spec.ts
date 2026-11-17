@@ -212,6 +212,23 @@ async function liveContext(config: ConstructorParameters<typeof SqliteSessionQue
 }
 
 describe('SQLite session search', () => {
+  it('inherits source-bound listing through the SQLite provider', async () => {
+    const ctx = await liveContext({ path: ':memory:', openAt: 'never' })
+    try {
+      ctx.sessions.create(SessionId('synthetic-live'), { meta: { createdAt: 1 } })
+      const bound = await ctx.sessionQuery.listSessionsWithSource()
+      expect(bound.records).toEqual(await ctx.sessionQuery.listSessions())
+      expect(bound.records).toMatchObject([{ header: { id: SessionId('synthetic-live') }, live: true }])
+      expect(bound.stored).toEqual([])
+      expect(bound.queryIdentity).toBe(ctx.sessionQuery.identity)
+      expect(bound.sessionStoreIdentity).toBe(ctx.sessions.identity)
+      expect(bound.persistenceIdentity).toBeUndefined()
+      expect(bound.observationPersistenceIdentity).toBeUndefined()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('defaults and validates opening policy and persisted inspection concurrency through its Cordis config', async () => {
     const defaultCtx = await liveContext()
     expect((defaultCtx.sessionQuery as SqliteSessionQueryEngine).config.openAt).toBe('startup')

@@ -16,7 +16,7 @@ description: "查阅活跃 RC2 Host 改动、仓库支持与可选预设扩展�
 - [概述](#summary)
 - [归属地图](#ownership-map)
 - [Review-Gated 预设](#review-gated-presets)
-- [本地 one-shot activation](#local-one-shot-activation)
+- [角色激活](#role-activation)
 - [保留行为注册表](#preservation-registry)
 - [不计入定制的上游行为](#upstream-behavior-not-counted-as-customization)
 
@@ -46,16 +46,14 @@ profile 选择的仓外插件属于独立安装，不是官方 Host 源码改动
 <a id="review-gated-presets"></a>
 ## Review-Gated 预设
 
-可选 [Review-Gated bundle](../packages/experimental/review-gated/README.zh.md) 在同一主会话中交付，并按需使用受管一次性执行者与审查者。唯一的 Host 设置文档默认未配置；新 RG Session 冻结角色模型池、默认值、推理选项、审查者继承结果与尝试上限。每个人类任务、每个角色默认允许两次已接受尝试；失败或取消不退还次数。结构化 PTC 报告与范围复查决定记录的审查状态。
+可选 [Review-Gated bundle](../packages/experimental/review-gated/README.zh.md) 在同一主会话中交付，并按需使用受管执行者与审查者。唯一的 Host 设置文档默认未配置；新 RG Session 冻结角色模型池、默认值、推理选项、审查者继承结果与尝试上限。每个人类任务、每个角色默认允许两次已接受尝试；失败或取消不退还次数。结构化 PTC 报告与范围复查决定记录的审查状态。
 
-只有 RG 可直接选择；角色预设要求预留的子级启动。本地[预设注册表扩展](../packages/preset/agent-preset-registry/README.zh.md#understand-the-implementation) 在空白会话选择提交后初始化消费方。主角色可直接工作。审查既不是交付门禁，也不授予权限，审查者只读行为属于指导。已有 Host 审批与深度限制仍生效。旧 RG Session 不会自动获得授权；参见[升级指南](upgrade-guide/v0.2.2-rc.1/rg-model-pools/guide.zh.md)。安装 bundle 不会转换普通 Session。
+所有已声明的预设都会出现在列表中；没有 RG 预留的角色预设启动会被 RG 拒绝。主 agent 可以直接工作。审查既不是交付门禁，也不授予权限，审查者的只读行为属于指导。已有 Host 审批与深度限制仍生效。旧 RG Session 不会自动获得授权；参见[升级指南](upgrade-guide/v0.2.2-rc.1/rg-model-pools/guide.zh.md)。安装 bundle 不会转换普通 Session。
 
-<a id="local-one-shot-activation"></a>
-## 本地 one-shot activation
+<a id="role-activation"></a>
+## 角色激活
 
-定制 Host 包含服务 Review-Gated 角色的本地 [Subagent](subsystems/subagent.zh.md) 扩展。显式 `lifecycle: 'one-shot'` 分派分离的 provider preparation，真实本地子级创建、权限、工作目录、preset 组合、执行及清理由已有 manager 管理。子级沿用 one-shot descriptor 和 catalog 格式，不接受后续输入或冷恢复。扩展不改变默认分派、可续接 activation 或外部 provider 执行。
-
-行为测试由 local-one-shot.spec.ts 负责，并有相邻外部 activation、权限、preset 和目录回归测试。当上游提供等价的公开本地 one-shot activation，且 Review-Gated 角色及包测试无需此扩展即可通过时，退役此偏离。上游包版本号不能标识此本地扩展。保留扩展不要求加载 Review-Gated 插件。
+Review-Gated 角色使用上游的可续接本地 activation。单次使用由角色而非 Host 负责：角色在拿到结构化结果后销毁子级并拒绝后续输入，因此 Host 中不保留任何本地 activation 扩展。
 
 <a id="preservation-registry"></a>
 ## 保留行为注册表

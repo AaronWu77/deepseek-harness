@@ -4,6 +4,12 @@ import { interruptedTurnClosers as repairInterruptedTurn, SessionSeq, TOOL_NOT_S
 import { openTurnClosers as closeOpenTurn, type OpenTurnCloseCause } from '../src/repair.ts'
 import type { SessionEvent as LogicalSessionEvent, SurfaceEvent } from '../src/index.ts'
 
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'test/repair-tail': { value: string }
+  }
+}
+
 interface SessionEvent {
   type: string
   seq: number
@@ -443,5 +449,111 @@ describe('openTurnClosers model-visible wording', () => {
     expect(interruptedTurnClosers(events)).toEqual(openTurnClosers(events, { kind: 'interrupted' }))
     const end = interruptedTurnClosers(events).at(-1)
     expect(end?.type === 'turn/end' && end.data.reason).toEqual({ kind: 'interrupted' })
+  })
+})
+
+describe('incremental recovery equivalence', () => {
+  function history(): LogicalSessionEvent[] {
+    return [
+      { type: 'turn/start', seq: SessionSeq(0), time: 10, data: { turn: 3 } },
+      { type: 'step/start', seq: SessionSeq(1), time: 20, data: { turn: 3, step: 2 } },
+      { ...liveToolRequests(), seq: SessionSeq(2), time: 30 },
+      { type: 'tool/call', seq: SessionSeq(3), time: 35,
+        data: { turn: 3, step: 2, callId: ToolCallId('started'), name: 'bash', arguments: '{}' } },
+      { type: 'test/repair-tail', seq: SessionSeq(4), time: 40, data: { value: 'unrelated' } },
+    ]
+  }
+
+  it.each(causes)('retains the exact recovery order, metadata and ownership for $kind', (cause) => {
+    const events = history()
+    const input = structuredClone(events)
+    const first = closeOpenTurn(events, cause)
+    const again = closeOpenTurn(events, cause)
+    expect(first).toEqual(again)
+    expect(first).not.toBe(again)
+    expect(first[0]).not.toBe(again[0])
+    expect(events).toEqual(input)
+    expect(first.map(event => ({ type: event.type, seq: event.seq, time: event.time }))).toEqual([
+      { type: 'tool/result', seq: 5, time: 40 },
+      { type: 'tool/result', seq: 6, time: 40 },
+      { type: 'step/end', seq: 7, time: 40 },
+      { type: 'turn/end', seq: 8, time: 40 },
+    ])
+    const started = first[0]
+    const pending = first[1]
+    if (started?.type !== 'tool/result' || pending?.type !== 'tool/result') throw new Error('expected tool results')
+    expect(started.data.message.id).toBe(cause.kind + '-tool-result-started-5')
+    expect(started.data.message.source.callId).toBe('started')
+    expect(started.data.error).toEqual({ name: 'ToolOutcomeUnknownError', code: TOOL_OUTCOME_UNKNOWN })
+    expect(started.sourceEventSeqs).toEqual([3])
+    expect(pending.data.message.id).toBe(cause.kind + '-tool-result-pending-6')
+    expect(pending.data.error).toEqual({ name: 'ToolNotStartedError', code: TOOL_NOT_STARTED })
+    expect(pending.sourceEventSeqs).toBeUndefined()
+    expect(Object.isFrozen(started)).toBe(false)
+    expect(Object.isFrozen(started.data)).toBe(false)
+    expect(Object.isFrozen(started.data.message)).toBe(true)
+    expect(Object.isFrozen(started.data.message.source)).toBe(true)
+    expect(Object.isFrozen(started.data.message.content)).toBe(true)
+    expect(Object.isFrozen(started.data.message.content[0])).toBe(true)
+    expect(first[2]).toEqual({ type: 'step/end', seq: 7, time: 40, data: { turn: 3, step: 2 } })
+    expect(first[3]).toEqual({ type: 'turn/end', seq: 8, time: 40, data: { turn: 3, reason: { kind: cause.kind } } })
+    if (cause.kind === 'interrupted') expect(repairInterruptedTurn(events)).toEqual(first)
+  })
+
+  it('reads the array tail after iteration even for a balanced log', () => {
+    const reason = new Error('tail lookup failed')
+    const events: LogicalSessionEvent[] = []
+    const observed = new Proxy(events, { get(target, key, receiver) {
+      if (key === 'at') throw reason
+      const value: unknown = Reflect.get(target, key, receiver)
+      return value
+    } })
+    expect(() => { closeOpenTurn(observed, { kind: 'interrupted' }) }).toThrow(reason)
+  })
+
+  it('preserves the original event-read error before examining event type', () => {
+    const seqFailure = new Error('sequence read failed')
+    const typeFailure = new Error('type read failed')
+    const event = new Proxy(history()[0]!, { get(target, key, receiver) {
+      if (key === 'seq') throw seqFailure
+      if (key === 'type') throw typeFailure
+      const value: unknown = Reflect.get(target, key, receiver)
+      return value
+    } })
+    expect(() => { closeOpenTurn([event], { kind: 'interrupted' }) }).toThrow(seqFailure)
+  })
+
+  it('uses the observed tail for tool results and the final array tail for lifecycle closers', () => {
+    const source = history()
+    const last = source.at(-1)
+    if (last === undefined) throw new Error('expected an event')
+    const events = new Proxy(source, { get(target, key, receiver) {
+      if (key === Symbol.iterator) return function* () {
+        yield* target
+        last.seq = SessionSeq(100)
+        last.time = 1234
+      }
+      const value: unknown = Reflect.get(target, key, receiver)
+      return value
+    } })
+    const result = closeOpenTurn(events, { kind: 'interrupted' })
+    expect(result.map(event => ({ type: event.type, seq: event.seq, time: event.time }))).toEqual([
+      { type: 'tool/result', seq: 5, time: 40 },
+      { type: 'tool/result', seq: 6, time: 40 },
+      { type: 'step/end', seq: 103, time: 1234 },
+      { type: 'turn/end', seq: 104, time: 1234 },
+    ])
+  })
+
+  it('keeps a closed step closed when an unrelated event follows', () => {
+    const events: LogicalSessionEvent[] = [
+      { type: 'turn/start', seq: SessionSeq(0), time: 10, data: { turn: 3 } },
+      { type: 'step/start', seq: SessionSeq(1), time: 20, data: { turn: 3, step: 2 } },
+      { type: 'step/end', seq: SessionSeq(2), time: 30, data: { turn: 3, step: 2 } },
+      { type: 'test/repair-tail', seq: SessionSeq(3), time: 40, data: { value: 'unrelated' } },
+    ]
+    expect(repairInterruptedTurn(events)).toEqual([
+      { type: 'turn/end', seq: 4, time: 40, data: { turn: 3, reason: { kind: 'interrupted' } } },
+    ])
   })
 })

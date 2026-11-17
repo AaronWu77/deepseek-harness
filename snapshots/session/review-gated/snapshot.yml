@@ -9,5 +9,6 @@ header:
   childSystemPrompts: [1, 2]
 permission: danger-full-access
 environment:
+  DEEPSEEK_API_KEY: ""
   DSH_SNAPSHOT_PROVIDER: rg-scripted
   DSH_SNAPSHOT_MODEL: rg-scripted

@@ -1,3 +1,4 @@
+import { appendRecord } from './records.ts'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -56,7 +57,7 @@ describe('local Git shared-repository queue', { timeout: 120_000 }, () => {
       const cwd = state?.workspace?.root
       if (state?.binding == null || cwd === undefined) throw new Error('The second worker must retain its reservation and checkout.')
       expect(state.status).toBe('working')
-      second.agent.session.append('review-gated/git-state', { version: 1, state: { ...state, diagnostic: 'Concurrent owner update' } })
+      appendRecord(second.agent.session, 'plugin:review-gated/git-state', { version: 1, state: { ...state, diagnostic: 'Concurrent owner update' } })
       firstFlushRelease.resolve(undefined)
       await Promise.all([workingFirst, workingSecond])
       expect(f.runtime.read(first.agent.session)?.task?.lastWorker?.status).toBe('completed')

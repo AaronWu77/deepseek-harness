@@ -187,9 +187,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async list(): Promise<AgentPreset[]>',
-        description: 'Read every user-selectable declared preset, including activation failures.',
+        description: 'Read every declared preset, including activation failures.',
         parameters: [],
-        returns: 'Display metadata and loading diagnostics; non-selectable role presets are omitted.',
+        returns: 'Display metadata and loading diagnostics.',
       },
       {
         signature: '@Remote(\'list\') async remoteExportList(): Promise<AgentPresetRoster>',
@@ -264,30 +264,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     summary: 'Agent service (`ctx.agents`): tracks live agents and carries the initiating Agent through one process-local asynchronous driver chain.',
     description: 'Agent service (`ctx.agents`): tracks live agents and carries the initiating Agent through one process-local asynchronous driver chain. Agent *creation* is provided by whichever plugin implements the AgentFactory (`@deepseek-ai/dsh-agent-loop`), registered via setFactory.\n\nInitiator methods provide same-process causal attribution only. Ambient presence is neither liveness proof nor authorization; subjects and owners remain explicit, as does identity at worker, process, persistence, and wire boundaries. Returned Promise boundaries drain during teardown, except a nested lineage that starts an owning-fiber unload is excluded from its own drain.',
     methods: [
-      {
-        signature: 'bindModelPolicy(agent: Agent, policy: SessionModelPolicy): void',
-        description: 'Bind complete model authorization before a Session records its first request. Identical bindings are idempotent and preserve later user selections.',
-        parameters: [{ name: 'agent', description: 'Agent whose Session receives the policy; this does not select its initial model.' }, { name: 'policy', description: 'exact allowed choices and the Session\'s default-persistence behavior.' }],
-        throws: ['when policy invariants fail, a different policy is already bound, or requests already exist.'],
-      },
-      {
-        signature: 'clearModelPolicy(agent: Agent): void',
-        description: 'Clear authorization while a user can still change an unstarted Session\'s preset.',
-        parameters: [{ name: 'agent', description: 'Agent whose blank Session returns to ordinary model selection.' }],
-        throws: ['when the Session has already recorded any request.'],
-      },
-      {
-        signature: 'modelPolicyFor(agent: Agent): SessionModelPolicy | null',
-        description: 'Read authorization reconstructed from the Session, including resumed or forked history.',
-        parameters: [{ name: 'agent', description: 'Agent whose recorded policy is read.' }],
-        returns: 'the immutable recorded value; null preserves ordinary model selection.',
-      },
-      {
-        signature: 'assertModelSelectionAllowed(agent: Agent, selection: Readonly<ModelSelection>): void',
-        description: 'Validate the complete final route against recorded Session authorization. Availability remains the caller\'s LLM-adapter check.',
-        parameters: [{ name: 'agent', description: 'Agent whose Session owns authorization.' }, { name: 'selection', description: 'final provider/model/effort choice, including omitted effort.' }],
-        throws: ['ModelPolicyViolationError when the choice is not allowed.'],
-      },
       {
         signature: 'turnBoundaryOf(session: Session): TurnBoundaryProjection',
         description: 'Read the turn and step positions recorded in a Session.',
@@ -2562,8 +2538,8 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: 'initialize(agent: Agent): void',
-        description: 'Bind a fresh RG composition or restore main policy; persisted children gain no new run authorization.',
-        parameters: [{ name: 'agent', description: 'live or initialization-window Agent.' }],
+        description: 'Record this Agent\'s RG role and freeze its captured policy.',
+        parameters: [{ name: 'agent', description: 'Agent whose preset composition determines the RG role.' }],
       },
       {
         signature: 'read(session: Session): RgSessionState | null',
@@ -2578,15 +2554,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'unknown for missing, replaced, or uncertain owners; saving until the owned operation settles.',
       },
       {
-        signature: 'claimOf(session: Session): ClaimWireState | null | undefined',
-        description: 'Read the exact Session claim disposition without starting an Agent.',
+        signature: 'claimOf(session: Session): RgProjectionState[\'claim\'] | undefined',
+        description: 'Read the original RG claim without starting an Agent.',
         parameters: [{ name: 'session', description: 'prepared Session.' }],
-        returns: 'the claim view, or undefined when its projection is unavailable.',
+        returns: 'the owned claim, or undefined when its current projection is unavailable or invalid.',
       },
       {
-        signature: 'claimReport(session: Session, status: \'saving\' | \'unknown\' | null, claim: ClaimRecovery | ClaimWireState | null): RgClaimReport',
+        signature: 'claimReport(session: Session, status: \'saving\' | \'unknown\' | null, claim: RgPreviewClaim | null): RgClaimReport',
         description: 'Bound model-visible claim details including the complete JSON wrapper.',
-        parameters: [{ name: 'session', description: 'Session owning the input.' }, { name: 'status', description: 'live claim durability state.' }, { name: 'claim', description: 'JSON-safe claim retained by the Agent or its projection.' }],
+        parameters: [{ name: 'session', description: 'Session owning the input.' }, { name: 'status', description: 'live claim durability state.' }, { name: 'claim', description: 'original claim retained by the RG projection.' }],
         returns: 'a bounded summary; omitted raw fields and text are explicitly marked.',
         throws: ['RgError when the configured budget cannot hold the minimum summary.'],
       },
@@ -2597,9 +2573,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'ordered replacement snapshots; unknown disables dependent actions.',
       },
       {
-        signature: 'assertRequest(agent: Agent, selection: Readonly<ModelSelection>, context?: { readonly signal: AbortSignal; readonly messages: readonly UserMessage[] }): void',
+        signature: 'assertRequest(agent: Agent, selection: Readonly<ModelSelection>, context?: StepClaimContext): void',
         description: 'Check every request against its frozen policy and, for children, its exact live reservation.',
-        parameters: [{ name: 'agent', description: 'requesting Agent.' }, { name: 'selection', description: 'frozen request selection.' }, { name: 'context', description: 'exact pre-step messages and signal for a confirmed first claim.' }],
+        parameters: [{ name: 'agent', description: 'requesting Agent.' }, { name: 'selection', description: 'frozen request selection.' }, { name: 'context', description: 'exact pre-step position, messages, and signal for the RG-owned claim.' }],
       },
       {
         signature: '@Remote async newTask(agent: Agent, objective: string): Promise<RgTask>',
@@ -2987,7 +2963,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'abstract create(header: SessionHeader, options?: SessionPersistenceCreateOptions): Promise<SessionHandle>',
         description: 'Create a new stored session and take its write ownership.',
-        parameters: [{ name: 'header', description: 'the immutable header (id, version, cwd, lineage) to store.' }, { name: 'options', description: 'optional cancellation.' }],
+        parameters: [{ name: 'header', description: 'the immutable header (id, version, cwd, lineage) to store.' }, { name: 'options', description: 'unused optional cancellation; backends that support deletion implement it.' }],
         returns: 'a `write` handle owned by the caller; close it to release ownership.',
         throws: ['{SessionAlreadyExistsError} when the id already exists.'],
       },
@@ -3016,6 +2992,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List every stored session visible to this process, in no promised order.',
         parameters: [{ name: 'options', description: 'optional cancellation.' }],
         returns: 'one snapshot per stored session.',
+      },
+      {
+        signature: 'async delete(id: SessionId, _options?: SessionPersistenceDeleteOptions): Promise<SessionPersistenceDeleteOutcome>',
+        description: 'Remove one stored session\'s durable artifacts.\n\nDeletion is not part of the append contract: a deleted id stops being observable through `stat`/`list`/`open`, and the backend may retain a recoverable copy outside its storage root because only the operator decides when bytes are unrecoverable. A created-but-unmaterialized session has no durable artifact, so it reports `absent` once its handle closes. Concurrent readers keep the handles they already opened; a write handle holds ownership of the id and refuses deletion until it closes.',
+        parameters: [{ name: 'id', description: 'the stored session to remove.' }, { name: '_options', description: 'optional cancellation; this base implementation ignores it.' }],
+        returns: '`deleted` when artifacts were removed, `absent` when the id stored nothing.',
+        throws: ['{SessionAlreadyOwnedError} when a write handle holds the session.', '{SessionPersistenceDeleteUnsupportedError} from a backend that keeps no removable artifact.'],
       },
     ],
   },
@@ -3047,7 +3030,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Durably checkpoint one live session NOW (all mandatory points call this; tests and carriers may too). The registry cut is snapshotted at this boundary (states are live references), then the session\'s record is replaced on the domain\'s write chain. NOT fail-soft — callers on the fail-soft paths contain it.',
         parameters: [{ name: 'session', description: 'the live session to checkpoint.' }],
         returns: 'resolution after durability and event emission.',
-        throws: ['when a live Session has no durable writer acknowledgement or the cache write fails.'],
       },
       {
         signature: 'coldSnapshot( meta: SessionHeader, inheritedEventCount: SessionLogOffset, events: readonly SessionEvent[], ): ProjectionSnapshot',
@@ -3136,9 +3118,14 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Unified live-preferred session query service.\n\nExact reads, filters, and traces are backend-independent concrete behavior. A backend implements full-text observation, reconciliation, ranking, cursor generations, and query execution on the same `ctx.sessionQuery` service.',
     methods: [
       {
+        signature: 'readonly identity: symbol = Symbol(SESSION_QUERY_SERVICE)',
+        description: 'Process-local Query instance identity; never persist it or send it over the wire.',
+        parameters: [],
+      },
+      {
         signature: 'observeSession( sessionId: SessionId, options: SessionObservationOptions = {}, ): Promise<SessionObservation>',
         description: 'Observe one exact live or prepared Session without a persistence listing preflight.',
-        parameters: [{ name: 'sessionId', description: 'logical Session identity.' }, { name: 'options', description: 'cancellation and projection selection for this read.' }],
+        parameters: [{ name: 'sessionId', description: 'logical Session identity.' }, { name: 'options', description: 'cancellation, projection selection, and shared-cache retention for this read.' }],
         returns: 'a caller-owned observation lease.',
       },
       {
@@ -3158,6 +3145,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List the complete logical corpus using live-preferred records.',
         parameters: [{ name: 'signal', description: 'optional cancellation for persistence listing.' }],
         returns: 'deterministic newest-first cloned session records.',
+      },
+      {
+        signature: 'async listSessionsWithSource(signal?: AbortSignal): Promise<SessionSourceListing>',
+        description: 'List records and stored metadata with their process-local source identities. The result is for Host use only and must not be persisted or sent over the wire.',
+        parameters: [{ name: 'signal', description: 'optional cancellation for persistence listing.' }],
+        returns: 'the listing and identities of its Query, persistence, observation, and live-store sources.',
+        throws: ['{SessionQueryError} when a custom listSessions lacks a bound implementation or the live store changes during listing.'],
       },
       {
         signature: 'async readSession(sessionId: SessionId): Promise<SessionLogSnapshot>',
@@ -3262,6 +3256,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'In-memory session store (`ctx.sessions`).\n\nPersistence is intentionally not implemented here — the agent lifecycle attaches a session-log writer to each published session\'s write handle; a session published outside that lifecycle persists nothing.',
     methods: [
       {
+        signature: 'readonly identity: symbol = Symbol(\'sessions\')',
+        description: 'Process-local instance identity, stable through Context proxies and Session membership changes. Different instances have different identities; this is not a revision and must not be persisted or transmitted.',
+        parameters: [],
+      },
+      {
         signature: 'registerMessageProjection(projection: SessionMessageProjection): () => Promise<void>',
         description: 'Register one event interpreter for live creation, restore, and fork. Disposing the contribution makes sessions that used it refuse further derivation.',
         parameters: [{ name: 'projection', description: 'pure definition owned by the event\'s plugin.' }],
@@ -3299,7 +3298,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'async flush(session: Session): Promise<boolean>',
         description: 'Dispatch the awaited `session/flush` durability checkpoint for `session`, with the carrier captured at enter. THE flush entry point: the store owns the carrier, so callers (the checkpoint policy\'s per-request barrier, goal-round-driver\'s idle checkpoint, teardown drains, and consumers that flush themselves before reading storage) must come through here rather than dispatch a raw `ctx.parallel(\'session/flush\', …)` — one owner and one spelling.',
         parameters: [{ name: 'session', description: 'the session whose buffered events must reach durable storage.' }],
-        returns: 'whether at least one listener acknowledged durability, after every listener has settled successfully. A void observer does not acknowledge it.',
+        returns: 'whether at least one listener participated, after every listener has settled successfully.',
         throws: ['the first registered listener failure after every listener settles.'],
       },
       {
@@ -3758,14 +3757,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     key: 'subagentModelSelection',
     summary: 'Host settings owner that records Session authorization before the first model request.',
     description: 'Host settings owner that records Session authorization before the first model request.',
-    methods: [
-      {
-        signature: 'registerSource(source: SubagentModelSelectionSource): () => void',
-        description: 'Register a composition-owned authorization source without changing global preferences. Sources are sampled only for new root Sessions. Existing, resumed, seeded and child Sessions retain their recorded or inherited decision. More than one matching source, or removal/replacement during resolution, rejects creation.',
-        parameters: [{ name: 'source', description: 'named resolver returning a non-empty route list or abstaining.' }],
-        returns: 'the effect disposer that withdraws this source for later creations.',
-      },
-    ],
+    methods: [],
   },
   {
     key: 'subagents',
@@ -3794,12 +3786,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Start a local or external child.',
         parameters: [{ name: 'spec', description: 'task, backend, and result recipient.' }],
         returns: 'activation with a message id only for local children.',
-      },
-      {
-        signature: 'guardStarts(check: SubagentStartGuard): () => void',
-        description: 'Register a synchronous, rejection-only check at the actual activation start. Every current guard inspects the immutable specification before the manager reserves resources. A throw prevents local and external provider execution. Removing a guard affects later starts, not activations already admitted.',
-        parameters: [{ name: 'check', description: 'synchronous callback that throws to reject and otherwise returns.' }],
-        returns: 'the effect disposer that removes this exact registration.',
       },
       {
         signature: 'async waitForChildren(parent: Agent): Promise<boolean>',
@@ -4786,6 +4772,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'resolution after durability.',
       },
       {
+        signature: 'removeSession(sessionId: SessionId): Promise<boolean>',
+        description: 'Remove every registry trace of one session that no longer exists: its archive slot, its pin, and its accounting slot in whichever workspace records it. Callers use this after deleting a stored session so the registry stops resolving an id with no session behind it. Removing an id cannot introduce an unknown one, so no existence check runs and an unknown id resolves without writing.',
+        parameters: [{ name: 'sessionId', description: 'The session to forget.' }],
+        returns: 'whether any registry record changed.',
+      },
+      {
         signature: 'pinSession(sessionId: SessionId): Promise<void>',
         description: 'Pin one session durably, prepending it to the registry-global pin set. The session must exist (live or in session persistence) and must not be archived. An already pinned id resolves without writing or reordering.',
         parameters: [{ name: 'sessionId', description: 'The session to pin.' }],
@@ -4843,14 +4835,6 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'payload', description: '.error - persistence, setup, or publication failure.' }],
   },
   {
-    name: 'agent-preset/recomposed',
-    mode: 'serial',
-    signature: '\'agent-preset/recomposed\'(payload: { agent: Agent; agentPreset: string }): void | Promise<void>',
-    summary: 'Initialize consumers after a blank Agent commits its new preset, outside Session publication.',
-    description: 'Initialize consumers after a blank Agent commits its new preset, outside Session publication. A listener failure leaves the selected composition committed and rejects the selection operation.',
-    parameters: [{ name: 'payload', description: 'live Agent and the committed preset id.' }],
-  },
-  {
     name: 'agent-preset/selected',
     mode: 'emit',
     signature: '\'agent-preset/selected\'(sessionId: SessionId, agentPreset: string): void',
@@ -4865,14 +4849,6 @@ export const EVENT_API: readonly EventApiEntry[] = [
     summary: 'Process-local assistant-stream publication.',
     description: 'Process-local assistant-stream publication. Chunk frames are transient; the loop appends one final v2 `assistant/message` or `assistant/attempt` with the same stream before a committed end frame.',
     parameters: [{ name: 'payload', description: '.frame - one ordered start, chunk, or end publication. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.' }],
-  },
-  {
-    name: 'agent/claim/status',
-    mode: 'emit',
-    signature: '\'agent/claim/status\'(this: Scoped<Agent>, payload: { agent: Agent; status: \'saving\' | \'unknown\' | null }): void',
-    summary: 'Protected claim durability status changed.',
-    description: 'Protected claim durability status changed.',
-    parameters: [{ name: 'payload', description: '.status - current durability status.' }],
   },
   {
     name: 'agent/created',
@@ -4921,14 +4897,6 @@ export const EVENT_API: readonly EventApiEntry[] = [
     summary: 'One message entered the live inbox.',
     description: 'One message entered the live inbox.',
     parameters: [{ name: 'payload', description: '.message - the inserted message. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.' }],
-  },
-  {
-    name: 'agent/post-pre-step',
-    mode: 'serial',
-    signature: '\'agent/post-pre-step\'(this: Scoped<Agent>, payload: { agent: Agent; claimedMessages: readonly UserMessage[]; admittedMessages: readonly UserMessage[]; turn: number; step: number; signal: AbortSignal; modelSelection: Readonly<ModelSelection>; addGuard: (guard: () => undefined) => void }): void | Promise<void>',
-    summary: 'Observe or commit the final enter decision after all pre-step middleware, before step admission.',
-    description: 'Observe or commit the final enter decision after all pre-step middleware, before step admission. Listeners run in order and must not return a bail value. A throw or cancellation stops the step; a protected claim remains unknown and requires recovery. Registered guards run in order, synchronously before each AgentLoop stream entry, after preparation and flushes. They must only read state, return undefined, and must not schedule asynchronous work. A guard failure stops that entry; prior requests and committed Session events are not rolled back. Downstream middleware and adapters are trusted to honor cancellation; this check does not guarantee authorization at network send time.',
-    parameters: [{ name: 'payload', description: '.modelSelection - frozen selection for the step. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.' }],
   },
   {
     name: 'agent/pre-step',
@@ -5365,9 +5333,9 @@ export const EVENT_API: readonly EventApiEntry[] = [
   {
     name: 'session/flush',
     mode: 'parallel',
-    signature: '\'session/flush\'(this: Scoped<Session>, session: Session): Promise<void | typeof SESSION_FLUSH_DURABLE> | void | typeof SESSION_FLUSH_DURABLE',
+    signature: '\'session/flush\'(this: Scoped<Session>, session: Session): Promise<void> | void',
     summary: 'Awaited parallel durability checkpoint: every listener runs and the caller awaits all of them, with no waterfall veto.',
-    description: 'Awaited parallel durability checkpoint: every listener runs and the caller awaits all of them, with no waterfall veto. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`) reuses the session\'s owner scope. A persistence listener returns `SESSION_FLUSH_DURABLE` only after durably storing this Session; observers return void.',
+    description: 'Awaited parallel durability checkpoint: every listener runs and the caller awaits all of them, with no waterfall veto. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`) reuses the session\'s owner scope.',
     parameters: [{ name: 'session', description: 'the session whose buffered events must reach durable storage.' }],
   },
   {
@@ -5711,10 +5679,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type AgentStatus = \'idle\' | \'running\';',
   },
   {
-    name: 'AllowedModelRoute',
-    declaration: 'export interface AllowedModelRoute {\n    readonly provider: string;\n    readonly model: string;\n}',
-  },
-  {
     name: 'AnalyticsPreset',
     declaration: 'export type AnalyticsPreset = \'creator\' | \'ptc\' | \'minimal\' | \'standard\';',
   },
@@ -5989,14 +5953,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ClaimOutcome',
     declaration: 'export interface ClaimOutcome {\n    readonly claimed: number;\n    readonly skipped: number;\n}',
-  },
-  {
-    name: 'ClaimRecovery',
-    declaration: 'export interface ClaimRecovery {\n    readonly intentSeq: SessionSeq;\n    readonly target: InboxTarget;\n    readonly turn: number;\n    readonly step: number;\n    readonly inputs: readonly {\n        readonly target: InboxTarget;\n        readonly message: JsonValue;\n    }[];\n}',
-  },
-  {
-    name: 'ClaimWireState',
-    declaration: 'export interface ClaimWireState extends ClaimRecovery {\n    readonly phase: \'unsettled\' | \'entered\' | \'rejected\' | \'empty\';\n}',
   },
   {
     name: 'ClientArtifactBaseline',
@@ -6873,10 +6829,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ImageVariantId',
     declaration: 'export type ImageVariantId = Branded<\'ImageVariantId\'>;',
-  },
-  {
-    name: 'InboxTarget',
-    declaration: 'export type InboxTarget = \'next-turn\' | \'next-step\';',
   },
   {
     name: 'IncompatiblePlugin',
@@ -7780,7 +7732,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PresetDefinition',
-    declaration: 'export interface PresetDefinition {\n    readonly id: string;\n    readonly name?: string;\n    readonly description?: string;\n    readonly order?: number;\n    readonly selectable?: boolean;\n    readonly plugins: readonly (Omit<EntryOptions, \'id\' | \'disabled\'> & {\n        id?: string;\n        disabled?: EntryOptions[\'disabled\'] | JsExpr;\n    })[];\n}',
+    declaration: 'export interface PresetDefinition {\n    readonly id: string;\n    readonly name?: string;\n    readonly description?: string;\n    readonly order?: number;\n    readonly plugins: readonly (Omit<EntryOptions, \'id\' | \'disabled\'> & {\n        id?: string;\n        disabled?: EntryOptions[\'disabled\'] | JsExpr;\n    })[];\n}',
   },
   {
     name: 'PresetOption',
@@ -8196,7 +8148,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RgClaimReport',
-    declaration: 'export interface RgClaimReport {\n    readonly claimStatus: \'saving\' | \'unknown\' | null;\n    readonly sessionId: string;\n    readonly sessionIdTruncated: boolean;\n    readonly rawPayloadTruncated: true;\n    readonly hint: string;\n    readonly claim: {\n        readonly intentSeq: SessionSeq;\n        readonly target: \'next-turn\' | \'next-step\';\n        readonly turn: number;\n        readonly step: number;\n        readonly phase: \'unsettled\' | \'entered\' | \'rejected\' | \'empty\';\n        readonly inputCount: number;\n        readonly otherContent: boolean;\n        readonly textPreview: string;\n    } | null;\n}',
+    declaration: 'export interface RgClaimReport {\n    readonly claimStatus: \'saving\' | \'unknown\' | null;\n    readonly sessionId: string;\n    readonly sessionIdTruncated: boolean;\n    readonly rawPayloadTruncated: true;\n    readonly hint: string;\n    readonly claim: {\n        readonly intentSeq: SessionSeq;\n        readonly target?: \'next-turn\' | \'next-step\';\n        readonly turn: number;\n        readonly step: number;\n        readonly phase: \'unsettled\' | \'entered\' | \'rejected\' | \'empty\';\n        readonly inputCount: number;\n        readonly otherContent: boolean;\n        readonly textPreview: string;\n    } | null;\n}',
   },
   {
     name: 'RgFinding',
@@ -8225,6 +8177,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RgPolicy',
     declaration: 'export interface RgPolicy {\n    readonly version: 1;\n    readonly configurationHash: string;\n    readonly main: RgModelPool;\n    readonly worker: RgModelPool;\n    readonly reviewer: RgModelPool;\n    readonly reviewerInherited: boolean;\n    readonly maxWorkerAttempts: number;\n    readonly maxReviewAttempts: number;\n    readonly maxHandoffChars: number;\n    readonly maxReportChars: number;\n    readonly maxScopeFiles: number;\n    readonly maxScopeBytes: number;\n}',
+  },
+  {
+    name: 'RgPreviewClaim',
+    declaration: 'export interface RgPreviewClaim {\n    readonly intentSeq: SessionSeq;\n    readonly target?: \'next-turn\' | \'next-step\';\n    readonly turn: number;\n    readonly step: number;\n    readonly phase?: \'intent\' | \'entered\' | \'rejected\' | \'empty\';\n    readonly inputs: readonly RgPreviewInput[];\n}',
+  },
+  {
+    name: 'RgPreviewInput',
+    declaration: 'export interface RgPreviewInput {\n    readonly target?: \'next-turn\' | \'next-step\';\n    readonly message: unknown;\n}',
+  },
+  {
+    name: 'RgProjectionState',
+    declaration: 'export interface RgProjectionState {\n    readonly value: RgSessionState | null;\n    readonly taskReceipt: \'none\' | \'proven\' | \'unproven\';\n    readonly hasRequested: boolean;\n    readonly failure: string | null;\n    readonly turn: number;\n    readonly step: number;\n    readonly claim: z.output<typeof claimStateSchema> | null;\n    readonly taskAdmission: {\n        readonly intentSeq: SessionSeq;\n        readonly messageId: MessageId;\n        readonly taskId: RgTaskId | null;\n    } | null;\n    readonly taskInputText: string | null;\n    readonly directClaim: {\n        readonly intentSeq: SessionSeq;\n        readonly messageId: MessageId;\n        readonly objective: string | null;\n        readonly limit: number;\n        readonly admitted: 0 | 1 | 2;\n        readonly phase: \'intent\' | \'prepared\' | \'settled\';\n    } | null;\n    readonly pending: {\n        readonly taskId: RgTaskId;\n        readonly runId: RgRunId;\n        readonly childId: SessionId;\n        readonly scopeMatches: boolean;\n        readonly state: RgSessionState;\n    } | null;\n}',
   },
   {
     name: 'RgReport',
@@ -8688,7 +8652,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionHandle',
-    declaration: 'export interface SessionHandle extends AsyncDisposable {\n    readonly id: SessionId;\n    readonly header: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffset;\n    readonly access: SessionAccess;\n    bindSession?(session: Session): void;\n    read(offset?: number, length?: number, options?: SessionHandleReadOptions): Promise<SessionHandleReadResult>;\n    append(events: readonly SessionEvent[], options?: SessionHandleAppendOptions): Promise<void>;\n    flush(options?: SessionHandleFlushOptions): Promise<void>;\n    close(): Promise<void>;\n}',
+    declaration: 'export interface SessionHandle extends AsyncDisposable {\n    readonly id: SessionId;\n    readonly header: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffset;\n    readonly access: SessionAccess;\n    read(offset?: number, length?: number, options?: SessionHandleReadOptions): Promise<SessionHandleReadResult>;\n    append(events: readonly SessionEvent[], options?: SessionHandleAppendOptions): Promise<void>;\n    flush(options?: SessionHandleFlushOptions): Promise<void>;\n    close(): Promise<void>;\n}',
   },
   {
     name: 'SessionHandleAppendOptions',
@@ -8787,16 +8751,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SessionMessageProjectionContext {\n    nodes: readonly SessionSeq[];\n    events: readonly SessionEvent[];\n    baseSeq: SessionLogOffset;\n    messages: ReadonlyMap<SessionSeq, Message>;\n}',
   },
   {
-    name: 'SessionModelPolicy',
-    declaration: 'export interface SessionModelPolicy {\n    readonly allowedSelections: readonly Readonly<ModelSelection>[];\n    readonly defaultSelection: Readonly<ModelSelection>;\n    readonly rememberDefault: boolean;\n}',
-  },
-  {
     name: 'SessionObservation',
-    declaration: 'export interface SessionObservation extends Disposable {\n    readonly source: \'live\' | \'prepared\';\n    readonly header: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffsetType;\n    readonly events: readonly SessionEvent[];\n    readonly cursor: SessionSeqCursor;\n    readonly revision?: SessionPersistenceRevision;\n    readonly projections?: ProjectionSnapshot;\n    retain(): SessionObservation;\n}',
+    declaration: 'export interface SessionObservation extends Disposable {\n    readonly source: \'live\' | \'prepared\';\n    readonly header: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffsetType;\n    readonly events: readonly SessionEvent[];\n    readonly cursor: SessionSeqCursor;\n    readonly revision?: SessionPersistenceRevision;\n    readonly persistenceIdentity?: symbol;\n    readonly projections?: ProjectionSnapshot;\n    retain(): SessionObservation;\n}',
   },
   {
     name: 'SessionObservationOptions',
-    declaration: 'export interface SessionObservationOptions {\n    readonly signal?: AbortSignal;\n    readonly projectionMode?: \'all\' | \'none\';\n}',
+    declaration: 'export interface SessionObservationOptions {\n    readonly signal?: AbortSignal;\n    readonly projectionMode?: \'all\' | \'none\';\n    readonly cachePolicy?: \'shared\' | \'transient\';\n}',
   },
   {
     name: 'SessionObserveEventRequest',
@@ -8825,6 +8785,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionPersistenceCreateOptions',
     declaration: 'export interface SessionPersistenceCreateOptions {\n    readonly signal?: AbortSignal;\n    readonly inheritedEventCount?: SessionLogOffset;\n}',
+  },
+  {
+    name: 'SessionPersistenceDeleteOptions',
+    declaration: 'export interface SessionPersistenceDeleteOptions {\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'SessionPersistenceDeleteOutcome',
+    declaration: 'export type SessionPersistenceDeleteOutcome = \'deleted\' | \'absent\';',
   },
   {
     name: 'SessionPersistenceListOptions',
@@ -8999,6 +8967,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SessionSeqCursor = SessionSeq | -1;',
   },
   {
+    name: 'SessionSourceListing',
+    declaration: 'export interface SessionSourceListing {\n    readonly records: SessionRecord[];\n    readonly stored: readonly SessionStoredMetadata[];\n    readonly queryIdentity: symbol;\n    readonly persistenceIdentity: symbol | undefined;\n    readonly observationPersistenceIdentity: symbol | undefined;\n    readonly sessionStoreIdentity: symbol | undefined;\n}',
+  },
+  {
     name: 'SessionStartInput',
     declaration: 'export interface SessionStartInput {\n    cwd: string;\n    surface: string | null;\n    isInteractive: boolean;\n}',
   },
@@ -9021,6 +8993,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionStorageMetadata',
     declaration: 'export interface SessionStorageMetadata {\n    readonly meta: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffset;\n}',
+  },
+  {
+    name: 'SessionStoredMetadata',
+    declaration: 'export interface SessionStoredMetadata {\n    readonly header: SessionHeader;\n    readonly revision: SessionPersistenceRevision;\n    readonly formatStatus?: \'current\' | \'migration-required\';\n    readonly eventCount?: number;\n    readonly sizeBytes?: number;\n}',
   },
   {
     name: 'SessionSummary',
@@ -9479,10 +9455,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SubagentListEntry = SubagentCatalogRow & {\n    readonly kind: \'child\';\n    readonly hasChildren: boolean;\n} | {\n    readonly kind: \'diagnostic\';\n    readonly id: SessionId;\n    readonly reason: \'corrupt\' | \'unsupported\' | \'unavailable\';\n};',
   },
   {
-    name: 'SubagentModelSelectionSource',
-    declaration: 'export interface SubagentModelSelectionSource {\n    readonly name: string;\n    resolve(agent: Agent): readonly AllowedModelRoute[] | undefined | Promise<readonly AllowedModelRoute[] | undefined>;\n}',
-  },
-  {
     name: 'SubagentPromptReceipt',
     declaration: 'export interface SubagentPromptReceipt {\n    readonly messageId: MessageId;\n}',
   },
@@ -9520,15 +9492,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentRuntime',
-    declaration: 'export class SubagentRuntime extends TypertRemoteService {\n    static Config;\n    static inject;\n    readonly supportsLocalOneShot: true;\n    constructor(ctx: Context, private config: Config);\n    resolveMaxDepth(configured?: number | \'provider-managed\'): number | undefined;\n    startActivation(spec: SubagentActivationSpec & {\n        readonly childId: SessionId;\n    }): Promise<SubagentActivation & {\n        readonly messageId: MessageId;\n    }>;\n    startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>;\n    async startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>;\n    guardStarts(check: SubagentStartGuard): () => void;\n    async waitForChildren(parent: Agent): Promise<boolean>;\n    async sendMessage(sender: Agent, targetId: SessionId, content: ContentBlock[], options: SubagentSendMessageOptions): Promise<MessageId>;\n    interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void;\n    async drainDescendants(parents: readonly Agent[]): Promise<void>;\n    async drainChildren(parent: Agent, childIds: readonly SessionId[]): Promise<void>;\n    listChildren(parentSessionId: SessionId, signal?: AbortSignal): Promise<SubagentCatalogEntry[]>;\n    listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<SubagentDescendantListEntry[]>;\n    @Remote(\'prompt\')\n    async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt>;\n    @Remote(\'interruptByParent\')\n    interrup /* …truncated — full shape in source */',
+    declaration: 'export class SubagentRuntime extends TypertRemoteService {\n    static Config;\n    static inject;\n    readonly supportsLocalOneShot: true;\n    constructor(ctx: Context, private config: Config);\n    resolveMaxDepth(configured?: number | \'provider-managed\'): number | undefined;\n    startActivation(spec: SubagentActivationSpec & {\n        readonly childId: SessionId;\n    }): Promise<SubagentActivation & {\n        readonly messageId: MessageId;\n    }>;\n    startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>;\n    async startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>;\n    async waitForChildren(parent: Agent): Promise<boolean>;\n    async sendMessage(sender: Agent, targetId: SessionId, content: ContentBlock[], options: SubagentSendMessageOptions): Promise<MessageId>;\n    interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void;\n    async drainDescendants(parents: readonly Agent[]): Promise<void>;\n    async drainChildren(parent: Agent, childIds: readonly SessionId[]): Promise<void>;\n    listChildren(parentSessionId: SessionId, signal?: AbortSignal): Promise<SubagentCatalogEntry[]>;\n    listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<SubagentDescendantListEntry[]>;\n    @Remote(\'prompt\')\n    async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt>;\n    @Remote(\'interruptByParent\')\n    interruptByParent(childSessionId: SessionId, parentSessionId: Se /* …truncated — full shape in source */',
   },
   {
     name: 'SubagentSendMessageOptions',
     declaration: 'export interface SubagentSendMessageOptions {\n    readonly signal: AbortSignal;\n}',
-  },
-  {
-    name: 'SubagentStartGuard',
-    declaration: 'export type SubagentStartGuard = (spec: Readonly<SubagentActivationSpec>) => void;',
   },
   {
     name: 'SubagentStartRequest',

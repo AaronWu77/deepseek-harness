@@ -24,7 +24,7 @@ import { parseSessionFormatLogFilename, sessionFormatLogFilename, SessionFormatU
 import type { SessionFormatEvent } from '@deepseek-ai/dsh-session-format'
 import type { SessionFormatRecovery, SessionFormatRestore } from '@deepseek-ai/dsh-session-format'
 import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
-import { assertV4RowAdmission, assertReleasedV4Relationships } from '@deepseek-ai/dsh-session-format-v3-to-v4'
+import { assertV4RowAdmission, assertReleasedV4Relationships, releasedV4SessionFormatCodec } from '@deepseek-ai/dsh-session-format-v3-to-v4'
 import {
   SessionFormatUnsupportedError,
   sessionFormatVersionRefusal,
@@ -346,7 +346,11 @@ function refuseForeignFormatVersion(parsed: object): void {
 }
 
 /** Parse one complete header record supplied independently from event rows. */
-function parseHeaderRecord(record: Buffer): { readonly meta: SessionHeader; readonly restore: SessionFormatRestore } {
+function parseHeaderRecord(record: Buffer): {
+  readonly meta: SessionHeader
+  readonly restore: SessionFormatRestore
+  readonly physical: HeaderLine
+} {
   if (record.length === 0 || record.at(-1) !== 0x0A || record.indexOf(0x0A) !== record.length - 1) {
     throw new Error('empty or header-less session log')
   }
@@ -374,7 +378,76 @@ function parseHeaderRecord(record: Buffer): { readonly meta: SessionHeader; read
     /* v8 ignore next -- isHeaderLine matches the current codec; this preserves classification if it tightens. */
     throw new Error('corrupt session log: first line is not a session header')
   }
-  return { meta: fromHeaderLine(parsed).meta, restore }
+  return { meta: fromHeaderLine(parsed).meta, restore, physical: parsed }
+}
+
+/**
+ * Create the raw current-format decoder after the same header checks as a normal scan.
+ * @internal
+ * @param headerRecord - Exactly one complete physical header record.
+ * @returns Logical metadata and a strict physical decoder for tentative streaming.
+ */
+export function createTentativeV4Decoder(headerRecord: Buffer) {
+  const parsed = parseHeaderRecord(headerRecord)
+  return { meta: parsed.meta, decoder: releasedV4SessionFormatCodec.createDecoder(parsed.physical, 'strict') }
+}
+
+/**
+ * Shared row admission and recoverable-prefix rules for both scanners.
+ * @internal
+ */
+export class SessionLogRowReader {
+  private line = 0
+  private issue: Error | undefined
+
+  /**
+   * @param decode - Decode an admitted row into the caller's output.
+   * @param recovery - Committed-row failure policy.
+   * @param isFatal - Identifies non-format failures that must never be recovered.
+   */
+  constructor(
+    private readonly decode: (row: unknown) => void,
+    private readonly recovery: SessionFormatRecovery,
+    private readonly isFatal: (error: unknown) => boolean = () => false,
+  ) {}
+
+  /** @param line - One complete physical row without its newline. @returns Whether the row joined the prefix. */
+  consume(line: Buffer): boolean {
+    this.line += 1
+    let decoded: unknown
+    try {
+      decoded = JSON.parse(line.toString('utf8'))
+    } catch {
+      const issue = new Error(`corrupt session log: unparsable committed event at line ${this.line}`)
+      if (this.recovery === 'strict') throw issue
+      this.issue ??= issue
+      return false
+    }
+    try {
+      assertV4RowAdmission(decoded, KNOWN_SESSION_EVENT_TYPES)
+    } catch (error: unknown) {
+      if (error instanceof SessionFormatUnsupportedMigrationError) throw new SessionFormatUnsupportedError(error.message)
+      throw error
+    }
+    if (this.issue !== undefined) {
+      if (typeof decoded === 'object' && decoded !== null
+        && (decoded as { type?: unknown }).type === 'turn/end') throw this.issue
+      return false
+    }
+    try {
+      this.decode(decoded)
+    } catch (error: unknown) {
+      if (this.isFatal(error)) throw error
+      const detail = error instanceof Error ? error.message : String(error)
+      const issue = new Error(`corrupt session log: invalid committed event at line ${this.line}: ${detail}`, { cause: error })
+      if (this.recovery === 'strict') throw issue
+      this.issue = issue
+      if (typeof decoded === 'object' && decoded !== null
+        && (decoded as { type?: unknown }).type === 'turn/end') throw issue
+      return false
+    }
+    return true
+  }
 }
 
 /**
@@ -391,8 +464,7 @@ export class SessionLogScanner {
   private fragmentBytes = 0
   private inputBytes: number
   private committedBytes: number
-  private eventLine = 0
-  private issue: Error | undefined
+  private readonly rows: SessionLogRowReader
   private finished = false
 
   /**
@@ -401,11 +473,12 @@ export class SessionLogScanner {
    */
   constructor(
     headerRecord: Buffer,
-    private readonly recovery: SessionFormatRecovery = 'recoverable',
+    recovery: SessionFormatRecovery = 'recoverable',
   ) {
     const parsed = parseHeaderRecord(headerRecord)
     this.meta = parsed.meta
     this.restore = parsed.restore
+    this.rows = new SessionLogRowReader((row) => { this.restore.decodeRow(row) }, recovery)
     this.inputBytes = headerRecord.length
     this.committedBytes = headerRecord.length
   }
@@ -476,48 +549,10 @@ export class SessionLogScanner {
 
   /** Decode one complete event row and update the contiguous prefix. */
   private consumeEventLine(line: Buffer, endByte: number): void {
-    this.eventLine += 1
-    let decoded: unknown
-    try {
-      decoded = JSON.parse(line.toString('utf8')) as unknown
-    } catch {
-      const issue = new Error(`corrupt session log: unparsable committed event at line ${this.eventLine}`)
-      if (this.recovery === 'strict') throw issue
-      this.issue ??= issue
-      return
+    if (this.rows.consume(line)) {
+      this.eventCount += 1
+      this.committedBytes = endByte
     }
-
-    // This scanner accepts only current-generation files. Owned structural refusal must
-    // precede its recoverable-tail suppression, independently of the strict decoder state.
-    try {
-      assertV4RowAdmission(decoded, KNOWN_SESSION_EVENT_TYPES)
-    } catch (error: unknown) {
-      if (error instanceof SessionFormatUnsupportedMigrationError) throw new SessionFormatUnsupportedError(error.message)
-      throw error
-    }
-
-    if (this.issue !== undefined) {
-      if (typeof decoded === 'object' && decoded !== null
-        && (decoded as { type?: unknown }).type === 'turn/end') throw this.issue
-      return
-    }
-    try {
-      this.restore.decodeRow(decoded)
-    } catch (error: unknown) {
-      // Unsupported current-format rows have already been refused before recovery.
-      /* v8 ignore next -- every production Session format decoder rejects with Error. */
-      const detail = error instanceof Error ? error.message : String(error)
-      const issue = new Error(`corrupt session log: invalid committed event at line ${this.eventLine}: ${detail}`, {
-        cause: error,
-      })
-      if (this.recovery === 'strict') throw issue
-      this.issue = issue
-      if (typeof decoded === 'object' && decoded !== null
-        && (decoded as { type?: unknown }).type === 'turn/end') throw issue
-      return
-    }
-    this.eventCount += 1
-    this.committedBytes = endByte
   }
 }
 

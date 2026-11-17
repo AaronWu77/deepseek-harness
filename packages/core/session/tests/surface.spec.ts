@@ -12,7 +12,7 @@ import {
   isSurfaceEligibleType,
   isSurfaceEvent,
 } from '@deepseek-ai/dsh-session'
-import { SurfaceManager } from '@deepseek-ai/dsh-session/surface'
+import { SurfaceManager, type SessionMessageProjection, type SessionMessageProjectionContext } from '@deepseek-ai/dsh-session/surface'
 import {
   MessageId,
   ToolCallId,
@@ -1026,5 +1026,141 @@ describe('developer message history', () => {
     expect(isSurfaceEligibleType('developer/message')).toBe(true)
     const restored = Session.fromRestore(session.id, session.snapshotEvents(), session.header, SessionLogOffset(0), 'shared-frozen')
     expect(restored.deriveMessages()).toEqual([replacement])
+  })
+})
+
+describe('surface history access', () => {
+  const header = (seq: number): SessionEvent<'request/header'> => ({
+    type: 'request/header', seq: SessionSeq(seq), time: seq,
+    data: { reason: 'initial', header: {
+      config: { provider: 'test', model: 'test' }, tools: [{ name: 'search', description: 'Search', parameters: {} }],
+    } },
+  })
+  const developer = (seq: number, headerSeq: number): SessionEvent<'developer/message'> => ({
+    type: 'developer/message', seq: SessionSeq(seq), time: seq, surfaceOp: 'append',
+    data: { turn: 1, step: 1, headerSeq: SessionSeq(headerSeq), message: createDeveloperMessage({
+      source: { kind: 'test' }, content: [{ type: 'tool-addition', toolName: 'search' }],
+    }) },
+  })
+  const user = (seq: number, op: TestSurfaceOp = 'append', sources?: number[]): SessionEvent<'user/message'> => ({
+    type: 'user/message', seq: SessionSeq(seq), time: seq, data: replacementMessage('user'),
+    surfaceOp: surfaceOp(op), ...sources === undefined ? {} : { sourceEventSeqs: sourceSeqs(...sources) },
+  })
+  const system = (seq: number): SessionEvent<'system/message'> => ({
+    type: 'system/message', seq: SessionSeq(seq), time: seq, surfaceOp: 'append',
+    data: { turn: 1, step: 1, message: createSystemMessage('system') },
+  })
+  const decision = (run: () => void): string => {
+    try { run(); return 'accepted' } catch (error: unknown) {
+      if (!(error instanceof Error)) throw error
+      return `${error.name}: ${error.message}`
+    }
+  }
+
+  it('reuses the historical header in full folds and offset windows', () => {
+    const events: SessionEvent[] = [header(0), developer(1, 0)]
+    expect(foldSurface(events).nodes).toEqual([1])
+    expect(new SurfaceManager(events).nodes).toEqual([1])
+    const base = 400_000
+    const window: SessionEvent[] = [header(base), developer(base + 1, base)]
+    expect(new SurfaceManager(window, SessionLogOffset(base)).nodes).toEqual([base + 1])
+    const missing: SessionEvent[] = [developer(base, base - 1)]
+    expect(decision(() => { void new SurfaceManager(missing, SessionLogOffset(base)).nodes }))
+      .toBe('Error: developer/message headerSeq must reference an earlier request/header')
+
+    const original = header(0)
+    const definition = original.data.header.tools?.[0]
+    if (definition === undefined) throw new Error('expected a tool definition')
+    const duplicate: SessionEvent<'request/header'> = {
+      ...original, data: { ...original.data, header: { ...original.data.header, tools: [definition, definition] } },
+    }
+    const ambiguous: SessionEvent[] = [duplicate, developer(1, 0)]
+    const expected = 'Error: developer/message tool-addition "search" must name exactly one tool in headerSeq 0'
+    expect(decision(() => { foldSurface(ambiguous) })).toBe(expected)
+    expect(decision(() => { void new SurfaceManager(ambiguous).nodes })).toBe(expected)
+  })
+
+  it('preserves error priority before projection and protected-head checks', () => {
+    let projected = 0
+    const projection: SessionMessageProjection<'developer/message'> = {
+      type: 'developer/message', project() { projected++; return new Map() },
+    }
+    const invalid: SessionEvent[] = [developer(0, 0)]
+    expect(decision(() => { foldSurface(invalid, [projection]) }))
+      .toBe('Error: developer/message headerSeq must reference an earlier request/header')
+    expect(decision(() => { void new SurfaceManager(invalid, SessionLogOffset(0), [projection]).nodes }))
+      .toBe('Error: developer/message headerSeq must reference an earlier request/header')
+    expect(projected).toBe(0)
+
+    const missingSource: SessionEvent[] = [system(0), user(1, { op: 'replace', startSeq: 0, endSeq: 0 })]
+    const expected = 'Error: surface replace: sourceEventSeqs must include every shadowed surface node; missing 0'
+    expect(decision(() => { foldSurface(missingSource) })).toBe(expected)
+    expect(decision(() => { void new SurfaceManager(missingSource).nodes })).toBe(expected)
+  })
+
+  it('preserves full-fold and manager outcomes for tool and system rewrites', () => {
+    const original = toolResultEvent(SessionSeq(0), 'call')
+    if (original.type !== 'tool/result') throw new Error('expected a tool result')
+    const replacement: SessionEvent<'tool/result'> = {
+      ...original, seq: SessionSeq(1), time: 1,
+      surfaceOp: surfaceOp({ op: 'replace', startSeq: 0, endSeq: 0 }), sourceEventSeqs: sourceSeqs(0),
+      data: { ...original.data, message: { ...original.data.message, content: [{ type: 'text', text: 'changed' }] } },
+    }
+    const altered: SessionEvent<'tool/result'> = {
+      ...replacement, data: { ...replacement.data, message: { ...replacement.data.message, toolCallId: ToolCallId('other') } },
+    }
+    const cases: { events: SessionEvent[]; expected: string }[] = [
+      { events: [original, replacement], expected: 'accepted' },
+      { events: [original, altered], expected: 'Error: tool/result surface replacement may change only content' },
+      { events: [system(0), user(1, { op: 'replace', startSeq: 0, endSeq: 0 }, [0])], expected: 'Error: surface replace: node 0 holds the system prompt and may be rewritten only by a system/message over exactly that node' },
+      { events: [user(0), { ...replacement }], expected: 'Error: tool/result surface replacement must target a current tool/result' },
+    ]
+    for (const { events, expected } of cases) {
+      expect(decision(() => { foldSurface(events) })).toBe(expected)
+      expect(decision(() => { void new SurfaceManager(events).nodes })).toBe(expected)
+    }
+    const base = 400_000
+    const window: SessionEvent[] = [system(base), user(base + 1, { op: 'replace', startSeq: base, endSeq: base }, [base])]
+    expect(decision(() => { void new SurfaceManager(window, SessionLogOffset(base)).nodes }))
+      .toBe('Error: surface replace: node 0 holds the system prompt and may be rewritten only by a system/message over exactly that node')
+  })
+
+  it('keeps projection context and pending candidate identities unchanged', () => {
+    const base = 400_000
+    const events: SessionEvent[] = [user(base)]
+    const seen: { event: SessionEvent; context: SessionMessageProjectionContext }[] = []
+    const projection: SessionMessageProjection<'turn/start'> = {
+      type: 'turn/start', project(event, context) { seen.push({ event, context }); return new Map() },
+    }
+    const manager = new SurfaceManager(events, SessionLogOffset(base), [projection])
+    const nodes = manager.nodes
+    const first: SessionEvent<'turn/start'> = { type: 'turn/start', seq: SessionSeq(base + 1), time: 1, data: { turn: 1 } }
+    manager.validateNext(first)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.event).toBe(first)
+    expect(seen[0]?.context.events).toBe(events)
+    expect(seen[0]?.context.baseSeq).toBe(base)
+    expect(seen[0]?.context.nodes).toBe(nodes)
+    events.push(first)
+    expect(manager.nodes).toBe(nodes)
+    expect(seen).toHaveLength(1)
+    const second: SessionEvent<'turn/start'> = { type: 'turn/start', seq: SessionSeq(base + 2), time: 2, data: { turn: 2 } }
+    manager.validateNext(second)
+    expect(seen[1]?.context.events).toBe(events)
+    expect(seen[1]?.context.messages).toBe(seen[0]?.context.messages)
+    expect(seen[1]?.context.nodes).toBe(nodes)
+    events.push({ ...second })
+    expect(manager.nodes).toBe(nodes)
+    expect(seen).toHaveLength(3)
+    expect(seen[2]?.event).toBe(events[2])
+
+    const complete: SessionEvent[] = [user(0), { type: 'turn/start', seq: SessionSeq(1), time: 1, data: { turn: 1 } }]
+    let captured: SessionMessageProjectionContext | undefined
+    const fullProjection: SessionMessageProjection<'turn/start'> = {
+      type: 'turn/start', project(_event, context) { captured = context; return new Map() },
+    }
+    expect(foldSurface(complete, [fullProjection]).nodes).toEqual([0])
+    expect(captured?.events).toBe(complete)
+    expect(captured?.baseSeq).toBe(0)
   })
 })

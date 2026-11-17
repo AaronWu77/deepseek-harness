@@ -55,15 +55,6 @@ type CurrentCheckpointIdentity = CheckpointIdentity & {
   inheritedEventCount: SessionLogOffset
 }
 
-/** Refusal to cache a live cut that has no durable Session checkpoint. */
-class SessionCheckpointUnavailableError extends Error {
-  readonly code = 'SESSION_CHECKPOINT_UNAVAILABLE'
-  constructor(session: Session) {
-    super(`Session "${session.id}" has no durable writer checkpoint. The projection cache was not updated.`)
-    this.name = 'SessionCheckpointUnavailableError'
-  }
-}
-
 const PREDECESSOR_TITLE_KEY = 'title' as Extract<keyof SessionProjectionMap, string>
 
 export { checkpointIdentity, checkpointRecord, checkpointRow, projectionCacheDomainSpec } from './spec.ts'
@@ -262,7 +253,6 @@ export class SessionProjectionCache extends Service {
    * fail-soft paths contain it.
    * @param session - the live session to checkpoint.
    * @returns resolution after durability and event emission.
-   * @throws when a live Session has no durable writer acknowledgement or the cache write fails.
    */
   async write(session: Session): Promise<void> {
     const rows = this.ctx.sessionProjections.checkpoint(session)
@@ -274,9 +264,7 @@ export class SessionProjectionCache extends Service {
     // from events no stored log contains). At detach the store entry is
     // already gone; persistence's own retirement drain covers that path and
     // any residual overreach is caught by the cold read's anchored floor.
-    if (this.ctx.sessions.get(session.id) === session && !await this.ctx.sessions.flush(session)) {
-      throw new SessionCheckpointUnavailableError(session)
-    }
+    if (this.ctx.sessions.get(session.id) === session) await this.ctx.sessions.flush(session)
     await this.put(
       session.id,
       identityOf(session.header, session.inheritedEventCount),

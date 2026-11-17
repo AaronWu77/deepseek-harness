@@ -24,9 +24,7 @@ async function boot() {
   const locale = new LocaleRuntime(ctx)
   ctx.provide('locale', locale)
   const f = fixture({ subscribe: false })
-  const unregisterDecoder = vi.fn()
-  const registerDecoder = vi.fn(() => unregisterDecoder)
-  ctx.provide('configForms', { get: () => f.scope, registerDecoder } as never)
+  ctx.provide('configForms', { get: () => f.scope } as never)
   ctx.provide('connection', {
     interactions: 'answer', isLoopback: true,
     generation: { getSnapshot: () => undefined, subscribe: () => () => {} },
@@ -38,30 +36,29 @@ async function boot() {
       open: async function* () { throw new Error('unexpected stream') } },
   } satisfies ConnectionHandle)
   await ctx.plugin({ inject: gatewayInject, apply: applyGateway })
-  return { ctx, locale, registerDecoder, unregisterDecoder }
+  return { ctx, locale }
 }
 
 describe('RG Gateway teardown', () => {
   it('parks only UI while Session is absent and restores it after remount', async () => {
-    const { ctx, locale, registerDecoder, unregisterDecoder } = await boot()
+    const { ctx, locale } = await boot()
     const feature = ctx.plugin({ inject, apply: (scope: Context) => mountRg(scope, {
       package: '@fixture/rg', descriptors: [descriptor('reviewGated', 'newTask')],
     }) })
     await feature
     expect(ctx.get('remote.reviewGated')).toBeDefined()
-    expect(registerDecoder).not.toHaveBeenCalled()
+    expect(locale.bind('review-gated')('effectiveHint')).toBe('effectiveHint')
     const contribution = { package: '@fixture/session', descriptors: [descriptor('session', 'modelCatalog')] }
     const unmountSession = await ctx.remote.$mount(contribution)
-    await vi.waitFor(() => { expect(registerDecoder).toHaveBeenCalledTimes(1) })
+    await vi.waitFor(() => { expect(locale.bind('review-gated')('effectiveHint')).not.toBe('effectiveHint') })
     expect(locale.bind('review-gated')('effectiveHint')).not.toBe('effectiveHint')
     await unmountSession()
-    expect(unregisterDecoder).toHaveBeenCalledTimes(1)
     expect(locale.bind('review-gated')('effectiveHint')).toBe('effectiveHint')
     expect(ctx.get('remote.reviewGated')).toBeDefined()
     const unmountReplacement = await ctx.remote.$mount(contribution)
-    await vi.waitFor(() => { expect(registerDecoder).toHaveBeenCalledTimes(2) })
+    await vi.waitFor(() => { expect(locale.bind('review-gated')('effectiveHint')).not.toBe('effectiveHint') })
     await feature.dispose()
-    expect(unregisterDecoder).toHaveBeenCalledTimes(2)
+    expect(locale.bind('review-gated')('effectiveHint')).toBe('effectiveHint')
     expect(ctx.get('remote.reviewGated')).toBeUndefined()
     await unmountReplacement()
     await ctx.fiber.dispose()

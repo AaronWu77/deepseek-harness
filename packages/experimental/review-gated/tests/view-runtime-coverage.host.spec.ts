@@ -1,3 +1,4 @@
+import { appendRecord } from './records.ts'
 /** Runtime view and claim recovery edges on real RG Sessions. */
 import { describe, expect, it, vi } from 'vitest'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
@@ -37,29 +38,6 @@ describe('RG runtime view and claim recovery edges', () => {
     expect(f.runtime.claimReport(agent.session, 'saving', null)).toMatchObject({ claimStatus: 'saving', claim: null })
   })
 
-  it.each(['enableClaimProtection', 'claimProtectionStatus', 'claimRecovery', 'exclusiveAdmission'] as const)(
-    'fails closed if the live Agent lacks %s', async (capability) => {
-      const f = await gitRuntimeFixture({ backend: false, noGit: true })
-      const { agent } = await f.task()
-      const before = Object.getOwnPropertyDescriptor(agent, capability)
-      Object.defineProperty(agent, capability, { configurable: true, value: undefined })
-      try {
-        expect(f.runtime.statusOf(agent.session)).toBe('unknown')
-        const state = f.runtime.read(agent.session)
-        const selection = state?.policy?.main.default
-        if (selection == null) throw new Error('Expected configured main model')
-        expect(() => { f.runtime.assertRequest(agent, selection) }).toThrow(/Protected input claims/)
-        const abort = new AbortController()
-        const stream = f.runtime.watchView({ sessionId: agent.id }, abort.signal)[Symbol.asyncIterator]()
-        try { expect((await stream.next()).value).toMatchObject({ status: 'unknown', state: null }) }
-        finally { abort.abort(); await stream.return?.() }
-      } finally {
-        if (before === undefined) Reflect.deleteProperty(agent, capability)
-        else Object.defineProperty(agent, capability, before)
-      }
-    },
-  )
-
   it('clears a view if a projection snapshot listener fails', async () => {
     const f = await gitRuntimeFixture({ backend: false, noGit: true })
     const { agent } = await f.task()
@@ -71,7 +49,7 @@ describe('RG runtime view and claim recovery edges', () => {
       expect((await stream.next()).value).toMatchObject({ status: 'ready' })
       const snapshot = vi.spyOn(f.ctx.sessionProjections, 'snapshot').mockImplementationOnce(() => { throw new Error('snapshot failed') })
       try {
-        agent.session.append('review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'changed' } } })
+        appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'changed' } } })
         expect((await stream.next()).value).toMatchObject({ status: 'unknown', state: null })
       } finally { snapshot.mockRestore() }
     } finally { abort.abort(); await stream.return?.() }

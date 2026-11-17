@@ -17,15 +17,6 @@ export const name = 'session-checkpoint-policy'
 /** Services whose request, tool, session, and persistence boundaries this policy joins. */
 export const inject = ['llm', 'sessionPersistence', 'sessions', 'tools']
 
-/** Expected refusal when no writer acknowledges the current Session. */
-class SessionCheckpointUnavailableError extends Error {
-  readonly code = 'SESSION_CHECKPOINT_UNAVAILABLE'
-  constructor(session: Session) {
-    super(`Session "${session.id}" has no durable writer checkpoint. Inspect persistence before continuing.`)
-    this.name = 'SessionCheckpointUnavailableError'
-  }
-}
-
 /**
  * Delay construction of the downstream model stream until the complete logged
  * request prefix is durable. A checkpoint rejection prevents adapter dispatch.
@@ -41,7 +32,7 @@ function afterCheckpoint(
   next: () => AsyncIterable<StreamChunk>,
 ): AsyncIterable<StreamChunk> {
   return (async function* (): AsyncIterable<StreamChunk> {
-    if (!await ctx.sessions.flush(session)) throw new SessionCheckpointUnavailableError(session)
+    await ctx.sessions.flush(session)
     yield* next()
   })()
 }
@@ -78,16 +69,15 @@ export function apply(ctx: Context): void {
 
   ctx.on('tools/execute', async (exec, next): Promise<ToolExecutionResult> => {
     if (exec.agent === undefined || exec.parent !== undefined) return next()
-    const durable = await ctx.sessions.flush(exec.agent.session)
+    await ctx.sessions.flush(exec.agent.session)
     if (exec.signal.aborted) return abortedBeforeDispatchResult()
-    if (!durable) throw new SessionCheckpointUnavailableError(exec.agent.session)
     return next()
   })
 
   // Before each request, persist everything committed by the preceding step;
   // the first step's call is an intentional no-op beyond any prompt intake.
   ctx.on('agent/pre-step', async ({ agent }, next): Promise<PreStepDecision> => {
-    if (!await ctx.sessions.flush(agent.session)) throw new SessionCheckpointUnavailableError(agent.session)
+    await ctx.sessions.flush(agent.session)
     return next()
   })
 }

@@ -28,6 +28,97 @@ describe('Session store membership', () => {
     await ctx.fiber.dispose()
   })
 
+  it('keeps one identity across distinct traceable proxies of the same store', async () => {
+    const first = await ctx.plugin({ name: 'identity-reader-a', inject: ['sessions'], apply() {} })
+    const second = await ctx.plugin({ name: 'identity-reader-b', inject: ['sessions'], apply() {} })
+    const rootStore = ctx.sessions
+    const firstStore = first.ctx.sessions
+    const secondStore = second.ctx.sessions
+    expect(firstStore).not.toBe(secondStore)
+    expect(typeof rootStore.identity).toBe('symbol')
+    expect(Symbol.keyFor(rootStore.identity)).toBeUndefined()
+    expect(ctx.get('sessions')?.identity).toBe(rootStore.identity)
+    expect(firstStore.identity).toBe(rootStore.identity)
+    expect(secondStore.identity).toBe(rootStore.identity)
+    expect(first.ctx.get('sessions')?.identity).toBe(rootStore.identity)
+    await first.dispose()
+    expect(ctx.sessions.identity).toBe(rootStore.identity)
+  })
+
+  it('distinguishes isolated and independently mounted stores', async () => {
+    const original = ctx.sessions.identity
+    const isolated = ctx.isolate('sessions')
+    const isolatedFiber = await isolated.plugin(SessionStore)
+    const other = new Context()
+    try {
+      await other.plugin(SessionStore)
+      expect(isolated.sessions.identity).not.toBe(original)
+      expect(other.sessions.identity).not.toBe(original)
+      expect(other.sessions.identity).not.toBe(isolated.sessions.identity)
+      expect(ctx.sessions.identity).toBe(original)
+    } finally {
+      await isolatedFiber.dispose()
+      await other.fiber.dispose()
+    }
+    expect(isolated.get('sessions')).toBeUndefined()
+    expect(ctx.sessions.identity).toBe(original)
+  })
+
+  it('retains its identity through unload and changes after replacement', async () => {
+    const owner = new Context()
+    try {
+      const first = await owner.plugin(SessionStore)
+      const retained = owner.sessions
+      const identity = retained.identity
+      expect(typeof identity).toBe('symbol')
+      await first.dispose()
+      expect(owner.get('sessions')).toBeUndefined()
+      expect(retained.identity).toBe(identity)
+      const second = await owner.plugin(SessionStore)
+      expect(owner.sessions.identity).not.toBe(identity)
+      expect(retained.identity).toBe(identity)
+      await second.dispose()
+      expect(owner.get('sessions')).toBeUndefined()
+    } finally { await owner.fiber.dispose() }
+  })
+
+  it('keeps the store identity out of serialized Session data', () => {
+    const identity = ctx.sessions.identity
+    const session = ctx.sessions.create(SessionId('identity-data'))
+    session.append('turn/start', { turn: 1 })
+    const header = session.header
+    const events = session.snapshotEvents()
+    expect(typeof identity).toBe('symbol')
+    expect(Reflect.ownKeys(header)).not.toContain('identity')
+    expect(Reflect.ownKeys(events[0]!)).not.toContain('identity')
+    expect(Object.values(header)).not.toContain(identity)
+    expect(Object.values(events[0]!)).not.toContain(identity)
+    const serialized = JSON.stringify({ header, events })
+    expect(serialized).not.toContain('"identity":')
+    expect(JSON.parse(serialized)).toEqual({ header, events })
+    expect(ctx.sessions.identity).toBe(identity)
+  })
+
+  it('follows the actual store across silent A-to-B-to-A replacement', async () => {
+    const owner = new Context()
+    try {
+      const first = await owner.plugin(SessionStore)
+      const isolated = owner.isolate('sessions')
+      const second = await isolated.plugin(SessionStore)
+      const a = owner.sessions
+      const b = isolated.sessions
+      const original = a.identity
+      expect(b.identity).not.toBe(original)
+      first.ctx.set('sessions', b)
+      expect(owner.sessions.identity).toBe(b.identity)
+      expect(owner.get('sessions')?.identity).toBe(b.identity)
+      first.ctx.set('sessions', a)
+      expect(owner.sessions.identity).toBe(original)
+      await second.dispose()
+      await first.dispose()
+    } finally { await owner.fiber.dispose() }
+  })
+
   it.each([
     { name: 'events', append: (session: Session) => session.append('turn/start', { turn: 1 }) },
     { name: 'plugin records', append: (session: Session) => appendPluginRecord(session, 'plugin:test/store-membership', { value: 1 }) },

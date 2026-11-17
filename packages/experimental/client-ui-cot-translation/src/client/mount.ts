@@ -22,6 +22,7 @@ export const inject = ['remote', 'slots', 'locale', 'configForms']
 async function registerUi(ctx: Context, lifetime: AbortController): Promise<void> {
   let readTask: Promise<RemoteResult<CotTranslationSnapshot>> | undefined
   let updating: Promise<void> | undefined
+  let acceptSnapshot: ((snapshot: CotTranslationSnapshot) => void) | undefined
   let revision = 0, lastReadRevision = -1, acceptedRevision = -1
   const isDisposed = (): boolean => lifetime.signal.aborted || ctx.fiber.uid === null
   ctx.effect(() => async () => {
@@ -48,26 +49,35 @@ async function registerUi(ctx: Context, lifetime: AbortController): Promise<void
       if (observed === revision) return result
     }
   }
-  let initial: RemoteResult<CotTranslationSnapshot> | undefined
-  try { initial = await read() } catch (error) {
-    if (isDisposed()) return
-    throw error
+  const load = async (): Promise<CotTranslationSnapshot | undefined> => {
+    try {
+      const result = await read()
+      if (result === undefined) return undefined
+      if (result.ok) return result.value
+    } catch (_error) {
+      if (isDisposed()) return undefined
+    }
+    ctx.logger.warn('cot-translation: could not read Host preferences and request limits. Original reasoning remains available. Reconnect or reload to retry')
+    return undefined
   }
-  if (initial === undefined) return
-  if (!initial.ok) throw initial.error
-  const preferences = createSnapshotStore(initial.value.preferences)
-  const translationLimit = createSnapshotStore(initial.value.maxTextChars)
-  const availableProviders = createSnapshotStore(initial.value.availableProviders)
-  acceptedRevision = lastReadRevision
+  updating = (async () => {
+    const initial = await load()
+    if (initial !== undefined) {
+      acceptSnapshot = install(initial)
+      acceptedRevision = lastReadRevision
+    }
+  })()
+  await updating
+  updating = undefined
+  if (revision !== lastReadRevision && !isDisposed()) refresh()
   function refresh(): void {
-    if (updating !== undefined || acceptedRevision < 0 || isDisposed()) return
+    if (updating !== undefined || isDisposed()) return
     updating = (async () => {
       try {
-        const result = await read()
-        if (result?.ok) {
-          preferences.set(result.value.preferences)
-          translationLimit.set(result.value.maxTextChars)
-          availableProviders.set(result.value.availableProviders)
+        const result = await load()
+        if (result !== undefined) {
+          if (acceptSnapshot === undefined) acceptSnapshot = install(result)
+          else acceptSnapshot(result)
           acceptedRevision = lastReadRevision
         }
       } catch (_error) {
@@ -78,41 +88,52 @@ async function registerUi(ctx: Context, lifetime: AbortController): Promise<void
       if (revision !== lastReadRevision && !isDisposed()) refresh()
     })
   }
-  const scope = ctx.configForms.get<CotTranslationPreferences>('cot-translation')
-  ctx.effect(() => scope.subscribe(invalidate))
-  ctx.effect(() => ctx.locale.register(NS, { en, zh, ja, es, fr, de, ru, pt }))
-  const form = new TranslationPreferencesForm(scope)
-  ctx.effect(() => () => { form.dispose() })
-  const injected = (sessionId: SessionId): TranslationBodyInjected => ({
-    hooks: { preferences, translationLocale: ctx.locale, translationLimit },
-    translate: async (request, signal) => {
-      if (acceptedRevision !== revision) refresh()
-      while (updating !== undefined) await updating
-      signal.throwIfAborted()
-      const accepted = preferences.getSnapshot()
-      if (isDisposed() || acceptedRevision !== revision || request.provider !== accepted.provider
-        || (accepted.targetLanguage !== 'auto' && request.targetLanguage !== accepted.targetLanguage)
-        || request.text.length > translationLimit.getSnapshot()) throw new Error('Translation preferences or limits changed')
-      const result = await ctx.remote.cotTranslation.translate({ ...request, sessionId }, signal)
-      if (!result.ok) throw result.error
-      return result.value
-    },
-  })
-  ctx.slots.inject('conversation.chat.reasoning.body', () => ctx.slots.register({
-    name: 'conversation.chat.reasoning.body', locale: NS,
-    inject: injected,
-  }, TranslationBody))
-  ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
-    name: 'plugins.bundle.config', key: '@deepseek-ai/dsh-experimental-cot-translation-bundle', locale: NS,
-    inject: () => {
-      const face = form.inject()
-      return { ...face, hooks: { ...face.hooks, availableProviders }, refreshProviders: invalidate }
-    },
-  }, TranslationSettings))
+  function install(snapshot: CotTranslationSnapshot): (value: CotTranslationSnapshot) => void {
+    const preferences = createSnapshotStore(snapshot.preferences)
+    const translationLimit = createSnapshotStore(snapshot.maxTextChars)
+    const availableProviders = createSnapshotStore(snapshot.availableProviders)
+    const scope = ctx.configForms.get<CotTranslationPreferences>('cot-translation')
+    ctx.effect(() => scope.subscribe(invalidate))
+    ctx.effect(() => ctx.locale.register(NS, { en, zh, ja, es, fr, de, ru, pt }))
+    const form = new TranslationPreferencesForm(scope)
+    ctx.effect(() => () => { form.dispose() })
+    const injected = (sessionId: SessionId): TranslationBodyInjected => ({
+      hooks: { preferences, translationLocale: ctx.locale, translationLimit },
+      translate: async (request, signal) => {
+        if (acceptedRevision !== revision) refresh()
+        while (updating !== undefined) await updating
+        signal.throwIfAborted()
+        const accepted = preferences.getSnapshot()
+        if (isDisposed() || acceptedRevision !== revision || request.provider !== accepted.provider
+          || (accepted.targetLanguage !== 'auto' && request.targetLanguage !== accepted.targetLanguage)
+          || request.text.length > translationLimit.getSnapshot()) throw new Error('Translation preferences or limits changed')
+        const result = await ctx.remote.cotTranslation.translate({ ...request, sessionId }, signal)
+        if (!result.ok) throw result.error
+        return result.value
+      },
+    })
+    ctx.slots.inject('conversation.chat.reasoning.body', () => ctx.slots.register({
+      name: 'conversation.chat.reasoning.body', locale: NS,
+      inject: injected,
+    }, TranslationBody))
+    ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+      name: 'plugins.bundle.config', key: '@deepseek-ai/dsh-experimental-cot-translation-bundle', locale: NS,
+      inject: () => {
+        const face = form.inject()
+        return { ...face, hooks: { ...face.hooks, availableProviders }, refreshProviders: invalidate }
+      },
+    }, TranslationSettings))
+    return (value) => {
+      preferences.set(value.preferences)
+      translationLimit.set(value.maxTextChars)
+      availableProviders.set(value.availableProviders)
+    }
+  }
 }
 
 /**
  * Mount Session-bound translation and withdraw UI before its generated Remote.
+ * Failed metadata reads retain original reasoning and retry on configuration updates or reconnect.
  * @param ctx - Client plugin lifetime.
  * @param contribution - generated controller Remote definitions.
  * @returns disposer that removes both contributions.

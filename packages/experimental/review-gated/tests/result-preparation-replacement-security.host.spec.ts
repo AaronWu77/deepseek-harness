@@ -1,3 +1,5 @@
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
+import { appendRecord } from './records.ts'
 /** An obsolete result preparation cannot authorize a parent notification. */
 import { describe, expect, it, vi } from 'vitest'
 import { gitHandoff, gitRuntimeFixture } from './fixtures/git-runtime.ts'
@@ -11,11 +13,11 @@ describe('RG result preparation replacement', () => {
     const release = f.gate()
     let intercepted = false
     const off = f.ctx.on('session/flush', async (session) => {
-      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => event.type === 'review-gated/result-prepared')) return
+      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-prepared')) return
       intercepted = true
       const state = f.runtime.read(session)
       if (state?.task?.active?.status !== 'saving') throw new Error('Expected a saving role')
-      session.append('review-gated/state', { version: 1, state })
+      appendRecord(session, 'plugin:review-gated/state', { version: 1, state })
       entered.resolve(undefined)
       await release.promise
     })
@@ -35,8 +37,8 @@ describe('RG result preparation replacement', () => {
       const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
       try {
         const events = (await stored.read()).events
-        expect(events.some(event => event.type === 'review-gated/result-prepared')).toBe(true)
-        expect(events.some(event => event.type === 'review-gated/result-confirmed')).toBe(false)
+        expect(events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-prepared')).toBe(true)
+        expect(events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(false)
       } finally { await stored.close() }
     } finally { off(); release.resolve(undefined); sent.mockRestore() }
   })

@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for 2026-11-17-rg-plugin-only.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/persistence-changes/2026-11-17-rg-plugin-only.md
+/:
+  en: 3d5a424ae7d7e46b
+  zh: c22a8e4a62d8cc1a
+/2026-11-17-rg-plugin-only:
+  en: 3437eea7d13fddfc
+  zh: 29883dfb8c72c12b
+/2026-11-17-rg-plugin-only/summary:
+  en: ab68bfd4f0066ea6
+  zh: 7e7d2d3760b1aaaa
+/2026-11-17-rg-plugin-only/table-of-contents:
+  en: 6cf314a069ceb451
+  zh: 9adff678e9ecab3b
+/2026-11-17-rg-plugin-only/declaration:
+  en: 6907136f28e48c90
+  zh: 02f8298485f3d8e7
+/2026-11-17-rg-plugin-only/compatibility:
+  en: 63f7bdeeda53a28b
+  zh: 6bda91346bbc181d
+/2026-11-17-rg-plugin-only/verification:
+  en: b613021c474d7404
+  zh: 0a319971c2fcf362
+/2026-11-17-rg-plugin-only/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269

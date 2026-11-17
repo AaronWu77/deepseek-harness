@@ -55,6 +55,84 @@ async function requestBody(request: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+it.skipIf(MODE === 'record')('boots with unavailable translation metadata, retains original reasoning and recovers after provider invalidation', async () => {
+  const resources: { scaffold?: WebScaffold; browser?: Browser } = {}
+  const root = await mkdtemp(join(tmpdir(), 'dsh-cot-boot-'))
+  let translations = 0
+  const server = createServer((_request, response) => {
+    translations += 1
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify([{ translations: [{ text: BING_TRANSLATION, to: 'zh-Hans' }] }]))
+  })
+  onTestFinished(async () => {
+    try {
+      await resources.browser?.close()
+    } finally {
+      try {
+        await resources.scaffold?.close()
+      } finally {
+        const closed = new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+        server.closeAllConnections()
+        await closed
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('Expected an allocated translation listener')
+  const overlay = join(root, 'translator.patch.yml')
+  await writeFile(overlay, JSON.stringify([{ id: 'translator', config: {
+    bingEndpoint: `http://127.0.0.1:${address.port}/bing`,
+  } }]))
+  const scaffold = await launchWebScaffold({
+    profile: { packages: [{ dir: BUNDLE, enabled: true }] }, extraOverlayPath: overlay,
+    replayFixture: FIXTURE, compareReplaySession: false,
+  })
+  resources.scaffold = scaffold
+  const browser = await chromium.launch()
+  resources.browser = browser
+  const context = await browser.newContext({ locale: ZH_BROWSER_LOCALE, timezoneId: 'Asia/Shanghai' })
+  const page = await context.newPage()
+  const console = watchConsole(page)
+  const metadataWarnings: string[] = []
+  page.on('console', (message) => {
+    if (message.text().includes('could not read Host preferences and request limits')) metadataWarnings.push(message.text())
+  })
+  let refuseMetadata = true
+  await page.route('**/api/cotTranslation/limits', async (route) => {
+    if (refuseMetadata) await route.fulfill({ status: 503, body: 'Metadata temporarily unavailable' })
+    else await route.continue()
+  })
+  onTestFailed(async () => { await saveFailureShot(page, 'web-e2e-cot-boot') })
+  await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
+  await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
+  const [prompt] = fixtureUserPrompts(await readFile(FIXTURE, 'utf8'))
+  if (prompt === undefined) throw new Error('Recorded reasoning requires a user prompt')
+  const settled = scaffold.whenTurnSettled()
+  const composer = page.locator('[data-composer-input]').first()
+  await composer.fill(prompt)
+  await composer.press('Enter')
+  const sessionId = await settled
+  await page.getByText('LIGHTHOUSE', { exact: true }).waitFor()
+  const reasoning = page.locator('[data-variant="think"]').first()
+  await expandOwningTurnProcess(page, reasoning)
+  await reasoning.locator('[data-disclosure-row]').first().click()
+  await reasoning.getByText(ORIGINAL, { exact: true }).waitFor()
+  expect(await reasoning.locator('[data-cot-translation]').count()).toBe(0)
+  expect(translations).toBe(0)
+  expect(metadataWarnings.length).toBeGreaterThan(0)
+  const originalEvents = await readPersistedEvents(scaffold, sessionId)
+  refuseMetadata = false
+  scaffold.ctx.emit('llm/adapters-updated')
+  await reasoning.locator('[data-cot-translation="true"]').getByText(BING_TRANSLATION, { exact: true }).waitFor()
+  expect(translations).toBe(1)
+  expect((await readPersistedEvents(scaffold, sessionId)).filter(event => !isTranslationRecord(event))).toEqual(originalEvents)
+  expect(console.pageErrors).toEqual([])
+  expect(console.warnings).toEqual([])
+})
+
 it.skipIf(MODE === 'record')('persists Bing reasoning translation across reopen and browser reload, changes provider and language, retains originals on failure and cancels uncached requests', async () => {
   const resources: { scaffold?: WebScaffold; browser?: Browser } = {}
   const root = await mkdtemp(join(tmpdir(), 'dsh-cot-translation-'))

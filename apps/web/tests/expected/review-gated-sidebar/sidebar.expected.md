@@ -1,0 +1,31 @@
+- text: RG Use rg_worker, then rg_reviewer, and report both result markers. 审查者报告通过 执行次数 1/2 · 审查次数 1/2
+- region "RG 详情":
+  - region "任务角色":
+    - article:
+      - heading "主代理" [level=3]
+      - paragraph: 空闲
+      - paragraph: "最近实际请求模型: rg-scripted/rg-scripted · off"
+      - paragraph: "下次请求模型: rg-scripted/rg-scripted · off"
+    - article:
+      - heading "执行者 · 最近执行尝试" [level=3]
+      - paragraph: 已完成
+      - paragraph: "已接纳的角色模型: rg-scripted/rg-scripted · off"
+      - button "尝试详情"
+    - article:
+      - heading "审查者 · 最近审查尝试" [level=3]
+      - paragraph: 已完成
+      - paragraph: "已接纳的角色模型: rg-scripted/rg-scripted · off"
+      - button "尝试详情"
+    - paragraph: 仅显示当前运行和最近的执行者、审查者尝试。角色尝试每次只运行一个。
+  - button "任务详情"
+  - heading "最近报告" [level=3]
+  - paragraph: REVIEW_OK
+  - paragraph: 审查者报告通过只适用于所列范围和修改版本，不代表代码已被证明正确。
+  - text: 检查范围 probe.txt
+  - heading "报告中的验证" [level=4]
+  - list:
+    - listitem: Inspected probe.txt
+  - heading "未验证部分" [level=4]
+  - list
+  - button "切换到新任务"
+  - button "重新核对受审文件"

@@ -1,3 +1,5 @@
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
+import { appendRecord, durableEvents, recordOf } from './records.ts'
 /** Stored review results remain untrusted until the terminal durability barrier succeeds. */
 import { Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -32,11 +34,11 @@ describe('RG terminal durability', { timeout: 120_000 }, () => {
       const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
       try {
         const events = (await stored.read()).events
-        expect(events.some(event => event.type === 'review-gated/result-prepared')).toBe(true)
-        expect(events.some(event => event.type === 'review-gated/result-confirmed')).toBe(false)
+        expect(events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-prepared')).toBe(true)
+        expect(events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(false)
         const recovered = f.ctx.sessionProjections.restore({}, events, SessionLogOffset(0), stored.header, stored.inheritedEventCount)
-        expect(recovered.snapshot.values.reviewGated?.task?.reviewStatus).not.toBe('reported-pass')
-        expect(recovered.snapshot.values.reviewGated?.task?.active).toMatchObject({ status: 'saving', report: null })
+        expect(recovered.snapshot.values.reviewGated?.state?.task?.reviewStatus).not.toBe('reported-pass')
+        expect(recovered.snapshot.values.reviewGated?.state?.task?.active).toMatchObject({ status: 'saving', report: null })
         checkpoint = recovered
         preparedCount = events.length
       } finally { await stored.close() }
@@ -47,26 +49,30 @@ describe('RG terminal durability', { timeout: 120_000 }, () => {
     const reopened = await f.ctx.sessionPersistence.open(agent.id, 'read')
     try {
       const events = (await reopened.read()).events
-      const confirmed = events.find(event => event.type === 'review-gated/result-confirmed')
+      const confirmed = events.find(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')
       expect(confirmed).toBeDefined()
       const full = f.ctx.sessionProjections.restore({}, events, SessionLogOffset(0), reopened.header, reopened.inheritedEventCount)
-      expect(full.snapshot.values.reviewGated?.task?.reviewStatus).toBe('reported-pass')
-      if (checkpoint === undefined || confirmed === undefined || confirmed.type !== 'review-gated/result-confirmed') {
+      expect(full.snapshot.values.reviewGated?.state?.task?.reviewStatus).toBe('reported-pass')
+      const confirmation = confirmed === undefined ? undefined : recordOf(confirmed)
+      if (checkpoint === undefined || confirmed === undefined || confirmation?.type !== 'plugin:review-gated/result-confirmed') {
         throw new Error('The result records are required')
       }
       const suffix = f.ctx.sessionProjections.restore(checkpoint.checkpoint, events.slice(preparedCount),
         SessionLogOffset(preparedCount), reopened.header, reopened.inheritedEventCount)
       expect(suffix.snapshot.values.reviewGated).toEqual(full.snapshot.values.reviewGated)
       const beforeConfirmation = events.slice(0, events.indexOf(confirmed)).reduce(foldRgState, rgProjectionDefinition.init())
-      const mismatch = { ...confirmed, data: { ...confirmed.data, runId: brandString<RgRunId>('another-run') } }
+      const mismatch = durableEvents([{ ...confirmed, data: { ...confirmation.data, runId: brandString<RgRunId>('another-run') } }])[0]!
       expect(foldRgState(beforeConfirmation, mismatch).failure).toContain('RG_STATE_INVALID')
-      const replacement = events.find(event => event.type === 'review-gated/state' && event.data.state?.task === null)
+      const replacement = events.find((event) => {
+        const record = recordOf(event)
+        return record?.type === 'plugin:review-gated/state' && record.data.state?.task === null
+      })
       if (replacement === undefined) throw new Error('Missing earlier RG state')
       expect(foldRgState(foldRgState(beforeConfirmation, replacement), confirmed).failure).toContain('RG_STATE_INVALID')
       const committed = foldRgState(beforeConfirmation, confirmed)
       expect(foldRgState(committed, confirmed).failure).toContain('RG_STATE_INVALID')
       const fork = Session.create(SessionId('fork-during-preparation'), events.slice(0, events.indexOf(confirmed)))
-      fork.append('review-gated/result-confirmed', confirmed.data)
+      appendRecord(fork, 'plugin:review-gated/result-confirmed', confirmation.data)
       const forked = fork.snapshotEvents().reduce(foldRgState, rgProjectionDefinition.init())
       expect(forked.failure).toContain('RG_STATE_INVALID')
       expect(forked.value?.task?.reviewStatus).not.toBe('reported-pass')
@@ -85,7 +91,8 @@ describe('RG terminal durability', { timeout: 120_000 }, () => {
       }
     })
     const offState = f.ctx.on('session/event', (session, event) => {
-      if (session === agent.session && event.type === 'review-gated/state' && event.data.state?.diagnostic?.startsWith('RG_RESULT_SAVE_FAILED')) failed.resolve(undefined)
+      const record = recordOf(event)
+      if (session === agent.session && record?.type === 'plugin:review-gated/state' && record.data.state?.diagnostic?.startsWith('RG_RESULT_SAVE_FAILED')) failed.resolve(undefined)
     })
     try {
       await f.runtime.startRole(agent, 'reviewer', gitHandoff, undefined, new AbortController().signal)
@@ -96,12 +103,12 @@ describe('RG terminal durability', { timeout: 120_000 }, () => {
       const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
       try {
         const events = (await stored.read()).events
-        expect(events.some(event => event.type === 'review-gated/result-prepared')).toBe(true)
-        expect(events.some(event => event.type === 'review-gated/result-confirmed')).toBe(false)
+        expect(events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-prepared')).toBe(true)
+        expect(events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(false)
         const view = f.ctx.sessionProjections.restore(
           {}, events, SessionLogOffset(0), stored.header, stored.inheritedEventCount).snapshot.values.reviewGated
-        expect(view).toMatchObject({ task: { active: null, reviewStatus: 'inconclusive' } })
-        expect(view?.diagnostic).toContain('RG_RESULT_SAVE_FAILED')
+        expect(view).toMatchObject({ state: { task: { active: null, reviewStatus: 'inconclusive' } } })
+        expect(view?.state?.diagnostic).toContain('RG_RESULT_SAVE_FAILED')
       } finally { await stored.close() }
     } finally { offFlush(); offState() }
   })
@@ -127,12 +134,12 @@ describe('RG terminal durability', { timeout: 120_000 }, () => {
       const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
       try {
         const events = (await stored.read()).events
-        expect(events.some(event => event.type === 'review-gated/result-prepared')).toBe(true)
-        expect(events.some(event => event.type === 'review-gated/result-confirmed')).toBe(false)
+        expect(events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-prepared')).toBe(true)
+        expect(events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(false)
         const view = f.ctx.sessionProjections.restore(
           {}, events, SessionLogOffset(0), stored.header, stored.inheritedEventCount).snapshot.values.reviewGated
-        expect(view?.task?.lastWorker).toBeNull()
-        expect(view?.task?.active).toMatchObject({ status: 'saving', report: null })
+        expect(view?.state?.task?.lastWorker).toBeNull()
+        expect(view?.state?.task?.active).toMatchObject({ status: 'saving', report: null })
       } finally { await stored.close() }
     } finally { off(); release.resolve(undefined) }
     await notice
@@ -143,7 +150,7 @@ describe('RG terminal durability', { timeout: 120_000 }, () => {
       const events = (await stored.read()).events
       const view = f.ctx.sessionProjections.restore(
         {}, events, SessionLogOffset(0), stored.header, stored.inheritedEventCount).snapshot.values.reviewGated
-      expect(view?.task?.lastWorker).toMatchObject({ status: 'completed', report: { kind: 'worker', outcome: 'completed' } })
+      expect(view?.state?.task?.lastWorker).toMatchObject({ status: 'completed', report: { kind: 'worker', outcome: 'completed' } })
     } finally { await stored.close() }
   })
 
@@ -173,11 +180,11 @@ describe('RG terminal durability', { timeout: 120_000 }, () => {
     const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
     try {
       const events = (await stored.read()).events
-      expect(events.some(event => event.type === 'review-gated/result-prepared')).toBe(true)
-      expect(events.some(event => event.type === 'review-gated/result-confirmed')).toBe(false)
+      expect(events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-prepared')).toBe(true)
+      expect(events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(false)
       const view = f.ctx.sessionProjections.restore(
         {}, events, SessionLogOffset(0), stored.header, stored.inheritedEventCount).snapshot.values.reviewGated
-      expect(view?.task?.reviewStatus).not.toBe('reported-pass')
+      expect(view?.state?.task?.reviewStatus).not.toBe('reported-pass')
     } finally { await stored.close() }
   })
 })

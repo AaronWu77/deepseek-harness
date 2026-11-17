@@ -77,8 +77,6 @@ interface ActivationBase {
 export type ActivationResource =
   | {
     readonly kind: 'local'
-    readonly lifecycle: 'one-shot' | 'continuable'
-    cancelled: boolean
     readonly handle: AgentHandle
     readonly outputStart: SessionLogOffset
     readonly structured: StructuredAttachment | undefined
@@ -159,7 +157,7 @@ export function captureLocalResult(activation: LocalActivation): SubagentResult 
   // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
   const events = activation.handle.agent.session.snapshotEvents(activation.outputStart)
   const output = finalAssistantOutput(events) ?? []
-  const stopReason = activation.cancelled ? 'aborted' : activation.failureAt === undefined ? epochStopReason(events) : 'error'
+  const stopReason = activation.failureAt === undefined ? epochStopReason(events) : 'error'
   const structured = activation.structured
   if (structured !== undefined) {
     const captured = structured.captured()
@@ -177,19 +175,11 @@ export class ChildLock {
    * Run `operation` after every previously queued operation for `childId`.
    * @param childId - the durable child whose operations are linearized.
    * @param operation - the critical section to run in order.
-   * @param signal - optional cancellation for the caller's wait; the internal tail remains ordered.
-   * @returns the operation's own settlement or an early cancellation of this wait.
+   * @returns the operation's own settlement.
    */
-  run<T>(childId: SessionId, operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    signal?.throwIfAborted()
+  run<T>(childId: SessionId, operation: () => Promise<T>): Promise<T> {
     const previous = this.tails.get(childId) ?? Promise.resolve()
-    let stopWaiting = (): void => {}
-    const guarded = (): Promise<T> => {
-      stopWaiting()
-      signal?.throwIfAborted()
-      return operation()
-    }
-    const result = previous.then(guarded, guarded)
+    const result = previous.then(operation, operation)
     // Absorb rejections in the chaining tail so one failed critical section
     // cannot reject an unrelated later caller.
     const tail = result.then(() => undefined, () => undefined)
@@ -197,13 +187,6 @@ export class ChildLock {
     void tail.then(() => {
       if (this.tails.get(childId) === tail) this.tails.delete(childId)
     })
-    if (signal === undefined) return result
-    return new Promise<T>((resolve, reject) => {
-      const abort = (): void => { cleanup(); reject(signal.reason) }
-      const cleanup = (): void => signal.removeEventListener('abort', abort)
-      stopWaiting = cleanup
-      signal.addEventListener('abort', abort, { once: true })
-      void result.then((value) => { cleanup(); resolve(value) }, (error) => { cleanup(); reject(error) })
-    })
+    return result
   }
 }

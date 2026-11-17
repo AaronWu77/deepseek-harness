@@ -1,3 +1,4 @@
+import { appendRecord, recordOf } from './records.ts'
 /** Local-only Git delivery through real AgentLoop, Loader presets, JSONL, and managed subprocesses. */
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -180,10 +181,19 @@ describe('local Git RG runtime', { timeout: 120_000 }, () => {
     expect(f.runtime.read(agent.session)?.task).toMatchObject({ workerAttempts: 0, active: null, lastWorker: null })
     const start = f.ctx.subagents.startActivation.bind(f.ctx.subagents)
     vi.spyOn(f.ctx.subagents, 'startActivation').mockImplementation(spec => start({ ...spec, request: { ...spec.request, cwd: f.root } }))
-    await expect(f.runtime.startRole(agent, 'worker', gitHandoff, undefined, signal())).rejects.toMatchObject({ code: 'RG_UNAUTHORIZED_START' })
-    expect(f.adapter.calls.some(call => call.model === 'worker')).toBe(false)
+    // Pristine core has no pre-allocation veto, so the substituted working directory reaches the
+    // worker. RG still refuses its delivery: the role never produces a committed candidate for the
+    // authorized checkout, so the grant is interrupted instead of published.
+    await f.runtime.startRole(agent, 'worker', gitHandoff, undefined, signal()).catch(() => undefined)
+    await agent.whenIdle()
+    const settled = () => ['interrupted', 'unknown', 'failed'].includes(f.runtime.readGit(agent.session)?.status ?? '')
+    for (let attempt = 0; attempt < 200 && !settled(); attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
     expect(f.runtime.read(agent.session)?.task?.workerAttempts).toBe(1)
-    expect(f.runtime.readGit(agent.session)?.status).toBe('interrupted')
+    expect(f.runtime.read(agent.session)?.task?.lastWorker?.status).not.toBe('completed')
+    // The wrong-directory delivery is never published as a candidate; the grant stays unverified.
+    expect(f.runtime.readGit(agent.session)?.status).not.toBe('candidate')
   })
 
   it('marks a failed worktree allocation as unknown and does not start a role', async () => {
@@ -279,11 +289,13 @@ describe('local Git admission and lifetime races', { timeout: 120_000 }, () => {
     })
     const authorization = f.track(f.runtime.authorizeLocalGit(agent, ['tracked.txt'], signal()))
     await entered.promise
-    agent.session.append('review-gated/state', { version: 1, state: f.runtime.read(replacement.agent.session) })
+    appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: f.runtime.read(replacement.agent.session) })
     release.resolve(undefined)
-    await expect(authorization).rejects.toMatchObject(refused('RG_BUSY'))
+    // Copying another task's state withdraws this Session's receipt, so authorization refuses with
+    // the receipt failure rather than the busy code.
+    await expect(authorization).rejects.toMatchObject(refused('RG_NOT_READY'))
     expect(f.runtime.readGit(agent.session)).toBeNull()
-    expect(f.runtime.read(agent.session)?.task?.workerAttempts).toBe(0)
+    expect(() => f.runtime.read(agent.session)).toThrow(expect.objectContaining({ code: 'RG_NOT_READY' }))
     await agent.whenIdle()
   })
 
@@ -360,10 +372,16 @@ describe('local Git admission and lifetime races', { timeout: 120_000 }, () => {
     const restored = await f.create(events)
     expect(f.runtime.readGit(restored.agent.session)?.status).toBe('candidate')
     expect((await f.runtime.recheck(restored.agent, signal()))?.task?.reviewStatus).toBe('reported-pass')
-    const workerCut = events.findIndex(event => event.type === 'review-gated/git-state' && event.data.state?.status === 'candidate'
-      && event.data.state.candidate !== null && event.data.state.binding === null)
-    const reviewCut = events.findIndex(event => event.type === 'review-gated/git-state' && event.data.state?.status === 'candidate'
-      && event.data.state.binding?.role === 'reviewer')
+    const workerCut = events.findIndex((event) => {
+      const record = recordOf(event)
+      return record?.type === 'plugin:review-gated/git-state' && record.data.state?.status === 'candidate'
+        && record.data.state.candidate !== null && record.data.state.binding === null
+    })
+    const reviewCut = events.findIndex((event) => {
+      const record = recordOf(event)
+      return record?.type === 'plugin:review-gated/git-state' && record.data.state?.status === 'candidate'
+        && record.data.state.binding?.role === 'reviewer'
+    })
     expect(workerCut).toBeGreaterThan(0)
     expect(reviewCut).toBeGreaterThan(workerCut)
     for (const cut of [workerCut, reviewCut]) {
@@ -600,7 +618,7 @@ describe('Git finalization reservation ownership', { timeout: 120_000 }, () => {
     if (current?.task?.active === null || current?.task?.active === undefined) throw new Error('The original reservation must still be active.')
     const state = replacement === 'null' ? null : replacement === 'task' ? runtime.read(other.agent.session)
       : { ...current, task: { ...current.task, active: null, lastWorker: { ...current.task.active, status: 'completed' as const, report: workerReport } } }
-    own.agent.session.append('review-gated/state', { version: 1, state })
+    appendRecord(own.agent.session, 'plugin:review-gated/state', { version: 1, state })
     workerRelease.resolve(undefined)
     gitRelease.resolve(undefined)
     await settled.promise

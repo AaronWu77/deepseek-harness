@@ -2,6 +2,7 @@
 import type { Volatile } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { createHash } from 'node:crypto'
+import { settingsDocument } from './settings-document.ts'
 import { settingsSchema } from './schemas.ts'
 import type { RgModel, RgModelPool, RgPolicy, RgSettings } from './types.ts'
 import type { GitExecutorConfig } from './git-executor.ts'
@@ -14,15 +15,6 @@ export interface Config {
   readonly git: GitExecutorConfig
 }
 
-const route = Schema.object({ provider: Schema.string().required(), model: Schema.string().required(), reasoningEffort: Schema.string() })
-const pool = Schema.object({
-  candidates: Schema.array(route).default([]),
-  default: Schema.union([
-    Schema.object({ provider: Schema.string().required(), model: Schema.string().required() }),
-    Schema.const(null),
-  ]).default(null),
-})
-const positive = () => Schema.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER)
 
 /** Complete defaults keep a fresh installation unconfigured rather than granting every route.
  * @returns detached editable defaults.
@@ -33,7 +25,8 @@ export function defaultSettings(): RgSettings {
     maxHandoffChars: 16384, maxReportChars: 16384, maxScopeFiles: 1024, maxScopeBytes: 16777216 }
 }
 
-/** Loader schema validates cross-field invariants before publishing a live document. */
+
+/** Complete loader schema; `git` stays a separate non-volatile section. */
 export const Config: Schema<Config> = Schema.object({
   git: Schema.object({
     gitCommand: Schema.string().default('git'),
@@ -41,19 +34,31 @@ export const Config: Schema<Config> = Schema.object({
     graceMs: Schema.number().step(1).min(1).max(2147483647).default(3000),
     maxOutputBytes: Schema.number().step(1).min(1).max(2147483647).default(1048576),
   }).default({}),
-  settings: Schema.transform(Schema.object({
-    configured: Schema.boolean().default(false),
-    main: pool.default({ candidates: [], default: null }),
-    worker: pool.default({ candidates: [], default: null }),
-    reviewer: Schema.union([
-      Schema.object({ mode: Schema.const('inherit-main') }),
-      Schema.object({ mode: Schema.const('custom'), pool: pool.required() }),
-    ]).default({ mode: 'inherit-main' }),
-    maxWorkerAttempts: positive().default(2), maxReviewAttempts: positive().default(2),
-    maxHandoffChars: positive().default(16384), maxReportChars: positive().default(16384),
-    maxScopeFiles: positive().default(1024), maxScopeBytes: positive().default(16777216),
-  }), value => settingsSchema.parse(value)).default(settingsSchema.parse(defaultSettings())).volatile(),
+  // Every field above declares its own default, so an empty document resolves
+  // to exactly `defaultSettings()`; a host test pins that equality.
+  settings: settingsDocument.default({}).volatile(),
 })
+
+/**
+ * Validate one complete settings document at its consumption boundary.
+ *
+ * The loader schema deliberately carries no transform: a transform callback
+ * does not survive schema serialization, and the settings page decodes a saved
+ * document through that serialized schema. Cross-field invariants therefore run
+ * here, before a policy is captured or a Session is initialized, and the error
+ * names each offending path.
+ * @param value - candidate complete document.
+ * @returns the parsed document, owned by the caller.
+ * @throws when a field or cross-field invariant fails.
+ */
+export function parseSettings(value: unknown): RgSettings {
+  const parsed = settingsSchema.safeParse(value)
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map(issue => `${issue.path.join('.') || '<document>'}: ${issue.message}`).join('; ')
+    throw new Error(`RG settings are invalid: ${issues}`)
+  }
+  return parsed.data
+}
 
 /** Resolve an authorized route, using the pool default when no explicit route is supplied.
  * @param pool - frozen role authorization.

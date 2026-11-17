@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /** Stream faults and fail-closed frames rendered through the real RG dock registration. */
-import { act, cleanup } from '@testing-library/react'
+import { act, cleanup, fireEvent } from '@testing-library/react'
 import { RemoteStream, type RemoteStreamOptions } from '@deepseek-ai/dsh-api-gateway/client'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -116,7 +116,7 @@ describe('RG dock carrier faults', () => {
   it('keeps the unknown frame when the carrier cannot be opened at all', async () => {
     const h = await boot(() => { throw new Error('transport unavailable') })
     expect(h.opened).toHaveBeenCalledOnce()
-    expect(h.view.view.getByRole('status').textContent).toBe(en.statusUnknown)
+    expect(h.view.view.getByRole('status').textContent).toContain(en.recoveryUnavailable)
   })
 
   it('ignores a frame that arrives after its generation was aborted', async () => {
@@ -126,7 +126,7 @@ describe('RG dock carrier faults', () => {
     await settle()
     aborted.push(ready)
     await settle()
-    expect(h.view.view.getByRole('status').textContent).toBe(en.statusUnknown)
+    expect(h.view.view.getByRole('status').textContent).toContain(en.recoveryUnavailable)
     h.generation().push(ready)
     await settle()
     expect(h.view.view.getByText('Repair the requested output', { selector: 'summary span' })).toBeTruthy()
@@ -139,7 +139,7 @@ describe('RG dock carrier faults', () => {
     expect(h.view.view.getByText('Repair the requested output', { selector: 'summary span' })).toBeTruthy()
     h.generation().fail(new Error('carrier lost'))
     await settle()
-    expect(h.view.view.getByRole('status').textContent).toBe(en.statusUnknown)
+    expect(h.view.view.getByRole('status').textContent).toContain(en.recoveryUnavailable)
   })
 
   it('logs a carrier disposal failure and still withdraws the frame', async () => {
@@ -163,18 +163,21 @@ describe('RG dock carrier faults', () => {
     h.generation().push({ status: 'saving', state: null, git: null,
       claim: { phase: 'unsettled', text: 'pending input', truncated: false, otherContent: false } })
     await settle()
-    expect(h.view.view.getByRole('status').textContent).toContain(en.saving)
-    expect(h.view.view.getByRole('status').textContent).toContain(en.statusProcessingHint)
-    expect(h.view.view.getByText(en.claimPending)).toBeTruthy()
-    expect(h.view.view.getByText(en.claimLogHint)).toBeTruthy()
-    expect(h.view.view.getByText('pending input')).toBeTruthy()
+    expect(h.view.view.getByRole('status').textContent).toContain(en.recoveryProcessing)
+    expect(h.view.view.queryByText(en.statusProcessingHint)).toBeNull()
+    expect(h.view.view.queryByText(en.claimPending)).toBeNull()
+    const inspect = h.view.view.getByRole('button', { name: en.showInputDetails })
+    expect(inspect.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(inspect)
+    expect(h.view.view.getByRole('region', { name: en.inputDetails }).textContent).toContain('pending input')
+    expect(h.view.view.getByText(en.recoveryInspectHint)).toBeTruthy()
     expect(h.view.view.queryByText(en.reportedPass)).toBeNull()
     h.generation().push({ status: 'unknown', state: null, git: null,
       claim: { phase: 'rejected', text: 'rejected input', truncated: true, otherContent: true } })
     await settle()
-    expect(h.view.view.getByRole('status').textContent).toBe(en.statusUnknown)
-    expect(h.view.view.getByText(en.claimRejected)).toBeTruthy()
-    expect(h.view.view.getByText(en.claimNotEnteredHint)).toBeTruthy()
+    expect(h.view.view.getByRole('status').textContent).toContain(en.recoveryNotEntered)
+    expect(h.view.view.getByText(en.recoveryNotEnteredHint)).toBeTruthy()
+    expect(h.view.view.queryByRole('button', { name: en.newTask })).toBeNull()
     expect(h.view.view.getByText(en.claimTruncated)).toBeTruthy()
   })
 

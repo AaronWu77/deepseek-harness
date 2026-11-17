@@ -11,6 +11,9 @@
   ],
   "references": [
     {
+      "path": "../../goal/goal"
+    },
+    {
       "path": "../../../vendor/cordis"
     },
     {

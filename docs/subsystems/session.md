@@ -1185,8 +1185,8 @@ announce(session: Session): void
  * rather than dispatch a raw `ctx.parallel('session/flush', …)` — one owner
  * and one spelling.
  * @param session - the session whose buffered events must reach durable storage.
- * @returns whether at least one listener acknowledged durability, after every
- *   listener has settled successfully. A void observer does not acknowledge it.
+ * @returns whether at least one listener participated, after every listener
+ *   has settled successfully.
  * @throws the first registered listener failure after every listener settles.
  */
 async flush(session: Session): Promise<boolean>
@@ -1408,22 +1408,20 @@ Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/i
 
 #### `session/flush` — parallel
 
-Awaited parallel durability checkpoint: every listener runs and the caller awaits all of them, with no waterfall veto. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`) reuses the session's owner scope. A persistence listener returns `SESSION_FLUSH_DURABLE` only after durably storing this Session; observers return void.
+Awaited parallel durability checkpoint: every listener runs and the caller awaits all of them, with no waterfall veto. Scope-filtered dispatch (`@deepseek-ai/dsh-scope`) reuses the session's owner scope.
 
 ```ts cordis-catalog
 /**
  * Awaited parallel durability checkpoint: every listener runs and the
  * caller awaits all of them, with no waterfall veto. Scope-filtered dispatch
- * (`@deepseek-ai/dsh-scope`) reuses the session's owner scope. A persistence
- * listener returns `SESSION_FLUSH_DURABLE` only after durably storing this
- * Session; observers return void.
+ * (`@deepseek-ai/dsh-scope`) reuses the session's owner scope.
  * @param session - the session whose buffered events must reach durable storage.
  * @mode parallel
  */
-'session/flush'(this: Scoped<Session>, session: Session): Promise<void | typeof SESSION_FLUSH_DURABLE> | void | typeof SESSION_FLUSH_DURABLE
+'session/flush'(this: Scoped<Session>, session: Session): Promise<void> | void
 ```
 
-Types: [SESSION_FLUSH_DURABLE](persistence.md) · [Scoped](scope.md)
+Types: [Scoped](scope.md)
 
 Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/index.ts)
 <!-- END GENERATED cordis-surface -->

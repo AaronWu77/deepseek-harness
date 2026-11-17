@@ -9,7 +9,6 @@
         name: RG Worker
         description: Bounded implementation and investigation delegated by the main agent.
         order: 21
-        selectable: false
         plugins:
           - id: persona
             name: '@deepseek-ai/dsh-persona'
@@ -134,7 +133,6 @@
         name: RG Reviewer
         description: Independent evidence-based review; no additional permission restrictions.
         order: 22
-        selectable: false
         plugins:
           - id: persona
             name: '@deepseek-ai/dsh-persona'

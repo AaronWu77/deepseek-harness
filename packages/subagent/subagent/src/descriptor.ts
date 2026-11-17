@@ -90,9 +90,6 @@ export type SubagentDescriptorData =
   | OneShotSubagentDescriptorData
   | ContinuableSubagentDescriptorData
 
-/** One-shot identity fields before the snapshot stamps their format version. */
-export type OneShotSubagentDescriptorInput = Omit<OneShotSubagentDescriptorData, 'version'>
-
 /** Continuable composition fields before the snapshot stamps their format version. */
 export type ContinuableSubagentDescriptorInput = Omit<ContinuableSubagentDescriptorData, 'version'>
 
@@ -225,27 +222,15 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
 }
 
 /**
- * Validate and detach a local child descriptor input.
- * @param input - the caller-collected identity or continuable composition fields.
- * @returns the versioned, detached descriptor payload with its original mode.
+ * Validate and detach a continuable descriptor input.
+ * @param input - the caller-collected continuable composition fields.
+ * @returns the versioned, detached continuable descriptor payload.
  * @throws when a field is not losslessly JSON-serializable.
  */
-export function snapshotSubagentDescriptor(input: OneShotSubagentDescriptorInput): OneShotSubagentDescriptorData
-/**
- * Validate and detach a continuable child descriptor input.
- * @param input - the caller-collected authority, composition, and filter fields.
- * @returns the versioned, detached descriptor payload with its original mode.
- */
-export function snapshotSubagentDescriptor(input: ContinuableSubagentDescriptorInput): ContinuableSubagentDescriptorData
 export function snapshotSubagentDescriptor(
-  input: OneShotSubagentDescriptorInput | ContinuableSubagentDescriptorInput,
-): SubagentDescriptorData {
-  const candidate: SubagentDescriptorData = input.mode === 'one-shot' ? {
-    version: SUBAGENT_DESCRIPTOR_VERSION,
-    mode: input.mode,
-    provider: input.provider,
-    ...(input.label === undefined ? {} : { label: input.label }),
-  } : {
+  input: ContinuableSubagentDescriptorInput,
+): ContinuableSubagentDescriptorData {
+  const candidate: ContinuableSubagentDescriptorData = {
     version: SUBAGENT_DESCRIPTOR_VERSION,
     mode: input.mode,
     provider: input.provider,

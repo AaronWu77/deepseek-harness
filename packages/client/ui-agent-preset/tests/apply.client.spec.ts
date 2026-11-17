@@ -194,6 +194,28 @@ async function bench(options: {
   }
 }
 
+it('releases display registrations with the contributing plugin and supports reload', async () => {
+  const b = await bench()
+  b.ctx.provide('sessions', sessionsDouble(b.ctx, { byId: {} }) as never)
+  const owner = b.ctx.plugin({ inject: [...inject], apply })
+  await owner.await()
+  const contribution = { match: { id: 'example', name: 'Example', description: 'Original' }, description: { en: 'English', zh: '中文' } }
+  const plugin = { inject: ['presetDisplay'], apply(ctx: Context) {
+    ctx.effect(() => ctx.presetDisplay.register(contribution), 'example display')
+  } }
+  const first = b.ctx.plugin(plugin)
+  await first.await()
+  expect(() => b.ctx.presetDisplay.register(contribution)).toThrow('already matches')
+  await first.dispose()
+  const second = b.ctx.plugin(plugin)
+  await second.await()
+  expect(() => b.ctx.presetDisplay.register(contribution)).toThrow('already matches')
+  await second.dispose()
+  const dispose = b.ctx.presetDisplay.register(contribution)
+  dispose()
+  await owner.dispose()
+})
+
 function declareRoot(slots: SlotRegistry): () => void {
   return slots.register({
     name: 'root',

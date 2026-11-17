@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /** Task facts and explicit controls remain independent of model-written prose. */
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ComponentProps } from 'react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
@@ -28,22 +28,93 @@ function mount(overrides: Partial<ComponentProps<typeof RgStatus>> = {}) {
     model: { lastUsed: { provider: 'alpha', model: 'last-actual' }, next: { provider: 'beta', model: 'next-choice' } },
     roleModel: undefined, newTask, recheck, authorizeLocalGit, leaveLocalGit, t: makeTranslate(en), ...overrides }
   const view = render(<RgStatus {...props} />)
-  fireEvent.click(view.container.querySelector('summary')!)
+  if (!props.sidebar) fireEvent.click(view.container.querySelector('summary')!)
   return { props, newTask, recheck, authorizeLocalGit, leaveLocalGit, ...view }
 }
 
 describe('RG task status', () => {
+  it.each(['classic', 'flow', 'focus', 'trace'] as const)('keeps the same role facts and details in the %s view', (roleLayout) => {
+    const state = rgState()
+    const review = { ...reviewRun(), status: 'running' as const }
+    const worker = { ...reviewRun(), id: 'worker-1' as typeof review.id, role: 'worker' as const, status: 'completed' as const }
+    const task = { ...state.task!, active: review, lastReview: review, lastWorker: worker }
+    const f = mount({ sidebar: true, roleLayout, state: { ...state, task },
+      roleModel: { lastUsed: { provider: 'actual', model: 'review' }, next: null } })
+    const region = screen.getByRole('region', { name: en.details })
+    const cards = region.querySelectorAll('article')
+    expect(cards).toHaveLength(3)
+    expect(cards[0]?.textContent).toContain(roleLayout === 'focus' ? en.reviewer : en.main)
+    expect(region.querySelectorAll('[data-state=ongoing]')).toHaveLength(1)
+    const reviewer = region.querySelector<HTMLElement>('[data-rg-role=reviewer]')!
+    fireEvent.click(within(reviewer).getByRole('button', { name: en.runDetails }))
+    const detail = within(reviewer).getByRole('region', { name: en.runDetails })
+    expect(detail.textContent).toContain('Run ID: review-1')
+    expect(reviewer.textContent).toContain('actual/review')
+    f.rerender(<RgStatus {...f.props} roleLayout={roleLayout === 'focus' ? 'flow' : 'focus'} />)
+    expect(screen.getByRole('region', { name: en.runDetails }).textContent).toContain('Run ID: review-1')
+    expect(f.newTask).not.toHaveBeenCalled()
+    expect(f.recheck).not.toHaveBeenCalled()
+  })
+
+  it('retains an unfinished task switch while changing the role layout', () => {
+    const f = mount({ sidebar: true })
+    fireEvent.click(screen.getByRole('button', { name: en.newTask }))
+    fireEvent.change(screen.getByRole('textbox', { name: en.newTaskObjective }), { target: { value: 'Retained draft' } })
+    f.rerender(<RgStatus {...f.props} roleLayout="focus" />)
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: en.newTaskObjective }).value).toBe('Retained draft')
+    expect(f.newTask).not.toHaveBeenCalled()
+  })
+
+  it('shows the active and retained role runs once in the sidebar', () => {
+    const state = rgState()
+    const review = { ...reviewRun(), status: 'running' as const }
+    const worker = { ...reviewRun(), id: 'worker-1' as typeof review.id, role: 'worker' as const, status: 'completed' as const }
+    mount({ sidebar: true, state: { ...state, task: { ...state.task!, active: review, lastReview: review, lastWorker: worker } },
+      roleModel: { lastUsed: { provider: 'actual', model: 'review' }, next: null } })
+    const cards = screen.getByRole('region', { name: en.details }).querySelectorAll('article')
+    expect(cards).toHaveLength(3)
+    expect(cards[0]?.querySelector('[data-state=idle]')).toBeTruthy()
+    expect(cards[1]?.querySelector('[data-state=ongoing]')).toBeTruthy()
+    expect(cards[2]?.querySelector('[data-state=done]')).toBeTruthy()
+    const runDetails = screen.getAllByRole('button', { name: en.runDetails })[0]!
+    expect(runDetails.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('region', { name: en.runDetails })).toBeNull()
+    fireEvent.click(runDetails)
+    expect(runDetails.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('region', { name: en.runDetails }).textContent).toContain('Run ID: review-1')
+    const configuration = screen.getByRole('button', { name: en.taskDetails })
+    expect(configuration.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(configuration)
+    expect(configuration.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('region', { name: en.taskDetails }).textContent).toContain('frozen-policy')
+    expect(document.querySelector('summary')).toBeNull()
+    expect(screen.getByText('Last requested model: actual/review')).toBeTruthy()
+    expect(screen.getByText(en.recentRunsHint)).toBeTruthy()
+  })
+
+  it('shows failure and interruption indicators alongside their status text', () => {
+    const state = rgState()
+    const failed = { ...reviewRun(), status: 'failed' as const }
+    const interrupted = { ...reviewRun(), id: 'worker-1' as typeof failed.id, role: 'worker' as const, status: 'interrupted' as const }
+    mount({ sidebar: true, state: { ...state, task: { ...state.task!, lastReview: failed, lastWorker: interrupted } } })
+    const cards = screen.getByRole('region', { name: en.details }).querySelectorAll('article')
+    expect(cards[1]?.querySelector('[data-state=warning]')).toBeTruthy()
+    expect(cards[1]?.textContent).toContain(en.interrupted)
+    expect(cards[2]?.querySelector('[data-state=error]')).toBeTruthy()
+    expect(cards[2]?.textContent).toContain(en.failed)
+  })
+
   it('withdraws controls, reports uncertainty, and discards drafts when trust changes', () => {
     const f = mount()
     fireEvent.click(screen.getByRole('button', { name: en.newTask }))
     fireEvent.change(screen.getByLabelText(en.newTaskObjective), { target: { value: 'unconfirmed draft' } })
     f.rerender(<RgStatus {...f.props} trust="saving" />)
-    expect(screen.getByRole('status').textContent).toContain(en.saving)
-    expect(screen.getByRole('status').textContent).toContain(en.statusProcessingHint)
+    expect(screen.getByRole('status').textContent).toContain(en.recoveryProcessing)
+    expect(screen.queryByText(en.statusProcessingHint)).toBeNull()
     expect(screen.queryByText(en.reportedPass)).toBeNull()
     expect(screen.queryByRole('button')).toBeNull()
     f.rerender(<RgStatus {...f.props} trust="unknown" />)
-    expect(screen.getByRole('status').textContent).toBe(en.statusUnknown)
+    expect(screen.getByRole('status').textContent).toContain(en.recoveryUnavailable)
     expect(f.newTask).not.toHaveBeenCalled()
     f.rerender(<RgStatus {...f.props} trust="ready" />)
     expect(screen.queryByLabelText(en.newTaskObjective)).toBeNull()
@@ -95,6 +166,30 @@ describe('RG task status', () => {
     expect(screen.getByText(new RegExp('src/first.ts:4')).textContent).toContain('Incorrect output')
     expect(screen.getByText(new RegExp('Worker attempts 1/2'))).toBeTruthy()
     expect(screen.getByText(new RegExp('Review attempts 2/2'))).toBeTruthy()
+  })
+
+  it('shows one last-review warning only when another review is unresolved', () => {
+    const state = rgState()
+    const f = mount({ sidebar: true, state: { ...state, task: { ...state.task!, reviewAttempts: 1, reviewStatus: 'changes-requested' } } })
+    expect(screen.getByText(en.lastReviewAttemptHint)).toBeTruthy()
+    expect(screen.queryByText(en.reviewBudgetExhausted)).toBeNull()
+    f.rerender(<RgStatus {...f.props} state={{ ...state, task: { ...state.task!, reviewAttempts: 1 } }} />)
+    expect(screen.queryByText(en.lastReviewAttemptHint)).toBeNull()
+  })
+
+  it('separates exhausted review capacity from an evidence-only inconclusive result', () => {
+    const state = rgState()
+    const previous = reviewRun()
+    const report = { kind: 'reviewer' as const, verdict: 'inconclusive' as const, summary: 'No live browser evidence',
+      inspectedScope: ['src/first.ts'], findings: [], validation: ['Unit checks passed'], unverified: ['Authenticated live-page verification'] }
+    const task = { ...state.task!, reviewStatus: 'inconclusive' as const, lastReview: { ...previous, report } }
+    const f = mount({ sidebar: true, state: { ...state, task } })
+    expect(screen.getByRole('status').textContent).toBe(en.reviewBudgetExhausted)
+    expect(screen.getByText(en.reviewEvidenceIncomplete)).toBeTruthy()
+    expect(screen.getByText('Authenticated live-page verification')).toBeTruthy()
+    expect(screen.queryByText(en.reportedPass)).toBeNull()
+    f.rerender(<RgStatus {...f.props} state={{ ...state, task: { ...task, active: { ...previous, status: 'running' } } }} />)
+    expect(screen.queryByText(en.reviewBudgetExhausted)).toBeNull()
   })
 
   it('does not display a pass without workspace scope or a retained Git delivery', () => {

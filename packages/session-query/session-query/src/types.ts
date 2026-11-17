@@ -15,6 +15,7 @@ import type {
   OptionalSessionSeq,
   SurfaceEvent,
 } from '@deepseek-ai/dsh-session'
+import type { SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionTitleSnapshot } from '@deepseek-ai/dsh-session-title'
 import type { SessionSearchCursor } from './cursor.ts'
 
@@ -33,6 +34,39 @@ export interface SessionRecord {
   persisted: boolean
   /** Current for live Sessions; otherwise the persistence format status when reported. */
   formatStatus?: 'current' | 'migration-required'
+}
+
+/** Detached persistence metadata in one source-bound Session listing. */
+export interface SessionStoredMetadata {
+  /** Cloned logical header; backend artifact locations are omitted. */
+  readonly header: SessionHeader
+  /** Opaque revision comparable only within the same persistence instance and Session id. */
+  readonly revision: SessionPersistenceRevision
+  /** Header-only format classification, when the backend reports it. */
+  readonly formatStatus?: 'current' | 'migration-required'
+  /** Logical event count when cheaply available. */
+  readonly eventCount?: number
+  /** Physical artifact byte size when cheaply available. */
+  readonly sizeBytes?: number
+}
+
+/**
+ * Host-only Session listing and its process-local source identities.
+ * The identities do not make the complete corpus an atomic snapshot. Never persist or transmit this value.
+ */
+export interface SessionSourceListing {
+  /** Live-preferred, newest-first logical Session records. */
+  readonly records: SessionRecord[]
+  /** Detached stored metadata in backend order, including duplicate ids. */
+  readonly stored: readonly SessionStoredMetadata[]
+  /** Query instance that produced this listing. */
+  readonly queryIdentity: symbol
+  /** Persistence instance used to list stored metadata, or undefined when none is bound. */
+  readonly persistenceIdentity: symbol | undefined
+  /** Persistence instance currently resolved for Session observations, or undefined when absent. */
+  readonly observationPersistenceIdentity: symbol | undefined
+  /** SessionStore instance used for the live listing, or undefined if its identity is unavailable. */
+  readonly sessionStoreIdentity: symbol | undefined
 }
 
 /** One atomic live-preferred observation of a session's current model surface. */

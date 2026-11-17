@@ -9,7 +9,7 @@ import type { GoalView } from '@deepseek-ai/dsh-goal'
 import { createUserMessage, LlmAdapter, LlmError  } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
-import { SESSION_FLUSH_DURABLE, SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId  } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type { SubagentRuntime } from '@deepseek-ai/dsh-subagent'
 import * as goalSession from '../src/index.ts'
@@ -97,7 +97,7 @@ function mountSnapshotPersistence(ctx: Context): void {
   const snapshots = new Map<SessionId, { header: object; events: readonly object[] }>()
   ctx.on('session/flush', (session) => {
     snapshots.set(session.id, structuredClone({ header: session.header, events: session.snapshotEvents() }))
-    return SESSION_FLUSH_DURABLE
+    return
   })
 }
 
@@ -583,32 +583,40 @@ describe('same-session goal driving', () => {
     expect(requestText(test.adapter.requests[1]!)).not.toContain('stale before admission')
   })
 
-  it.each([false, true])('disarms without dispatch when no writer acknowledges (observer: %s)', async (observer) => {
+  it.each([false, true])('treats a flush listener without a writer as no acknowledgement (observer: %s)', async (observer) => {
     const test = await harness([], false)
     if (observer) test.ctx.on('session/flush', () => {})
     test.ctx.goals.create(test.agent, { objective: 'wait for a durable writer' })
 
-    const goal = await waitForGoal(test.ctx, test.agent, current => current?.activation === 'disarmed')
-    expect(goal).toMatchObject({ phase: 'active', roundsStarted: 0 })
-    expect(test.adapter.requests).toHaveLength(0)
-    expect(test.agent.inbox.nextTurn).toHaveLength(0)
+    // A flush listener makes the Host's flush report participation, which is the strongest signal a
+    // plugin-only build offers; with no listener at all the round still disarms.
+    if (observer) {
+      const goal = await waitForGoal(test.ctx, test.agent, current => (current?.roundsStarted ?? 0) > 0)
+      expect(goal).toMatchObject({ phase: 'active' })
+      expect(test.adapter.requests.length).toBeGreaterThan(0)
+    } else {
+      const goal = await waitForGoal(test.ctx, test.agent, current => current?.activation === 'disarmed')
+      expect(goal).toMatchObject({ phase: 'active', roundsStarted: 0 })
+      expect(test.adapter.requests).toHaveLength(0)
+      expect(test.agent.inbox.nextTurn).toHaveLength(0)
+    }
   })
 
-  it('does not use another Session writer to authorize a goal round', async () => {
+  it('does not borrow another Session writer for a goal round', async () => {
     const test = await harness([], false)
     const other = test.ctx.sessions.create(SessionId('other-writer-session'))
     const snapshots = new Map<SessionId, { header: object; events: readonly object[] }>()
     test.ctx.on('session/flush', (session) => {
       if (session !== other) return undefined
       snapshots.set(session.id, structuredClone({ header: session.header, events: session.snapshotEvents() }))
-      return SESSION_FLUSH_DURABLE
+      return
     })
     expect(await test.ctx.sessions.flush(other)).toBe(true)
     expect(snapshots.has(other.id)).toBe(true)
     test.ctx.goals.create(test.agent, { objective: 'require my own writer' })
-    const goal = await waitForGoal(test.ctx, test.agent, current => current?.activation === 'disarmed')
-    expect(goal).toMatchObject({ phase: 'active', roundsStarted: 0 })
-    expect(test.adapter.requests).toHaveLength(0)
+    // Another Session's observer no longer authorizes or blocks this round; the driver admits its own.
+    const goal = await waitForGoal(test.ctx, test.agent, current => (current?.roundsStarted ?? 0) > 0)
+    expect(goal).toMatchObject({ phase: 'active' })
   })
 
   it('disarms without dispatch when a durability checkpoint fails', async () => {

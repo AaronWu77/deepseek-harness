@@ -29,8 +29,13 @@ export interface SessionObservation extends Disposable {
   readonly events: readonly SessionEvent[]
   /** Last observed event seq, or -1 for an empty log. */
   readonly cursor: SessionSeqCursor
-  /** Durable source revision for a cold prepared observation. */
+  /** Revision observed before the prepared read; compare only for the same session and persistence identity. */
   readonly revision?: SessionPersistenceRevision
+  /**
+   * Process-local identity of the instance that produced the prepared revision; absent for live observations.
+   * Never persist it or send it over the wire.
+   */
+  readonly persistenceIdentity?: symbol
   /** Exact projection baseline at {@link cursor}, when the registry is mounted. */
   readonly projections?: ProjectionSnapshot
   /**
@@ -46,6 +51,8 @@ export interface SessionObservationOptions {
   readonly signal?: AbortSignal
   /** Whether to compute every projection or leave projection state untouched. */
   readonly projectionMode?: 'all' | 'none'
+  /** Transient reads reuse existing entries but do not add newly prepared Sessions to the shared cache. */
+  readonly cachePolicy?: 'shared' | 'transient'
 }
 
 /**
@@ -91,7 +98,7 @@ export class SessionObservationReader {
   /**
    * Observe one live-preferred Session and retain a cold preparation until disposal.
    * @param sessionId - logical Session identity.
-   * @param options - cancellation and all-or-none projection computation for this read.
+   * @param options - cancellation, projection computation, and shared-cache retention for this read.
    * @returns one exact immutable observation.
    * @throws {@link SessionQueryError} with code `SESSION_QUERY_CORRUPT_SESSION` when live or prepared projection computation fails.
    */
@@ -99,18 +106,19 @@ export class SessionObservationReader {
     sessionId: SessionId,
     options: SessionObservationOptions = {},
   ): Promise<SessionObservation> {
-    const { signal, projectionMode = 'all' } = options
+    const { signal, projectionMode = 'all', cachePolicy = 'shared' } = options
     for (;;) {
       throwIfObservationAborted(signal)
       const live = this.ctx.sessions.get(sessionId)
       if (live !== undefined) return this.live(live, projectionMode)
       const persistence = this.ctx.get('sessionPersistence')
       if (persistence === undefined) throw notFound(sessionId)
+      const persistenceIdentity = persistence.identity
 
       const snapshot = await this.statSource(persistence, sessionId, signal)
       const attachedDuringStat = this.ctx.sessions.get(sessionId)
       if (attachedDuringStat !== undefined) return this.live(attachedDuringStat, projectionMode)
-      let entry = this.cachedEntry(persistence.identity, sessionId, snapshot.revision)
+      let entry = this.cachedEntry(persistenceIdentity, sessionId, snapshot.revision)
       if (entry === undefined) {
         const loaded = await this.loadSource(persistence, sessionId, signal)
         throwIfObservationAborted(signal)
@@ -139,13 +147,13 @@ export class SessionObservationReader {
           )
         }
         entry = {
-          persistenceIdentity: persistence.identity,
+          persistenceIdentity,
           revision: snapshot.revision,
           session,
           events: Object.freeze(seed),
           refs: 0,
         }
-        this.store(sessionId, entry)
+        if (cachePolicy === 'shared') this.store(sessionId, entry)
       }
 
       let projections: ProjectionSnapshot | undefined
@@ -255,6 +263,7 @@ export class SessionObservationReader {
         events: entry.events,
         cursor: entry.events.at(-1)?.seq ?? -1,
         revision: entry.revision,
+        persistenceIdentity: entry.persistenceIdentity,
         ...projections === undefined ? {} : { projections },
         retain: () => {
           if (disposed) throw new Error(`session observation "${sessionId}" is disposed`)

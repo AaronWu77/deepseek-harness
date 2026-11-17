@@ -1,7 +1,7 @@
 /** Local Git delivery replay is pure: it never allocates checkouts, commits, or starts roles. */
 import { z } from 'zod'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { pluginRecordOf, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import type { RgRunId, RgTaskId } from './types.ts'
 import type { RgCandidateId, RgGitState } from './git-types.ts'
@@ -43,12 +43,8 @@ export const gitStateSchema: z.ZodType<RgGitState> = z.object({
   if (mismatch || wrongReview || wrongWorker) context.addIssue({ code: 'custom', message: 'The Git candidate and role binding do not match the authorized repository and scope.' })
 })
 
-declare module '@deepseek-ai/dsh-session/types' {
-  interface SessionEventMap {
-    /** Complete local Git authorization, current candidate, and operation facts after one committed change. */
-    'review-gated/git-state': { readonly version: 1; readonly state: RgGitState | null }
-  }
-}
+/** Versioned Git record retains explicit clear-to-null operations. */
+export const gitStateRecordSchema = z.object({ version: z.literal(1), state: gitStateSchema.nullable() }).strict()
 /** Fail-closed replay state; an invalid record cannot be repaired by ignoring later history. */
 export interface RgGitProjectionState { readonly value: RgGitState | null; readonly failure: string | null }
 /** Fold one event without external effects.
@@ -57,14 +53,15 @@ export interface RgGitProjectionState { readonly value: RgGitState | null; reado
  * @returns the same reference for unrelated events.
  */
 export function foldGitState(state: RgGitProjectionState, event: SessionEvent): RgGitProjectionState {
-  if (event.type !== 'review-gated/git-state' || state.failure !== null) return state
-  const parsed = z.object({ version: z.literal(1), state: gitStateSchema.nullable() }).strict().safeParse(event.data)
+  const record = pluginRecordOf(event)
+  if (record?.type !== 'plugin:review-gated/git-state' || state.failure !== null) return state
+  const parsed = gitStateRecordSchema.safeParse(record.data)
   return parsed.success ? { value: parsed.data.state, failure: null }
-    : { ...state, failure: 'RG_GIT_STATE_INVALID: event ' + String(event.seq) }
+    : { ...state, failure: 'RG_GIT_STATE_INVALID: event ' + String(record.seq) }
 }
 /** Separate from the unchanged RG model-policy and report projection. */
 export const gitProjectionDefinition = {
-  key: 'reviewGatedGit', stateVersion: 1,
+  key: 'reviewGatedGit', stateVersion: 2,
   stateSchema: z.object({ value: gitStateSchema.nullable(), failure: z.string().nullable() }).strict(),
   init: () => ({ value: null, failure: null }), apply: foldGitState,
   wire: { viewSchema: gitStateSchema.nullable(), view: (state: RgGitProjectionState) => state.value },

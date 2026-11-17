@@ -44,7 +44,17 @@ import { AgentPresetSeatController, type AgentPresetStage } from './seat-store.t
 import { AgentPresetSectionController } from './section-store.ts'
 import { en, ja, es, fr, de, ru, pt, zh, type AgentPresetSettingsKey } from './locales.ts'
 import { AGENT_PRESET_SETTINGS_NS, AgentPresetSettingsController } from './settings-store.ts'
+import { createPresetDisplayRegistry, type PresetDisplayRegistry } from './preset-display.ts'
 import { analyticsMode } from './analytics.ts'
+
+export type { PresetDisplayContribution, PresetDisplayRegistry } from './preset-display.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Client-only localized preset descriptions. */
+    presetDisplay: PresetDisplayRegistry
+  }
+}
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -71,6 +81,9 @@ export const inject = [
  * @param ctx - the browser plugin context.
  */
 export function apply(ctx: ClientContext): void {
+  const display = createPresetDisplayRegistry()
+  ctx.provide('presetDisplay', display.registry)
+  const resolvePresetDescription = (text: { readonly en: string; readonly [locale: string]: string }) => ctx.locale.resolveText(text)
   const toolsSettings = ctx.configForms.get<{ enabled: boolean }>('ui-settings')
   const presetSettings = ctx.configForms.get(AGENT_PRESET_SETTINGS_NS)
   let active = true
@@ -186,7 +199,8 @@ export function apply(ctx: ClientContext): void {
       const binding = sessionId === undefined ? undefined : ctx.sessions.binding(sessionId)
       const seat = binding === undefined ? unboundSeat : seatFor(binding)
       return {
-        hooks: { agentPresetSeat: seat.store, developerTools: ctx.configForms.developerTools.enabled },
+        hooks: { agentPresetSeat: seat.store, developerTools: ctx.configForms.developerTools.enabled, presetDisplay: display.source },
+        resolvePresetDescription,
         load: () => seat.load(),
         select: async (id: string) => {
           const state = seat.store.getSnapshot()
@@ -209,7 +223,8 @@ export function apply(ctx: ClientContext): void {
     }
 
     const labelInjected = (): AgentPresetLabelInjected => ({
-      hooks: { agentPresets: controller.store },
+      hooks: { agentPresets: controller.store, presetDisplay: display.source },
+      resolvePresetDescription,
       load: () => controller.load(),
     })
 
@@ -270,7 +285,8 @@ export function apply(ctx: ClientContext): void {
   }
 
   const sectionInjected = (): AgentPresetSectionInjected => ({
-    hooks: { agentPresetSection: section.store, developerTools: ctx.configForms.developerTools.enabled },
+    hooks: { agentPresetSection: section.store, developerTools: ctx.configForms.developerTools.enabled, presetDisplay: display.source },
+    resolvePresetDescription,
     load: () => section.load(),
     view: (id: string) => section.view(id),
     closeView: () => { section.closeView() },

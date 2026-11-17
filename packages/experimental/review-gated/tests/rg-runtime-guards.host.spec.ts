@@ -1,3 +1,5 @@
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
+import { appendRecord, recordsOf } from './records.ts'
 /** RG runtime guards exercised through real Agent lifecycles and real Session event sequences. */
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
@@ -13,7 +15,7 @@ describe('RG runtime guard coverage', { timeout: 120_000 }, () => {
     const { agent } = handle
     const calls = f.adapter.calls.length
     // A malformed durable record is committed before the input arrives; the fold reports a failure.
-    agent.session.append('review-gated/state', { version: 1, state: { role: 'main' } } as never)
+    appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: { role: 'main' } } as never)
     expect(() => f.runtime.read(agent.session)).toThrow(/RG_STATE_INVALID/)
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Poisoned entry' }], source: { kind: 'user' } }))
     await agent.whenIdle()
@@ -34,7 +36,7 @@ describe('RG runtime guard coverage', { timeout: 120_000 }, () => {
     let held = false
     const spy = vi.spyOn(f.ctx.sessions, 'flush').mockImplementation(async (session) => {
       const result = await flush(session)
-      if (session === agent.session && !held && session.snapshotEvents().some(event => event.type === 'review-gated/task-prepared')) {
+      if (session === agent.session && !held && session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/task-prepared')) {
         held = true
         entered.resolve(undefined)
         await release.promise
@@ -61,7 +63,7 @@ describe('RG runtime guard coverage', { timeout: 120_000 }, () => {
       const state = f.runtime.read(agent.session)
       if (state === null) return workspace
       // Replace the binding after the checkout was allocated.
-      agent.session.append('review-gated/git-state', { version: 1, state: { ...f.runtime.readGit(agent.session)!, binding: null } } as never)
+      appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: { ...f.runtime.readGit(agent.session)!, binding: null } } as never)
       return workspace
     })
     try {
@@ -103,7 +105,7 @@ describe('RG runtime guard coverage', { timeout: 120_000 }, () => {
     const { agent } = await f.task()
     const state = f.runtime.read(agent.session)
     if (state?.task == null) throw new Error('Expected a task')
-    agent.session.append('review-gated/state', { version: 1, state: { ...state, diagnostic: 'uncertain' } })
+    appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state, diagnostic: 'uncertain' } })
     expect(f.runtime.statusOf(agent.session)).toBe('unknown')
     expect(f.runtime.statusOf(agent.session)).not.toBe('saving')
   })
@@ -117,7 +119,7 @@ describe('RG runtime guard coverage', { timeout: 120_000 }, () => {
     const state = f.runtime.read(agent.session)
     expect(state?.task).toMatchObject({ objective: 'Direct objective' })
     const events = agent.session.snapshotEvents()
-    expect(events.some(event => event.type === 'agent/claim/intent')).toBe(true)
+    expect(recordsOf(events).some(record => record.type === 'plugin:review-gated/claim')).toBe(true)
     expect(SessionSeq(events.length - 1)).toBe(events.at(-1)?.seq)
   })
 
@@ -166,7 +168,7 @@ describe('RG runtime guard coverage', { timeout: 120_000 }, () => {
     const { agent } = await f.task()
     const state = f.runtime.read(agent.session)
     if (state?.task == null) throw new Error('Expected a task')
-    agent.session.append('review-gated/state', { version: 1,
+    appendRecord(agent.session, 'plugin:review-gated/state', { version: 1,
       state: { ...state, task: { ...state.task, workerAttempts: 1 } } })
     await expect(f.runtime.authorizeLocalGit(agent, ['tracked.txt'], new AbortController().signal))
       .rejects.toMatchObject(refused('RG_BUSY'))
@@ -181,7 +183,7 @@ describe('RG runtime guard coverage', { timeout: 120_000 }, () => {
     const running = { id: 'rg-run-active' as never, childId: 'rg-child-active' as never, role: 'worker' as const,
       workRevision: 1, selection: { provider: 'fixture', model: 'worker' }, status: 'running' as const,
       report: null, diagnostic: null, scope: null }
-    agent.session.append('review-gated/state', { version: 1, state: { ...state, task: { ...state.task, active: running } } })
+    appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state, task: { ...state.task, active: running } } })
     await expect(f.runtime.newTask(agent, 'Overlapping budget')).rejects.toMatchObject(refused('RG_BUSY'))
     await expect(f.runtime.leaveLocalGit(agent)).rejects.toMatchObject(refused('RG_BUSY'))
   })

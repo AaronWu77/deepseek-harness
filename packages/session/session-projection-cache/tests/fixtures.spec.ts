@@ -33,7 +33,6 @@ import {
 } from '@deepseek-ai/dsh-storage-domain'
 import SessionProjectionCache from '../src/index.ts'
 import { checkpointRow, projectionCacheDomainSpec } from '../src/spec.ts'
-import { installTestPersistence } from './fake-persistence.ts'
 
 // Declarations must match the shipped title unit's exactly (the repo-wide
 // compile face sees both).
@@ -107,7 +106,6 @@ async function storageHarness(root: string) {
 async function harness(root: string) {
   const ctx = await storageHarness(root)
   await ctx.plugin(SessionStore)
-  installTestPersistence(ctx)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.sessionProjections.register(titleUnit)
   await ctx.plugin(SessionProjectionCache, { writeEveryEvents: 100, writeIntervalMs: 60_000 })
@@ -322,7 +320,6 @@ describe('archived version recovery', () => {
     await ctx.plugin({ name: storageJsonName, inject: storageJsonInject, apply: storageJsonApply, Config: storageJsonConfig }, { root })
     await ctx.plugin({ name: storageDomainName, inject: storageDomainInject, apply: storageDomainApply, Config: storageDomainConfig }, { backend: 'json' })
     await ctx.plugin(SessionStore)
-    installTestPersistence(ctx)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.sessionProjections.register(titleUnit)
     const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})

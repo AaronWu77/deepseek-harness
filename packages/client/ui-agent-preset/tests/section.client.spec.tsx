@@ -8,6 +8,7 @@ import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AgentPresetSection, type AgentPresetSectionProps } from '../src/client/AgentPresetSection.tsx'
 import type { AgentPresetSectionState } from '../src/client/section-store.ts'
 import { en } from '../src/client/locales.ts'
+import { createPresetDisplayRegistry } from '../src/client/preset-display.ts'
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers() })
 const translations: ReadonlyMap<string, string> = new Map(Object.entries(en))
 function unusedHook(): never {
@@ -15,6 +16,7 @@ function unusedHook(): never {
 }
 function view(partial: Partial<AgentPresetSectionState> = {}, startCreatorDraft?: () => void, outerClose?: () => void, enabled = true) {
   const developerTools = createSnapshotStore(enabled)
+  const display = createPresetDisplayRegistry()
   const store = createSnapshotStore<AgentPresetSectionState>({ status: 'ready', error: null,
     saving: false, rows: [{ id: 'standard', isDefault: true }, { id: 'mine', name: 'Mine', isDefault: false }],
     view: null, ...partial })
@@ -27,12 +29,34 @@ function view(partial: Partial<AgentPresetSectionState> = {}, startCreatorDraft?
     ...allowAllAccess,
     useContextMenu: contextMenuHook(),
     useAgentPresetSection: bindSnapshotSelector(store),
+    usePresetDisplay: bindSnapshotSelector(display.source),
+    resolvePresetDescription: text => text.en,
     useDeveloperTools: bindSnapshotSelector(developerTools),
     t: key => translations.get(key) ?? key }
-  render(outerClose === undefined ? <AgentPresetSection {...props} />
-    : <Modal open onClose={outerClose} title="Settings" closeLabel="Close"><AgentPresetSection {...props} /></Modal>)
-  return { ...actions, store, developerTools }
+  const language = createSnapshotStore<'en' | 'zh'>('en')
+  const useLanguage = bindSnapshotSelector(language)
+  function LocalizedSection() {
+    const current = useLanguage(value => value)
+    return <AgentPresetSection {...props} resolvePresetDescription={text => text[current] ?? text.en} />
+  }
+  render(outerClose === undefined ? <LocalizedSection />
+    : <Modal open onClose={outerClose} title="Settings" closeLabel="Close"><LocalizedSection /></Modal>)
+  return { ...actions, store, developerTools, display, language }
 }
+it('updates an exact preset description when its contribution mounts and unmounts', () => {
+  const match = { id: 'example', name: 'Example', description: 'Original' }
+  const custom = { id: 'custom', name: 'Custom', description: 'Custom description' }
+  const actions = view({ rows: [{ ...match, isDefault: false }, { ...custom, isDefault: false }] })
+  expect(within(rowFor('example')).getByText('Original')).toBeTruthy()
+  let dispose = () => {}
+  act(() => { dispose = actions.display.registry.register({ match, description: { en: 'Localized', zh: '中文' } }) })
+  expect(within(rowFor('example')).getByText('Localized')).toBeTruthy()
+  expect(within(rowFor('custom')).getByText('Custom description')).toBeTruthy()
+  act(() => { actions.language.set('zh') })
+  expect(within(rowFor('example')).getByText('中文')).toBeTruthy()
+  act(dispose)
+  expect(within(rowFor('example')).getByText('Original')).toBeTruthy()
+})
 function rowFor(id: string): HTMLElement {
   const row = document.querySelector<HTMLElement>(`[data-agent-preset-id="${id}"]`)
   if (row === null) throw new Error(`no card for ${id}`)

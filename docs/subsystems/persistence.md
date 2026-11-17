@@ -53,16 +53,6 @@ interface SessionHandle extends AsyncDisposable {
   readonly access: SessionAccess
 
   /**
-   * Bind live event routing to this exact Session until close. The owner must
-   * first append the complete Session prefix through this handle and must bind
-   * immediately before publishing it, without intervening Session appends.
-   * Backends without this optional capability cannot acknowledge live flushes.
-   * @param session - the Session owned by this write handle.
-   * @throws when the handle cannot bind this Session.
-   */
-  bindSession?(session: Session): void
-
-  /**
    * Read a slice of the valid contiguous logical log. The slice is a legal log
    * prefix segment: a torn physical tail is never returned, and repeated reads
    * on this handle never observe an older state than a prior read.
@@ -374,7 +364,7 @@ Freshness: once an `append` or `flush` resolves, reads started afterwards on thi
 /**
  * Create a new stored session and take its write ownership.
  * @param header - the immutable header (id, version, cwd, lineage) to store.
- * @param options - optional cancellation.
+ * @param options - unused optional cancellation; backends that support deletion implement it.
  * @returns a `write` handle owned by the caller; close it to release ownership.
  * @throws {SessionAlreadyExistsError} when the id already exists.
  */
@@ -430,6 +420,24 @@ abstract stat(id: SessionId, options?: SessionPersistenceStatOptions): Promise<S
  * @returns one snapshot per stored session.
  */
 abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+/**
+ * Remove one stored session's durable artifacts.
+ *
+ * Deletion is not part of the append contract: a deleted id stops being
+ * observable through `stat`/`list`/`open`, and the backend may retain a
+ * recoverable copy outside its storage root because only the operator
+ * decides when bytes are unrecoverable. A created-but-unmaterialized
+ * session has no durable artifact, so it reports `absent` once its handle
+ * closes. Concurrent readers keep the handles they already opened; a write
+ * handle holds ownership of the id and refuses deletion until it closes.
+ * @param id - the stored session to remove.
+ * @param _options - optional cancellation; this base implementation ignores it.
+ * @returns `deleted` when artifacts were removed, `absent` when the id stored nothing.
+ * @throws {SessionAlreadyOwnedError} when a write handle holds the session.
+ * @throws {SessionPersistenceDeleteUnsupportedError} from a backend that keeps no removable artifact.
+ */
+async delete(id: SessionId, _options?: SessionPersistenceDeleteOptions): Promise<SessionPersistenceDeleteOutcome>
 ```
 
 Types: [SessionId](core.md)

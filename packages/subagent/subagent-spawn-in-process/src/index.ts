@@ -10,7 +10,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {
   ContinuableCreateSpec,
-  LocalOneShotCreateSpec,
   SubagentCapabilities,
   SubagentProvider,
 } from '@deepseek-ai/dsh-subagent'
@@ -47,10 +46,6 @@ class SpawnInProcessProvider implements SubagentProvider {
   readonly inheritsParentContext = false
 
   constructor(readonly name: string) {}
-
-  prepareLocalOneShot(): Promise<LocalOneShotCreateSpec> {
-    return Promise.resolve({})
-  }
 
   prepareContinuable(): Promise<ContinuableCreateSpec> {
     // A spawned child starts fresh, so it contributes no seed; the continuation

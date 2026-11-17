@@ -113,6 +113,8 @@ describe('Subagent model selection fields', () => {
     })
 
     expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByText(/These choices do not set a default/)).toBeTruthy()
+    expect(screen.getByText(/even if it is not listed/)).toBeTruthy()
     expect(screen.getByText('Alpha API', { exact: true })).toBeTruthy()
     fireEvent.click(screen.getByRole('checkbox', { name: /Fast/ }))
     fireEvent.click(screen.getByRole('checkbox', { name: /Deep/ }))

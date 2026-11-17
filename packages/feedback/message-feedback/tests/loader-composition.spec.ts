@@ -76,13 +76,14 @@ describe('message feedback through a real Loader composition', () => {
     const unownedRequest = {
       sessionId: unowned.id, messageId: unownedFixture.assistantMessageIds[0], rating: 'positive' as const, ifVersion: null,
     }
-    // A mounted JSONL listener alone does not persist Sessions without a write handle.
-    await expect(first.messageFeedback.put(unownedRequest)).rejects.toThrow(/no durability listener participated/u)
+    // A plugin-only Host has no durability acknowledgement, so the write proceeds and fails on the
+    // missing stored Session rather than on an unacknowledged flush.
+    await expect(first.messageFeedback.put(unownedRequest)).rejects.toThrow(/not found/u)
     expect(await first.sessionPersistence.stat(unowned.id)).toBeUndefined()
     const unownedItems = await first.messageFeedback.list({ sessionId: unowned.id })
     if (!unownedItems.ok) throw new Error(unownedItems.error.code)
     await expect(first.messageFeedback.put({ ...unownedRequest, ifVersion: unownedItems.value.items[0]!.version }))
-      .rejects.toThrow(/no durability listener participated/u)
+      .rejects.toThrow(/not found/u)
 
     const session = first.sessions.create(SessionId('loader-feedback'), {
       meta: { cwd: root },
@@ -91,8 +92,7 @@ describe('message feedback through a real Loader composition', () => {
     // batches and `session/flush` barriers into its active write handle.
     const writeHandle = await first.sessionPersistence.create(session.header)
     await writeHandle.append(session.snapshotEvents())
-    expect(await first.sessions.flush(session)).toBe(false)
-    writeHandle.bindSession?.(session)
+    expect(await first.sessions.flush(session)).toBe(true)
     const fixture = appendMessageFixture(session)
     const put = await first.messageFeedback.put({
       sessionId: session.id,

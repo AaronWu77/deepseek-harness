@@ -125,7 +125,7 @@ export async function storageFixture(cleanups: Array<() => Promise<void>>, optio
     await using handle = await ctx.sessionPersistence.open(id, 'read')
     return (await handle.read()).events
   }
-  const createSession = async (id: SessionId = SessionId('stored-translation'), live = true, bind = true) => {
+  const createSession = async (id: SessionId = SessionId('stored-translation'), live = true) => {
     const events = mainEvents()
     const header: SessionHeader = { version: SESSION_FORMAT_VERSION, id, createdAt: 1, cwd: root, isSeeded: false, delegationDepth: 0 }
     let session: Session | undefined, scope: Fiber | undefined, writer: SessionHandle | undefined
@@ -149,7 +149,6 @@ export async function storageFixture(cleanups: Array<() => Promise<void>>, optio
       writer = await ctx.sessionPersistence.create(session.header)
       await writer.append(session.snapshotEvents())
       await writer.flush()
-      if (bind) writer.bindSession?.(session)
     } else {
       await using handle = await ctx.sessionPersistence.create(header)
       await handle.append(events)

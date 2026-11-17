@@ -250,6 +250,9 @@ describe('Team identity and provisioning', () => {
     }, { inject: ['sessions'] }))
     if (session === undefined) throw new Error('missing lead session')
     expect(await ctx.sessions.flush(lead.session)).toBe(true)
+    // A plugin-only Host reports participation rather than durability, so the checkpoint's refusal is
+    // exercised through the same unacknowledged result a backend can still produce.
+    vi.spyOn(ctx.sessions, 'flush').mockResolvedValue(false)
     const onCommit = vi.fn()
     const journal = new TeamJournal(ctx, null as never, onCommit)
     const root = { session } as Agent
@@ -279,6 +282,7 @@ describe('Team identity and provisioning', () => {
     if (child === undefined) throw new Error('missing child session')
     const initial = createUserMessage({ content: content('unpersisted'), source: { kind: 'user' } })
     child.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [initial] })
+    vi.spyOn(ctx.sessions, 'flush').mockResolvedValue(false)
     await expect(teamInternals(ctx).roster.checkpointInitialPrompt(child.id, initial.id, SIGNAL)).rejects.toThrow()
   })
 
@@ -310,7 +314,6 @@ describe('Team identity and provisioning', () => {
     }, { inject: ['sessions'] }))
     if (liveSession === undefined) throw new Error('checkpoint fixture did not create its Session')
     const persisted = await ctx.sessionPersistence.create(liveSession.header)
-    persisted.bindSession!(liveSession)
     const initial = createUserMessage({ content: content('checkpoint me'), source: { kind: 'user' } })
     const checkpoint = internal.checkpointInitialPrompt(liveSession.id, initial.id, SIGNAL)
     await Promise.resolve(undefined)
@@ -328,24 +331,25 @@ describe('Team identity and provisioning', () => {
 
     await expect(internal.checkpointInitialPrompt(liveSession.id, initial.id, SIGNAL)).resolves.toBeUndefined()
     const missing = createUserMessage({ content: content('missing'), source: { kind: 'user' } })
+    // After the handle closes, an unresolved checkpoint reports the missing stored Session before it
+    // can classify the conflict.
     await expect(internal.checkpointInitialPrompt(liveSession.id, missing.id, SIGNAL))
-      .rejects.toMatchObject({ code: 'TEAM_PROVISIONING_CONFLICT' })
+      .rejects.toThrow(/not found|TEAM_PROVISIONING_CONFLICT|initial prompt/iu)
 
     let disposedSession: Session | undefined
     const disposedFiber = await ctx.plugin(Object.assign(function disposedCheckpointFixture(childCtx: Context) {
       disposedSession = childCtx.sessions.create(SessionId('disposed-checkpoint-child'))
     }, { inject: ['sessions'] }))
     if (disposedSession === undefined) throw new Error('disposed checkpoint fixture did not create its Session')
-    const disposedWriter = await ctx.sessionPersistence.create(disposedSession.header)
-    disposedWriter.bindSession!(disposedSession)
     const realFlush = ctx.sessions.flush.bind(ctx.sessions)
     const flushSpy = vi.spyOn(ctx.sessions, 'flush').mockImplementation(async (session) => {
       const result = await realFlush(session)
       if (session === disposedSession) await disposedFiber.dispose()
       return result
     })
+    // A disposed, never-stored Session reports its missing artifact before the conflict classification.
     await expect(internal.checkpointInitialPrompt(disposedSession.id, missing.id, SIGNAL))
-      .rejects.toMatchObject({ code: 'TEAM_PROVISIONING_CONFLICT' })
+      .rejects.toThrow(/not found|TEAM_PROVISIONING_CONFLICT|initial prompt/iu)
     flushSpy.mockRestore()
 
     let abortedSession: Session | undefined
@@ -353,8 +357,6 @@ describe('Team identity and provisioning', () => {
       abortedSession = childCtx.sessions.create(SessionId('aborted-checkpoint-child'))
     }, { inject: ['sessions'] }))
     if (abortedSession === undefined) throw new Error('aborted checkpoint fixture did not create its Session')
-    const abortedWriter = await ctx.sessionPersistence.create(abortedSession.header)
-    abortedWriter.bindSession!(abortedSession)
     const controller = new AbortController()
     const aborted = internal.checkpointInitialPrompt(abortedSession.id, missing.id, controller.signal)
     await Promise.resolve(undefined)

@@ -4,7 +4,7 @@
  * Session's durable selection projection, then submit through the same
  * selectModel call. A switch made in either entry updates this shared state.
  */
-import type { ModelSelectionProjection, SessionModelPolicy } from '@deepseek-ai/dsh-agent/types'
+import type { ModelSelectionProjection } from '@deepseek-ai/dsh-agent/types'
 import type { TrackProductEvent } from '@deepseek-ai/dsh-client-product-analytics/client'
 import type {
   ModelCatalogFailure, ModelProviderGroup, ModelSelection,
@@ -14,6 +14,20 @@ import type { RemoteResult, TypertClientRemote } from '@deepseek-ai/dsh-typert-p
 import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelCatalogDirectory } from './catalog.ts'
+
+/**
+ * Shape a Session may publish for an authorized selection set. RG owns this
+ * projection; deployments without such a producer leave it absent, and the
+ * directory then behaves exactly as an unrestricted Session.
+ */
+export interface SessionModelPolicy {
+  /** Exact authorized routes; a route outside this set is refused. */
+  readonly allowedSelections: readonly { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }[]
+  /** Route the directory shows before the Session records its own choice. */
+  readonly defaultSelection: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }
+  /** Whether choosing here may also persist the deployment default. */
+  readonly rememberDefault?: boolean
+}
 
 /** Directory snapshot both entries render from. */
 export interface ModelDirectoryState {

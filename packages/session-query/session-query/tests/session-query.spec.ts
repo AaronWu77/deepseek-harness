@@ -22,6 +22,8 @@ import SessionQueryEngine, {
   SESSION_QUERY_DEFAULT_PERSISTED_INSPECT_CONCURRENCY,
   type SessionEventSurface,
   type SessionQueryErrorCode,
+  type SessionRecord,
+  type SessionSourceListing,
 } from '@deepseek-ai/dsh-session-query'
 import { SessionTitleProviderId, SessionTitleService } from '@deepseek-ai/dsh-session-title'
 import { TestSessionQueryEngine } from './test-service.ts'
@@ -200,6 +202,10 @@ const cancellableSessionListings = [
     run: (ctx: Context, signal: AbortSignal) => ctx.sessionQuery.listSessions(signal),
   },
   {
+    name: 'listSessionsWithSource',
+    run: (ctx: Context, signal: AbortSignal) => ctx.sessionQuery.listSessionsWithSource(signal),
+  },
+  {
     name: 'filterSessions',
     run: (ctx: Context, signal: AbortSignal) => ctx.sessionQuery.filterSessions([], signal),
   },
@@ -232,6 +238,511 @@ const cancellableExactReads: readonly CancellableExactRead[] = [
     run: (ctx, sessionId, signal) => ctx.sessionQuery.readEvent({ sessionId, seq: SessionSeq(0) }, signal),
   },
 ] as const
+
+describe('source-bound Session corpus listings', () => {
+  it('distinguishes an absent provider from an empty provider', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      const absent = await ctx.sessionQuery.listSessionsWithSource()
+      expect(absent.records).toEqual([])
+      expect(absent.stored).toEqual([])
+      expect(absent.persistenceIdentity).toBeUndefined()
+      expect(absent.observationPersistenceIdentity).toBeUndefined()
+      expect(absent.sessionStoreIdentity).toBe(ctx.sessions.identity)
+      expect(absent.queryIdentity).toBe(ctx.sessionQuery.identity)
+
+      await ctx.plugin(TestPersistence)
+      const empty = await ctx.sessionQuery.listSessionsWithSource()
+      expect(empty.records).toEqual([])
+      expect(empty.stored).toEqual([])
+      expect(empty.persistenceIdentity).toBe(ctx.sessionPersistence.identity)
+      expect(empty.observationPersistenceIdentity).toBe(ctx.sessionPersistence.identity)
+      expect(empty.sessionStoreIdentity).toBe(ctx.sessions.identity)
+      expect(empty.queryIdentity).toBe(ctx.sessionQuery.identity)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('retains duplicate stored metadata without backend locations or shared headers', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      const live = ctx.sessions.create(SessionId('same'), { meta: { createdAt: 1 } })
+      const first = {
+        header: structuredClone(live.header), revision: SessionPersistenceRevision('r1'),
+        eventCount: 0, sizeBytes: 0, formatStatus: 'current' as const,
+        location: { kind: 'test', path: '/private-artifact' }, debugPath: '/private-debug',
+      }
+      const hidden = { header: header('hidden'), revision: SessionPersistenceRevision('hidden') }
+      const duplicate = { header: structuredClone(live.header), revision: SessionPersistenceRevision('r2') }
+      const snapshots = [first, hidden, duplicate]
+      TestPersistence.listOverride = () => Promise.resolve(snapshots)
+      await ctx.plugin(TestPersistence)
+
+      const bound = await ctx.sessionQuery.listSessionsWithSource()
+      expect(TestPersistence.listCalls).toBe(1)
+      expect(bound.stored.map(row => [row.header.id, row.revision])).toEqual([
+        [live.id, SessionPersistenceRevision('r1')],
+        [hidden.header.id, SessionPersistenceRevision('hidden')],
+        [live.id, SessionPersistenceRevision('r2')],
+      ])
+      expect(bound.stored[0]).toEqual({
+        header: live.header, revision: SessionPersistenceRevision('r1'),
+        eventCount: 0, sizeBytes: 0, formatStatus: 'current',
+      })
+      expect(JSON.stringify(bound.stored)).not.toContain('/private-')
+      expect(bound.stored[0]?.header).not.toBe(first.header)
+      expect(bound.stored[0]?.header).not.toBe(bound.stored[2]?.header)
+      expect(bound.stored[0]?.header).not.toBe(bound.records.find(row => row.header.id === live.id)?.header)
+      expect(bound.records).toEqual(await ctx.sessionQuery.listSessions())
+      expect(bound.records.find(row => row.header.id === live.id)).toMatchObject({ live: true, persisted: true })
+      expect(JSON.stringify(bound.records)).not.toContain('Identity')
+      const serialized = JSON.stringify(bound)
+      for (const key of ['queryIdentity', 'persistenceIdentity', 'observationPersistenceIdentity', 'sessionStoreIdentity']) {
+        expect(serialized).not.toContain(JSON.stringify(key))
+      }
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects live and stored header conflicts and persistence errors', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      ctx.sessions.create(SessionId('conflict'), { meta: { createdAt: 1 } })
+      TestPersistence.listOverride = () => Promise.resolve([
+        { header: header('conflict', 2), revision: SessionPersistenceRevision('same') },
+      ])
+      await ctx.plugin(TestPersistence)
+      await expect(ctx.sessionQuery.listSessionsWithSource()).rejects.toMatchObject({
+        code: 'SESSION_QUERY_SOURCE_CONFLICT',
+      })
+      await expect(ctx.sessionQuery.listSessions()).rejects.toMatchObject({
+        code: 'SESSION_QUERY_SOURCE_CONFLICT',
+      })
+      TestPersistence.listOverride = () => Promise.reject(new Error('synthetic listing failure'))
+      await expect(ctx.sessionQuery.listSessionsWithSource()).rejects.toMatchObject({
+        code: 'SESSION_QUERY_PERSISTENCE_FAILED',
+      })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('preserves cancellation raised by a reentrant live-list accessor', async () => {
+    const ctx = await liveContext()
+    const sessions = ctx.sessions
+    const originalList = sessions.list.bind(sessions)
+    const controller = new AbortController()
+    const reason = new Error('cancelled inside live listing')
+    try {
+      ctx.accessor('sessions.list', {
+        get: () => () => {
+          controller.abort(reason)
+          return originalList()
+        },
+      })
+      await expect(ctx.sessionQuery.listSessionsWithSource(controller.signal)).rejects.toBe(reason)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('captures the observation source after a reentrant live-list persistence switch', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    const other = new Context()
+    const owner = await ctx.plugin(TestPersistence)
+    await other.plugin(TestPersistence)
+    const a = ctx.sessionPersistence
+    const b = other.sessionPersistence
+    const sessions = ctx.sessions
+    const originalList = sessions.list.bind(sessions)
+    try {
+      ctx.accessor('sessions.list', {
+        get: () => () => {
+          owner.ctx.set('sessionPersistence', b)
+          return originalList()
+        },
+      })
+      const bound = await ctx.sessionQuery.listSessionsWithSource()
+      expect(bound.persistenceIdentity).toBe(a.identity)
+      expect(bound.observationPersistenceIdentity).toBe(b.identity)
+    } finally {
+      owner.ctx.set('sessionPersistence', a)
+      await Promise.all([ctx.fiber.dispose(), other.fiber.dispose()])
+    }
+  })
+
+  it('rejects a reentrant live-list store switch before publishing records', async () => {
+    const ctx = new Context()
+    const other = new Context()
+    const owner = await ctx.plugin(SessionStore)
+    await ctx.plugin(TestSessionQueryEngine)
+    await other.plugin(SessionStore)
+    const a = ctx.sessions
+    const b = other.sessions
+    const originalList = a.list.bind(a)
+    try {
+      ctx.accessor('sessions.list', {
+        get: () => () => {
+          owner.ctx.set('sessions', b)
+          return originalList()
+        },
+      })
+      await expect(ctx.sessionQuery.listSessionsWithSource()).rejects.toMatchObject({
+        code: 'SESSION_QUERY_SOURCE_CONFLICT',
+      })
+    } finally {
+      owner.ctx.set('sessions', a)
+      await Promise.all([ctx.fiber.dispose(), other.fiber.dispose()])
+    }
+  })
+
+  it('reports distinct list and observation persistence sources after a silent replacement', async () => {
+    TestPersistence.reset([{ meta: header('shared'), events: eventLog('stored') }])
+    const ctx = await liveContext()
+    const other = new Context()
+    const owner = await ctx.plugin(TestPersistence)
+    await other.plugin(TestPersistence)
+    try {
+      const a = ctx.sessionPersistence
+      const b = other.sessionPersistence
+      const first = await ctx.sessionQuery.listSessionsWithSource()
+      expect(first.persistenceIdentity).toBe(a.identity)
+      expect(first.observationPersistenceIdentity).toBe(a.identity)
+
+      owner.ctx.set('sessionPersistence', b)
+      const split = await ctx.sessionQuery.listSessionsWithSource()
+      expect(split.records).toEqual(first.records)
+      expect(split.stored[0]?.revision).toBe(first.stored[0]?.revision)
+      expect(split.persistenceIdentity).toBe(a.identity)
+      expect(split.observationPersistenceIdentity).toBe(b.identity)
+      expect(split.persistenceIdentity).not.toBe(split.observationPersistenceIdentity)
+
+      owner.ctx.set('sessionPersistence', a)
+      const restored = await ctx.sessionQuery.listSessionsWithSource()
+      expect(restored.persistenceIdentity).toBe(a.identity)
+      expect(restored.observationPersistenceIdentity).toBe(a.identity)
+    } finally {
+      await Promise.all([ctx.fiber.dispose(), other.fiber.dispose()])
+    }
+  })
+
+  it('keeps list identity tied to A across an in-flight persistence A-B-A switch', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    const other = new Context()
+    const owner = await ctx.plugin(TestPersistence)
+    await other.plugin(TestPersistence)
+    const a = ctx.sessionPersistence
+    const b = other.sessionPersistence
+    const started = Promise.withResolvers<undefined>()
+    const listing = Promise.withResolvers<SessionPersistenceSnapshot[]>()
+    TestPersistence.listOverride = () => {
+      started.resolve(undefined)
+      return listing.promise
+    }
+    const pending = ctx.sessionQuery.listSessionsWithSource()
+    try {
+      await started.promise
+      owner.ctx.set('sessionPersistence', b)
+      owner.ctx.set('sessionPersistence', a)
+      listing.resolve([{ header: header('shared'), revision: SessionPersistenceRevision('same') }])
+      const bound = await pending
+      expect(bound.persistenceIdentity).toBe(a.identity)
+      expect(bound.observationPersistenceIdentity).toBe(a.identity)
+      expect(bound.stored).toMatchObject([{ header: header('shared'), revision: 'same' }])
+    } finally {
+      listing.resolve([])
+      await Promise.allSettled([pending])
+      await Promise.all([ctx.fiber.dispose(), other.fiber.dispose()])
+    }
+  })
+
+  it('reports the Query live store even when the consumer has an isolated same-id store', async () => {
+    TestPersistence.reset()
+    const root = new Context()
+    const a = root.isolate('sessions', Symbol('store-a'))
+    const b = root.isolate('sessions', Symbol('store-b'))
+    await a.plugin(SessionStore)
+    await b.plugin(SessionStore)
+    await b.plugin(TestSessionQueryEngine)
+    try {
+      a.sessions.create(SessionId('shared'), { meta: { createdAt: 1 } })
+      b.sessions.create(SessionId('shared'), { meta: { createdAt: 1 } })
+      const query = a.get('sessionQuery')
+      if (query === undefined) throw new Error('expected shared Query service')
+      const bound = await query.listSessionsWithSource()
+      expect(bound.records).toMatchObject([{ header: header('shared'), live: true }])
+      expect(bound.sessionStoreIdentity).toBe(b.sessions.identity)
+      expect(bound.sessionStoreIdentity).not.toBe(a.sessions.identity)
+      expect(bound.queryIdentity).toBe(query.identity)
+    } finally {
+      await root.fiber.dispose()
+    }
+  })
+
+  it('reports the Query persistence source across a consumer isolation boundary', async () => {
+    TestPersistence.reset([{ meta: header('shared'), events: eventLog() }])
+    const root = new Context()
+    await root.plugin(SessionStore)
+    const a = root.isolate('sessionPersistence', Symbol('persistence-a'))
+    const b = root.isolate('sessionPersistence', Symbol('persistence-b'))
+    await a.plugin(TestPersistence)
+    await b.plugin(TestPersistence)
+    await b.plugin(TestSessionQueryEngine)
+    try {
+      const query = a.get('sessionQuery')
+      if (query === undefined) throw new Error('expected shared Query service')
+      const bound = await query.listSessionsWithSource()
+      expect(bound.stored).toMatchObject([{ header: header('shared') }])
+      expect(bound.persistenceIdentity).toBe(b.sessionPersistence.identity)
+      expect(bound.observationPersistenceIdentity).toBe(b.sessionPersistence.identity)
+      expect(bound.persistenceIdentity).not.toBe(a.sessionPersistence.identity)
+    } finally {
+      await root.fiber.dispose()
+    }
+  })
+
+  it.each(['replace', 'roundtrip'] as const)('binds the live store used after an in-flight %s', async (mode) => {
+    TestPersistence.reset()
+    const ctx = new Context()
+    const other = new Context()
+    const sessionOwner = await ctx.plugin(SessionStore)
+    await ctx.plugin(TestSessionQueryEngine)
+    await ctx.plugin(TestPersistence)
+    await other.plugin(SessionStore)
+    const a = ctx.sessions
+    const b = other.sessions
+    a.create(SessionId('live-a'), { meta: { createdAt: 1 } })
+    b.create(SessionId('live-b'), { meta: { createdAt: 2 } })
+    const started = Promise.withResolvers<undefined>()
+    const listing = Promise.withResolvers<SessionPersistenceSnapshot[]>()
+    TestPersistence.listOverride = () => {
+      started.resolve(undefined)
+      return listing.promise
+    }
+    const pending = ctx.sessionQuery.listSessionsWithSource()
+    try {
+      await started.promise
+      sessionOwner.ctx.set('sessions', b)
+      if (mode === 'roundtrip') sessionOwner.ctx.set('sessions', a)
+      listing.resolve([])
+      const bound = await pending
+      const expected = mode === 'roundtrip' ? a : b
+      expect(bound.sessionStoreIdentity).toBe(expected.identity)
+      expect(bound.records.map(record => record.header.id)).toEqual([
+        SessionId(mode === 'roundtrip' ? 'live-a' : 'live-b'),
+      ])
+      sessionOwner.ctx.set('sessions', a)
+      expect(ctx.get('sessions')?.identity).toBe(a.identity)
+    } finally {
+      listing.resolve([])
+      await Promise.allSettled([pending])
+      await Promise.all([ctx.fiber.dispose(), other.fiber.dispose()])
+    }
+  })
+
+  it('keeps overlapping listings bound to their own persistence instances', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    const firstOwner = await ctx.plugin(TestPersistence)
+    const a = ctx.sessionPersistence
+    const started = Promise.withResolvers<undefined>()
+    const listing = Promise.withResolvers<SessionPersistenceSnapshot[]>()
+    TestPersistence.listOverride = () => {
+      started.resolve(undefined)
+      return listing.promise
+    }
+    const first = ctx.sessionQuery.listSessionsWithSource()
+    try {
+      await started.promise
+      await firstOwner.dispose()
+      await ctx.plugin(TestPersistence)
+      const b = ctx.sessionPersistence
+      TestPersistence.listOverride = () => Promise.resolve([
+        { header: header('shared'), revision: SessionPersistenceRevision('same'), eventCount: 2 },
+      ])
+      const second = await ctx.sessionQuery.listSessionsWithSource()
+      listing.resolve([{ header: header('shared'), revision: SessionPersistenceRevision('same'), eventCount: 1 }])
+      const initial = await first
+      expect(initial.persistenceIdentity).toBe(a.identity)
+      expect(initial.observationPersistenceIdentity).toBe(b.identity)
+      expect(initial.stored).toMatchObject([{ header: header('shared'), revision: 'same', eventCount: 1 }])
+      expect(second.persistenceIdentity).toBe(b.identity)
+      expect(second.observationPersistenceIdentity).toBe(b.identity)
+      expect(second.stored).toMatchObject([{ header: header('shared'), revision: 'same', eventCount: 2 }])
+    } finally {
+      listing.resolve([])
+      await Promise.allSettled([first])
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each(['during-return', 'before-return'] as const)('keeps Query identity through an in-flight A-B-A switch %s', async (mode) => {
+    TestPersistence.reset()
+    const ctx = new Context()
+    const other = await liveContext()
+    await ctx.plugin(SessionStore)
+    const owner = await ctx.plugin(TestSessionQueryEngine)
+    await ctx.plugin(TestPersistence)
+    const a = ctx.sessionQuery
+    const b = other.sessionQuery
+    const started = Promise.withResolvers<undefined>()
+    const listing = Promise.withResolvers<SessionPersistenceSnapshot[]>()
+    TestPersistence.listOverride = () => {
+      started.resolve(undefined)
+      return listing.promise
+    }
+    const pending = a.listSessionsWithSource()
+    try {
+      await started.promise
+      owner.ctx.set('sessionQuery', b)
+      expect(ctx.get('sessionQuery')?.identity).toBe(b.identity)
+      if (mode === 'before-return') owner.ctx.set('sessionQuery', a)
+      listing.resolve([])
+      expect((await pending).queryIdentity).toBe(a.identity)
+      if (mode === 'during-return') owner.ctx.set('sessionQuery', a)
+      expect(ctx.get('sessionQuery')?.identity).toBe(a.identity)
+    } finally {
+      listing.resolve([])
+      await Promise.allSettled([pending])
+      await Promise.all([ctx.fiber.dispose(), other.fiber.dispose()])
+    }
+  })
+
+  it('refuses an inherited bound method when a subclass overrides listSessions', async () => {
+    class OverriddenQuery extends TestSessionQueryEngine {
+      override listSessions(): Promise<SessionRecord[]> {
+        return Promise.resolve([{ header: header('custom'), live: false, persisted: false }])
+      }
+    }
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(OverriddenQuery)
+    try {
+      expect(await ctx.sessionQuery.listSessions()).toMatchObject([{ header: header('custom') }])
+      const controller = new AbortController()
+      const reason = new Error('cancelled before source resolution')
+      controller.abort(reason)
+      await expect(ctx.sessionQuery.listSessionsWithSource(controller.signal)).rejects.toBe(reason)
+      await expect(ctx.sessionQuery.listSessionsWithSource()).rejects.toMatchObject({
+        code: 'SESSION_QUERY_SOURCE_CONFLICT',
+      })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('refuses an instance-level listSessions override without a bound override', async () => {
+    const ctx = await liveContext()
+    try {
+      Object.defineProperty(ctx.sessionQuery, 'listSessions', {
+        value: () => Promise.resolve([{ header: header('instance'), live: false, persisted: false }]),
+        configurable: true,
+      })
+      expect(await ctx.sessionQuery.listSessions()).toMatchObject([{ header: header('instance') }])
+      await expect(ctx.sessionQuery.listSessionsWithSource()).rejects.toMatchObject({
+        code: 'SESSION_QUERY_SOURCE_CONFLICT',
+      })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('refuses an intercepted listSessions without a bound override', async () => {
+    const ctx = await liveContext()
+    try {
+      ctx.accessor('sessionQuery.listSessions', {
+        get: () => () => Promise.resolve([{ header: header('intercepted'), live: false, persisted: false }]),
+      })
+      expect(await ctx.sessionQuery.listSessions()).toMatchObject([{ header: header('intercepted') }])
+      await expect(ctx.sessionQuery.listSessionsWithSource()).rejects.toMatchObject({
+        code: 'SESSION_QUERY_SOURCE_CONFLICT',
+      })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each(['accessor', 'instance', 'both-accessors'] as const)(
+    'rejects a list override installed during the default bound listing: %s',
+    async (mode) => {
+      TestPersistence.reset()
+      const ctx = await liveContext()
+      await ctx.plugin(TestPersistence)
+      const started = Promise.withResolvers<undefined>()
+      const listing = Promise.withResolvers<SessionPersistenceSnapshot[]>()
+      TestPersistence.listOverride = () => {
+        started.resolve(undefined)
+        return listing.promise
+      }
+      const pending = ctx.sessionQuery.listSessionsWithSource()
+      try {
+        await started.promise
+        if (mode === 'instance') {
+          Object.defineProperty(ctx.sessionQuery, 'listSessions', {
+            value: () => Promise.resolve([]), configurable: true,
+          })
+        } else {
+          ctx.accessor('sessionQuery.listSessions', { get: () => () => Promise.resolve([]) })
+          if (mode === 'both-accessors') {
+            ctx.accessor('sessionQuery.listSessionsWithSource', { get: () => () => Promise.resolve(undefined) })
+          }
+        }
+        listing.resolve([])
+        await expect(pending).rejects.toMatchObject({ code: 'SESSION_QUERY_SOURCE_CONFLICT' })
+      } finally {
+        listing.resolve([])
+        await Promise.allSettled([pending])
+        await ctx.fiber.dispose()
+      }
+    },
+  )
+
+  it('allows a provider with explicit matching list and bound-list overrides', async () => {
+    class BoundOverrideQuery extends TestSessionQueryEngine {
+      override listSessions(): Promise<SessionRecord[]> {
+        return Promise.resolve([{ header: header('custom'), live: false, persisted: false }])
+      }
+
+      override async listSessionsWithSource(signal?: AbortSignal): Promise<SessionSourceListing> {
+        const bound = await super.listSessionsWithSource(signal)
+        return { ...bound, records: await this.listSessions() }
+      }
+    }
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(BoundOverrideQuery)
+    try {
+      const bound = await ctx.sessionQuery.listSessionsWithSource()
+      expect(bound.records).toEqual(await ctx.sessionQuery.listSessions())
+      expect(bound.records).toMatchObject([{ header: header('custom') }])
+      expect(bound.queryIdentity).toBe(ctx.sessionQuery.identity)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps Query identity stable through proxies and distinct between instances', async () => {
+    const a = await liveContext()
+    const b = await liveContext()
+    try {
+      const first = a.sessionQuery.identity
+      const child = a.isolate('unrelated', Symbol('unrelated'))
+      expect(child.get('sessionQuery')?.identity).toBe(first)
+      expect(a.sessionQuery.identity).toBe(first)
+      expect((await a.sessionQuery.listSessionsWithSource()).queryIdentity).toBe(first)
+      expect(b.sessionQuery.identity).not.toBe(first)
+    } finally {
+      await Promise.all([a.fiber.dispose(), b.fiber.dispose()])
+    }
+  })
+})
 
 describe.each(cancellableSessionListings)('$name cancellation', ({ run }) => {
   it('preserves an exact pre-abort reason without entering persistence', async () => {

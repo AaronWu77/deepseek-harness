@@ -1,0 +1,14 @@
+version: 1
+scenario: review-gated-review-budget
+profile: headless
+composition: review-gated
+recording: scripted
+header:
+  class: review-gated-review-budget
+  pin: true
+  childSystemPrompts: [1, 2]
+permission: danger-full-access
+environment:
+  DEEPSEEK_API_KEY: ""
+  DSH_SNAPSHOT_PROVIDER: rg-scripted
+  DSH_SNAPSHOT_MODEL: rg-scripted

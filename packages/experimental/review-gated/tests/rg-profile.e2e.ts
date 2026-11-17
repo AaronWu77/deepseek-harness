@@ -1,3 +1,5 @@
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
+import { recordsOf } from './records.ts'
 /** Real headless-profile composition: RG mount health, PTC tools, and durable role sessions. */
 import { mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -156,7 +158,7 @@ describe('RG through the shipped headless profile', () => {
     let logs: PersistedSession[] = []
     const result = await runProfile(task, async (cwd) => { logs = await persistedSessions(join(cwd, '.sessions')) })
     const rows = expectHealthy(result.stdout)
-    const diagnostics = logs.map(log => ({ preset: log.header.agentPreset, events: log.events.filter(event => event.type === 'review-gated/state' || event.type === 'tool/result' && event.data.message.isError) }))
+    const diagnostics = logs.map(log => ({ preset: log.header.agentPreset, events: log.events.filter(event => pluginRecordOf(event)?.type === 'plugin:review-gated/state' || event.type === 'tool/result' && event.data.message.isError) }))
     expect(rows.findLast(row => row['type'] === 'final'), result.stderr + JSON.stringify(diagnostics)).toMatchObject({ type: 'final', text: 'PARENT_DONE WORKER_OK REVIEW_OK' })
     const agents = rows.filter(row => row['type'] === 'agent_health')
     expect(agents.map(row => row['preset']).sort()).toEqual([...presetIds].sort())
@@ -199,10 +201,10 @@ describe('RG through the shipped headless profile', () => {
       expect(child.events.filter(event => event.type === 'request/header')
         .every(event => event.type === 'request/header' && event.data.header.config.model === preset)).toBe(true)
     }
-    const prepared = parent.events.filter(event => event.type === 'review-gated/result-prepared').at(-1)
-    if (prepared?.type !== 'review-gated/result-prepared') throw new Error('missing prepared reviewer result')
+    const prepared = recordsOf(parent.events).filter(event => event.type === 'plugin:review-gated/result-prepared').at(-1)
+    if (prepared?.type !== 'plugin:review-gated/result-prepared') throw new Error('missing prepared reviewer result')
     expect(prepared.data.state.task).toMatchObject({ workerAttempts: 1, reviewAttempts: 1, active: null, reviewStatus: 'reported-pass' })
-    expect(parent.events.filter(event => event.type === 'review-gated/result-confirmed').at(-1)).toMatchObject({ data: {
+    expect(parent.events.filter(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed').at(-1)).toMatchObject({ data: {
       taskId: prepared.data.taskId, runId: prepared.data.runId, childId: prepared.data.childId,
     } })
     for (const { events } of logs) {

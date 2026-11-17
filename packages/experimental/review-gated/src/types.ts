@@ -14,7 +14,8 @@ export interface RgClaimReport {
   readonly hint: string
   readonly claim: {
     readonly intentSeq: SessionSeq
-    readonly target: 'next-turn' | 'next-step'
+    /** Original target when recorded; absence does not imply next-turn or next-step. */
+    readonly target?: 'next-turn' | 'next-step'
     readonly turn: number
     readonly step: number
     readonly phase: 'unsettled' | 'entered' | 'rejected' | 'empty'
@@ -120,6 +121,15 @@ export interface RgPolicy {
   readonly maxScopeFiles: number
   readonly maxScopeBytes: number
 }
+/** Derived counters and recovery advice; never persisted as another task state. */
+export interface RgReviewWorkflow {
+  readonly workerAttemptsRemaining: number
+  readonly reviewAttemptsRemaining: number
+  readonly nextReviewIsLast: boolean
+  readonly needsHumanDecision: boolean
+  /** An inconclusive review with unavailable evidence and no reported concrete defect. */
+  readonly evidenceIncomplete: boolean
+}
 /** Complete requirements delivered to a fresh role. */
 export interface RgHandoff {
   readonly objective: string
@@ -210,8 +220,26 @@ export interface RgSessionState {
   readonly diagnostic: string | null
 }
 
+/** Bounded recovery view published by the RG projection for live and cold observers. */
+export interface RgProjectionView {
+  /** Distinguishes failed RG recovery from a Session carrying no RG state. */
+  readonly failed: boolean
+  /** False for failure, open admission, intent or entered claims, rejected task
+   * origin, unproven task receipt, or unusable task state (diagnostic or saving result).
+   */
+  readonly ready: boolean
+  /** Diagnostic receipt summary; never gate on this field. Use ready instead. */
+  readonly taskReceipt: 'none' | 'proven' | 'unproven'
+  readonly state: RgSessionState | null
+  readonly claim: (NonNullable<RgView['claim']> & {
+    readonly intentSeq: SessionSeq
+    readonly turn: number
+    readonly step: number
+  }) | null
+}
+
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
-    reviewGated: RgSessionState | null
+    reviewGated: RgProjectionView
   }
 }

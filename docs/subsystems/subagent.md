@@ -431,8 +431,8 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 Settings, Session policy, durable reservations, and parent-visible formal results.
 
 ```ts cordis-catalog
-/** Bind a fresh RG composition or restore main policy; persisted children gain no new run authorization.
- * @param agent - live or initialization-window Agent.
+/** Record this Agent's RG role and freeze its captured policy.
+ * @param agent - Agent whose preset composition determines the RG role.
  */
 initialize(agent: Agent): void
 
@@ -448,20 +448,20 @@ read(session: Session): RgSessionState | null
  */
 statusOf(session: Session): 'ready' | 'saving' | 'unknown'
 
-/** Read the exact Session claim disposition without starting an Agent.
+/** Read the original RG claim without starting an Agent.
  * @param session - prepared Session.
- * @returns the claim view, or undefined when its projection is unavailable.
+ * @returns the owned claim, or undefined when its current projection is unavailable or invalid.
  */
-claimOf(session: Session): ClaimWireState | null | undefined
+claimOf(session: Session): RgProjectionState['claim'] | undefined
 
 /** Bound model-visible claim details including the complete JSON wrapper.
  * @param session - Session owning the input.
  * @param status - live claim durability state.
- * @param claim - JSON-safe claim retained by the Agent or its projection.
+ * @param claim - original claim retained by the RG projection.
  * @returns a bounded summary; omitted raw fields and text are explicitly marked.
  * @throws RgError when the configured budget cannot hold the minimum summary.
  */
-claimReport(session: Session, status: 'saving' | 'unknown' | null, claim: ClaimRecovery | ClaimWireState | null): RgClaimReport
+claimReport(session: Session, status: 'saving' | 'unknown' | null, claim: RgPreviewClaim | null): RgClaimReport
 
 /** Follow complete RG snapshots without activating a historical Agent.
  * @param request - authorized Session identity.
@@ -473,9 +473,9 @@ claimReport(session: Session, status: 'saving' | 'unknown' | null, claim: ClaimR
 /** Check every request against its frozen policy and, for children, its exact live reservation.
  * @param agent - requesting Agent.
  * @param selection - frozen request selection.
- * @param context - exact pre-step messages and signal for a confirmed first claim.
+ * @param context - exact pre-step position, messages, and signal for the RG-owned claim.
  */
-assertRequest(agent: Agent, selection: Readonly<ModelSelection>, context?: { readonly signal: AbortSignal; readonly messages: readonly UserMessage[] }): void
+assertRequest(agent: Agent, selection: Readonly<ModelSelection>, context?: StepClaimContext): void
 
 /** Start a new budget only from a human-owned Remote action. Concurrent actions on the same Agent are refused.
  * A failed save or interrupted delivery leaves the task outcome uncertain and refuses further RG work.
@@ -522,7 +522,7 @@ readGit(session: Session): RgGitState | null
 async startRole(parent: Agent, role: 'worker' | 'reviewer', input: RgHandoff, requested: { provider: string; model: string } | undefined, signal: AbortSignal): Promise<{ kind: 'activation'; subagentId: SessionId; runId: RgRunId }>
 ```
 
-Types: [Agent](core.md) · [ClaimRecovery](core.md) · [ClaimWireState](core.md) · [ModelSelection](core.md) · [Session](session.md) · [SessionId](core.md) · [UserMessage](session.md)
+Types: [Agent](core.md) · [ModelSelection](core.md) · [Session](session.md) · [SessionId](core.md)
 
 Source: [`packages/experimental/review-gated/src/runtime.ts`](../../packages/experimental/review-gated/src/runtime.ts)
 
@@ -531,18 +531,6 @@ Source: [`packages/experimental/review-gated/src/runtime.ts`](../../packages/exp
 ### `ctx.subagentModelSelection` — `SubagentModelSelectionConfig`
 
 Host settings owner that records Session authorization before the first model request.
-
-```ts cordis-catalog
-/**
- * Register a composition-owned authorization source without changing global preferences.
- * Sources are sampled only for new root Sessions. Existing, resumed, seeded and
- * child Sessions retain their recorded or inherited decision. More than one
- * matching source, or removal/replacement during resolution, rejects creation.
- * @param source - named resolver returning a non-empty route list or abstaining.
- * @returns the effect disposer that withdraws this source for later creations.
- */
-registerSource(source: SubagentModelSelectionSource): () => void
-```
 
 Source: [`packages/subagent/tool-subagent/src/model-selection-settings.ts`](../../packages/subagent/tool-subagent/src/model-selection-settings.ts)
 
@@ -573,16 +561,6 @@ startActivation(spec: SubagentActivationSpec & { readonly childId: SessionId }):
  * @returns activation with a message id only for local children.
  */
 startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>
-
-/**
- * Register a synchronous, rejection-only check at the actual activation start.
- * Every current guard inspects the immutable specification before the manager
- * reserves resources. A throw prevents local and external provider execution.
- * Removing a guard affects later starts, not activations already admitted.
- * @param check - synchronous callback that throws to reject and otherwise returns.
- * @returns the effect disposer that removes this exact registration.
- */
-guardStarts(check: SubagentStartGuard): () => void
 
 /**
  * Join progressing descendants without cancelling them. Idle descendants whose

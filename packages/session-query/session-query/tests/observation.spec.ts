@@ -126,7 +126,7 @@ function stubPersistence(
     }
     return Promise.resolve(handle)
   }
-  return { stat, open } as never
+  return { identity: Symbol('stub-persistence'), stat, open } as never
 }
 
 async function readerContext(): Promise<Context> {
@@ -146,6 +146,8 @@ describe('SessionObservationReader live path', () => {
     observed[Symbol.dispose]()
     expect(() => observed.retain()).toThrow('is disposed')
     expect(retained.source).toBe('live')
+    expect(Object.hasOwn(observed, 'persistenceIdentity')).toBe(false)
+    expect(Object.hasOwn(retained, 'persistenceIdentity')).toBe(false)
     retained[Symbol.dispose]()
     await ctx.fiber.dispose()
   })
@@ -259,16 +261,69 @@ describe('SessionObservationReader cold path', () => {
     const meta = header('prepared-leases')
     const store = new Map([[meta.id, { header: meta, events: [messageEvent(0, 'kept')], revision: 'r1' }]])
     const counters = { stat: 0, open: 0, read: 0 }
-    ctx.provide('sessionPersistence', stubPersistence(store, counters))
+    const persistence = stubPersistence(store, counters)
+    ctx.provide('sessionPersistence', persistence)
     const reader = new SessionObservationReader(ctx)
     const observed = await reader.read(meta.id, { projectionMode: 'none' })
     const retained = observed.retain()
+    expect(observed.persistenceIdentity).toBe(persistence.identity)
+    expect(retained.persistenceIdentity).toBe(persistence.identity)
+    expect(JSON.parse(JSON.stringify(observed))).not.toHaveProperty('persistenceIdentity')
+    expect(observed.revision).toBe(SessionPersistenceRevision('r1'))
+    expect(retained.revision).toBe(observed.revision)
 
     observed[Symbol.dispose]()
     observed[Symbol.dispose]()
     expect(() => observed.retain()).toThrow('is disposed')
     retained[Symbol.dispose]()
     await ctx.fiber.dispose()
+  })
+
+  it('does not retain a background observation or evict an existing cached Session', async () => {
+    const ctx = await readerContext()
+    const a = header('background-cached')
+    const b = header('background-transient')
+    const store = new Map([
+      [a.id, { header: a, events: [messageEvent(0, 'cached')], revision: 'r1' }],
+      [b.id, { header: b, events: [messageEvent(0, 'transient')], revision: 'r1' }],
+    ])
+    const counters = { stat: 0, open: 0, read: 0 }
+    ctx.provide('sessionPersistence', stubPersistence(store, counters))
+    const reader = new SessionObservationReader(ctx, 1)
+    try {
+      const cached = await reader.read(a.id, { projectionMode: 'none' })
+      cached[Symbol.dispose]()
+      const first = await reader.read(b.id, { projectionMode: 'none', cachePolicy: 'transient' })
+      const retained = first.retain()
+      first[Symbol.dispose]()
+      const next = await reader.read(b.id, { projectionMode: 'none', cachePolicy: 'transient' })
+      expect(counters.open).toBe(3)
+      expect(retained.events).not.toBe(next.events)
+      expect(retained.events).toEqual(next.events)
+      next[Symbol.dispose]()
+      retained[Symbol.dispose]()
+      const again = await reader.read(a.id, { projectionMode: 'none' })
+      expect(counters.open).toBe(3)
+      expect(again.events).toBe(cached.events)
+      again[Symbol.dispose]()
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('allows a transient observation to reuse an already cached Session', async () => {
+    const ctx = await readerContext()
+    const meta = header('transient-existing-cache')
+    const store = new Map([[meta.id, { header: meta, events: [messageEvent(0, 'stable')], revision: 'r1' }]])
+    const counters = { stat: 0, open: 0, read: 0 }
+    ctx.provide('sessionPersistence', stubPersistence(store, counters))
+    const reader = new SessionObservationReader(ctx)
+    try {
+      const cached = await reader.read(meta.id, { projectionMode: 'none' })
+      const transient = await reader.read(meta.id, { projectionMode: 'none', cachePolicy: 'transient' })
+      expect(counters.open).toBe(1)
+      expect(transient.events).toBe(cached.events)
+      transient[Symbol.dispose]()
+      cached[Symbol.dispose]()
+    } finally { await ctx.fiber.dispose() }
   })
 
   it('serves an unchanged revision from its cache without re-reading the log', async () => {
@@ -284,6 +339,65 @@ describe('SessionObservationReader cold path', () => {
 
     expect(counters).toEqual({ stat: 2, open: 1, read: 1 })
     expect(second.events).toBe(first.events)
+    await ctx.fiber.dispose()
+  })
+
+  it.each(['onStat', 'onRead'] as const)('keeps the producing identity if persistence changes during %s', async (phase) => {
+    const ctx = await readerContext()
+    const meta = header('in-flight-source')
+    const left = new Map([[meta.id, { header: meta, events: [messageEvent(0, 'from-a')], revision: 'same' }]])
+    const right = new Map([[meta.id, { header: meta, events: [messageEvent(0, 'from-b')], revision: 'same' }]])
+    const aCounters = { stat: 0, open: 0, read: 0 }
+    const bCounters = { stat: 0, open: 0, read: 0 }
+    const hooks: StubHooks = {}
+    const a = stubPersistence(left, aCounters, hooks)
+    const b = stubPersistence(right, bCounters)
+    hooks[phase] = () => { ctx.set('sessionPersistence', b) }
+    ctx.provide('sessionPersistence', a)
+    const reader = new SessionObservationReader(ctx)
+
+    const first = await reader.read(meta.id, { projectionMode: 'none' })
+    const retained = first.retain()
+    using second = await reader.read(meta.id, { projectionMode: 'none' })
+    expect(first.revision).toBe(second.revision)
+    expect(first.persistenceIdentity).toBe(a.identity)
+    expect(second.persistenceIdentity).toBe(b.identity)
+    expect(first.persistenceIdentity).not.toBe(second.persistenceIdentity)
+    expect(first.events[0]).toMatchObject({ data: { content: [{ text: 'from-a' }] } })
+    expect(second.events[0]).toMatchObject({ data: { content: [{ text: 'from-b' }] } })
+    first[Symbol.dispose]()
+    expect(retained.persistenceIdentity).toBe(a.identity)
+    expect(retained.events[0]).toMatchObject({ data: { content: [{ text: 'from-a' }] } })
+
+    if (phase === 'onStat') delete hooks.onStat
+    else delete hooks.onRead
+    ctx.set('sessionPersistence', a)
+    using third = await reader.read(meta.id, { projectionMode: 'none' })
+    expect(third.persistenceIdentity).toBe(a.identity)
+    expect(third.revision).toBe(second.revision)
+    expect(third.events[0]).toMatchObject({ data: { content: [{ text: 'from-a' }] } })
+    retained[Symbol.dispose]()
+    await ctx.fiber.dispose()
+  })
+
+  it('identifies a different source hidden by an A-to-B-to-A service switch', async () => {
+    const ctx = await readerContext()
+    const meta = header('aba-source')
+    const aStore = new Map([[meta.id, { header: meta, events: [messageEvent(0, 'from-a')], revision: 'same' }]])
+    const bStore = new Map([[meta.id, { header: meta, events: [messageEvent(0, 'from-b')], revision: 'same' }]])
+    const a = stubPersistence(aStore, { stat: 0, open: 0, read: 0 })
+    const b = stubPersistence(bStore, { stat: 0, open: 0, read: 0 }, {
+      onStat: () => { ctx.set('sessionPersistence', a) },
+    })
+    ctx.provide('sessionPersistence', a)
+    const before = ctx.get('sessionPersistence')?.identity
+    ctx.set('sessionPersistence', b)
+    using observed = await new SessionObservationReader(ctx).read(meta.id, { projectionMode: 'none' })
+    expect(ctx.get('sessionPersistence')?.identity).toBe(before)
+    expect(observed.revision).toBe(SessionPersistenceRevision('same'))
+    expect(observed.persistenceIdentity).toBe(b.identity)
+    expect(observed.persistenceIdentity).not.toBe(before)
+    expect(observed.events[0]).toMatchObject({ data: { content: [{ text: 'from-b' }] } })
     await ctx.fiber.dispose()
   })
 
@@ -517,21 +631,27 @@ describe('SessionObservationReader cold path', () => {
     const ctx = await readerContext()
     const reader = new SessionObservationReader(ctx)
     const first = await ctx.plugin(SwapPersistence)
-    {
-      using observed = await reader.read(meta.id, { projectionMode: 'none' })
-      void observed
-    }
+    const firstIdentity = ctx.sessionPersistence.identity
+    const observed = await reader.read(meta.id, { projectionMode: 'none' })
+    const retained = observed.retain()
+    expect(observed.persistenceIdentity).toBe(firstIdentity)
+    observed[Symbol.dispose]()
     expect(SwapPersistence.readCalls).toBe(1)
     await first.dispose()
     const second = await ctx.plugin(SwapPersistence)
+    const secondIdentity = ctx.sessionPersistence.identity
     {
-      using observed = await reader.read(meta.id, { projectionMode: 'none' })
-      void observed
+      using next = await reader.read(meta.id, { projectionMode: 'none' })
+      expect(next.revision).toBe(retained.revision)
+      expect(next.persistenceIdentity).toBe(secondIdentity)
+      expect(next.persistenceIdentity).not.toBe(retained.persistenceIdentity)
+      expect(retained.persistenceIdentity).toBe(firstIdentity)
     }
-    // The revision string matches, but revisions from different instances are
-    // incomparable, so the cached entry must not be reused.
+    // Equal revision strings from distinct instances must not share an entry.
     expect(SwapPersistence.readCalls).toBe(2)
     await second.dispose()
+    expect(retained.persistenceIdentity).toBe(firstIdentity)
+    retained[Symbol.dispose]()
     await ctx.fiber.dispose()
   })
 
@@ -551,6 +671,8 @@ describe('SessionObservationReader cold path', () => {
     using observed = await new SessionObservationReader(ctx).read(meta.id, { projectionMode: 'none' })
 
     expect(observed.source).toBe('live')
+    expect(Object.hasOwn(observed, 'persistenceIdentity')).toBe(false)
+    expect(Object.hasOwn(observed, 'revision')).toBe(false)
     await ctx.fiber.dispose()
   })
 
@@ -570,6 +692,8 @@ describe('SessionObservationReader cold path', () => {
     using observed = await new SessionObservationReader(ctx).read(meta.id, { projectionMode: 'none' })
 
     expect(observed.source).toBe('live')
+    expect(Object.hasOwn(observed, 'persistenceIdentity')).toBe(false)
+    expect(Object.hasOwn(observed, 'revision')).toBe(false)
     expect(counters.open).toBe(0)
     await ctx.fiber.dispose()
   })

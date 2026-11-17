@@ -48,6 +48,30 @@ interface Compaction {
   summarized: boolean
 }
 
+/** Earlier events and compactions interrupted at a seed boundary. */
+interface RelationshipHistory {
+  eventAt(seq: number): SessionFormatEvent | undefined
+  isOrphanCompaction(seq: number): boolean
+}
+
+function arrayHistory(artifact: SessionFormatArtifact, knownEventTypes: ReadonlySet<string>): RelationshipHistory {
+  const orphanCompactions = new Set<number>()
+  let start: number | undefined
+  for (const event of artifact.events) {
+    if (!knownEventTypes.has(event.type)) continue
+    if (event.type === 'compaction/start') start = event.seq
+    if (event.type === 'compaction/end') start = undefined
+    if (event.type === 'session/end-seed') {
+      if (start !== undefined) orphanCompactions.add(start)
+      start = undefined
+    }
+  }
+  return {
+    eventAt: seq => artifact.events[seq],
+    isOrphanCompaction: seq => orphanCompactions.has(seq),
+  }
+}
+
 /** One native artifact's lifecycle state; no state survives between reads. */
 class Relationships {
   turn: number | null = null
@@ -63,20 +87,8 @@ class Relationships {
   readonly retries: SessionFormatJsonObject[] = []
   readonly startedRetries = new Set<string>()
   readonly commands = new Set<string>()
-  readonly orphanCompactions = new Set<number>()
 
-  constructor(readonly artifact: SessionFormatArtifact, readonly knownEventTypes: ReadonlySet<string>) {
-    let start: number | undefined
-    for (const event of artifact.events) {
-      if (!knownEventTypes.has(event.type)) continue
-      if (event.type === 'compaction/start') start = event.seq
-      if (event.type === 'compaction/end') start = undefined
-      if (event.type === 'session/end-seed') {
-        if (start !== undefined) this.orphanCompactions.add(start)
-        start = undefined
-      }
-    }
-  }
+  constructor(readonly history: RelationshipHistory, readonly knownEventTypes: ReadonlySet<string>) {}
 
   requireTurn(type: string): void {
     if (this.turn === null) throw new SessionFormatError(`${type} is outside an open turn`)
@@ -96,7 +108,7 @@ class Relationships {
   developer(event: SessionFormatEvent, data: SessionFormatJsonObject): void {
     if (data['headerSeq'] === undefined) return
     const headerSeq = earlier(data['headerSeq'], event.seq, 'developer/message headerSeq')
-    const headerEvent = this.artifact.events[headerSeq]
+    const headerEvent = this.history.eventAt(headerSeq)
     if (headerEvent?.type !== 'request/header') {
       throw new SessionFormatError('developer/message headerSeq must reference an earlier request/header')
     }
@@ -267,7 +279,7 @@ class Relationships {
     if (!this.knownEventTypes.has(event.type) || !RELATIONSHIP_TYPES.has(event.type)) return
     const data = record(event.data, event.type)
     if (STEP_EVENT_TYPES.has(event.type)) this.requireStep(event, data)
-    if (event.type.startsWith('turn/') && this.compaction !== undefined && !this.orphanCompactions.has(this.compaction.seq)) {
+    if (event.type.startsWith('turn/') && this.compaction !== undefined && !this.history.isOrphanCompaction(this.compaction.seq)) {
       throw new SessionFormatError(`${event.type} crosses an open compaction`)
     }
     this.foldSurface(event)
@@ -303,7 +315,7 @@ class Relationships {
       case 'request/context': this.requireTurn(event.type); break
       case 'tool/ptc-dispatch-start': case 'tool/ptc-dispatch': this.dispatch(event, data); break
       case 'llm/retry': case 'llm/retry-started': this.retry(event, data); break
-      case 'session/title': case 'session/title-llm-request': titleSources(this.artifact.events, event, data, this.knownEventTypes); break
+      case 'session/title': case 'session/title-llm-request': titleSources(this.history, event, data, this.knownEventTypes); break
       case 'command/run': {
         const id = text(data['commandId'], 'commandId')
         if (this.commands.has(id)) throw new SessionFormatError(`command/run repeats commandId ${id}`)
@@ -313,7 +325,7 @@ class Relationships {
       case 'command/done': {
         if (!this.commands.has(text(data['commandId'], 'commandId'))) throw new SessionFormatError('command/done has no prior command/run')
         if (data['sourceEventSeq'] !== undefined) {
-          const source = this.artifact.events[earlier(data['sourceEventSeq'], event.seq, 'command sourceEventSeq')]
+          const source = this.history.eventAt(earlier(data['sourceEventSeq'], event.seq, 'command sourceEventSeq'))
           if (data['kind'] !== 'success' || source?.type === 'command/run' || source?.type === 'command/done') throw new SessionFormatError('command/done has invalid sourceEventSeq')
         }
         break
@@ -347,7 +359,7 @@ function notStartedRepair(
 }
 
 function titleSources(
-  events: readonly SessionFormatEvent[], event: SessionFormatEvent, data: SessionFormatJsonObject, knownEventTypes: ReadonlySet<string>,
+  history: RelationshipHistory, event: SessionFormatEvent, data: SessionFormatJsonObject, knownEventTypes: ReadonlySet<string>,
 ): void {
   const references = array(data['messageSeqs'], 'title messageSeqs')
   if (event.type === 'session/title' && (references.length === 0) !== (record(data['source'], 'title source')['kind'] === 'user')) {
@@ -356,7 +368,7 @@ function titleSources(
   const seen = new Set<number>()
   for (const value of references) {
     const seq = earlier(value, event.seq, 'title messageSeqs')
-    const source = events[seq]
+    const source = history.eventAt(seq)
     if (seen.has(seq) || source?.type !== 'user/message' || !knownEventTypes.has(source.type) || record(record(source.data, 'title input')['source'], 'title input source')['kind'] !== 'user') {
       throw new SessionFormatError(`${event.type} messageSeqs must cite distinct earlier human user/message events`)
     }
@@ -380,6 +392,7 @@ function titleSources(
  * @param knownEventTypes - installed event types whose payloads this reader interprets.
  */
 export function assertV4LifecycleRelationships(artifact: SessionFormatArtifact, knownEventTypes: ReadonlySet<string>): void {
-  const state = new Relationships(artifact, knownEventTypes)
+  const history = arrayHistory(artifact, knownEventTypes)
+  const state = new Relationships(history, knownEventTypes)
   for (const event of artifact.events) state.accept(event)
 }

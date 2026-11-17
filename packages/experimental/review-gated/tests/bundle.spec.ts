@@ -47,7 +47,6 @@ describe('RG optional bundle', () => {
     const worker = definition(rows, 'preset-rg-worker')
     const reviewer = definition(rows, 'preset-rg-reviewer')
     const main = definition(rows, 'preset-rg')
-    expect(main.selectable).not.toBe(false)
     const shipped = definition(composeEntries([loadOverlayPatches('rg-test', ptcPath)]), 'preset-ptc')
     expect(group(worker)).toEqual(group(reviewer))
     expect(group(main)).toEqual(group(worker))
@@ -64,7 +63,6 @@ describe('RG optional bundle', () => {
       expect(tools.some(row => row.name === '@deepseek-ai/dsh-tool-subagent-control/list-agents')).toBe(false)
     }
     for (const preset of [worker, reviewer]) {
-      expect(preset.selectable).toBe(false)
       expect(preset.plugins.map(row => row.id)).toEqual(['persona', 'rg-role', 'rg-tools'])
       expect(leaves(preset.plugins).some(row => row.name === '@deepseek-ai/dsh-experimental-review-gated')).toBe(false)
     }

@@ -1,3 +1,4 @@
+import { appendRecord } from './records.ts'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -48,7 +49,7 @@ describe('local Git delivery recovery failures', { timeout: 120_000 }, () => {
       const state = f.runtime.readGit(session)
       if (state?.status === 'candidate' && state.candidate !== null && state.binding === null) {
         changed = true
-        session.append('review-gated/git-state', { version: 1, state: { ...state, diagnostic: 'Concurrent owner update' } })
+        appendRecord(session, 'plugin:review-gated/git-state', { version: 1, state: { ...state, diagnostic: 'Concurrent owner update' } })
       }
     })
     await f.role(agent, 'worker')

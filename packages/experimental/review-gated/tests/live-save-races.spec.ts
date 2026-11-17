@@ -1,3 +1,5 @@
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
+import { recordOf } from './records.ts'
 /** Regression barriers for the UI projection while confirmed events are flushing. */
 import { describe, expect, it } from 'vitest'
 import { gitHandoff, gitRuntimeFixture } from './fixtures/git-runtime.ts'
@@ -12,14 +14,15 @@ describe('RG UI save barriers', { timeout: 120_000 }, () => {
     const failed = f.gate()
     let intercepted = false
     const off = f.ctx.on('session/flush', (session) => {
-      if (session === agent.session && !intercepted && session.snapshotEvents().some(event => event.type === 'review-gated/result-confirmed')) {
+      if (session === agent.session && !intercepted && session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')) {
         intercepted = true
         throw new Error('controlled confirmation failure')
       }
     })
     const offState = f.ctx.on('session/event', (session, event) => {
-      if (session === agent.session && event.type === 'review-gated/state'
-        && event.data.state?.diagnostic?.startsWith('RG_RESULT_SAVE_FAILED')) failed.resolve(undefined)
+      const record = recordOf(event)
+      if (session === agent.session && record?.type === 'plugin:review-gated/state'
+        && record.data.state?.diagnostic?.startsWith('RG_RESULT_SAVE_FAILED')) failed.resolve(undefined)
     })
     try {
       await f.runtime.startRole(agent, 'reviewer', gitHandoff, undefined, new AbortController().signal)
@@ -42,9 +45,9 @@ describe('RG UI save barriers', { timeout: 120_000 }, () => {
     const entered = f.gate()
     const release = f.gate()
     let intercepted = false
-    const before = agent.session.snapshotEvents().filter(event => event.type === 'agent/admission/confirmed').length
+    const before = agent.session.snapshotEvents().filter(event => pluginRecordOf(event)?.type === 'plugin:review-gated/task-prepared').length
     const off = f.ctx.on('session/flush', async (session) => {
-      if (session !== agent.session || intercepted || session.snapshotEvents().filter(event => event.type === 'agent/admission/confirmed').length <= before) return
+      if (session !== agent.session || intercepted || session.snapshotEvents().filter(event => pluginRecordOf(event)?.type === 'plugin:review-gated/task-prepared').length <= before) return
       intercepted = true
       entered.resolve(undefined)
       await release.promise
@@ -54,7 +57,7 @@ describe('RG UI save barriers', { timeout: 120_000 }, () => {
       await entered.promise
       await f.ctx.sessionPersistence.flush()
       const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
-      try { expect((await stored.read()).events.filter(event => event.type === 'agent/admission/confirmed').length).toBeGreaterThan(before) }
+      try { expect((await stored.read()).events.filter(event => pluginRecordOf(event)?.type === 'plugin:review-gated/task-prepared').length).toBeGreaterThan(before) }
       finally { await stored.close() }
       const state = f.ctx.sessionProjections.snapshot(agent.session).values.reviewGated
       if (state == null) throw new Error('Missing RG projection')
@@ -76,7 +79,7 @@ describe('RG UI save barriers', { timeout: 120_000 }, () => {
     const release = f.gate()
     let intercepted = false
     const off = f.ctx.on('session/flush', async (session) => {
-      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => event.type === 'review-gated/result-confirmed')) return
+      if (session !== agent.session || intercepted || !session.snapshotEvents().some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')) return
       intercepted = true
       entered.resolve(undefined)
       await release.promise
@@ -87,7 +90,7 @@ describe('RG UI save barriers', { timeout: 120_000 }, () => {
       const completion = f.runtime['runs'].get(run.subagentId)?.completion
       await f.ctx.sessionPersistence.flush()
       const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
-      try { expect((await stored.read()).events.some(event => event.type === 'review-gated/result-confirmed')).toBe(true) }
+      try { expect((await stored.read()).events.some(event => pluginRecordOf(event)?.type === 'plugin:review-gated/result-confirmed')).toBe(true) }
       finally { await stored.close() }
       const state = f.ctx.sessionProjections.snapshot(agent.session).values.reviewGated
       if (state == null) throw new Error('Missing RG projection')

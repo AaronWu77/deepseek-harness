@@ -32,6 +32,7 @@ kind: "package-reference"
 | 操作 | 你得到什么 |
 |---|---|
 | `listSessions()` | 每个逻辑会话，最新的在前，带 `live` 与 `persisted` 可用性标志及可选 `formatStatus` |
+| `listSessionsWithSource()` | 绑定进程内来源身份的仅限 Host 的记录与持久化元数据 |
 | `readSession(id)` | 经过回放校验的完整原始事件日志，且不会让该会话变为实时 |
 | `filterSessions(filters)` | 匹配 AND 连接的元数据与可用性谓词的会话 |
 | `filterEvents(id, filters)` | 匹配元数据与字面文本谓词的语义事件文档 |
@@ -42,7 +43,9 @@ kind: "package-reference"
 | `traceEvent(request)` | 一个事件的位置替换与被引用源事件关系 |
 | `searchSessions(request)` / `searchEvents(request)` | 全文搜索分页结果，由挂载的后端实现 |
 
-不带正文的记录只公开 `SessionHeader.isSeeded`。返回事件正文的读取（`readSession`、`readSurface`、`readEvent`）与保留的 `SessionObservation` 值还携带精确 `inheritedEventCount`，因此调用方无需从日志推断切点即可区分继承事件与自有事件。
+不带正文的记录只公开 `SessionHeader.isSeeded`。返回事件正文的读取（`readSession`、`readSurface`、`readEvent`）与保留的 `SessionObservation` 值还携带精确 `inheritedEventCount`，因此调用方无需从日志推断切点即可区分继承事件与自有事件。 prepared 观察携带其读取前 `stat` 产生 `revision` 的持久化实例的进程内 `persistenceIdentity`；只能针对同一实例和会话 id 比较该修订，对新鲜度有要求时须重新验证，绝不能持久化身份或通过通信传输。实时观察不包含这两个字段。旧版 Query 不提供 `persistenceIdentity`，调用方必须将身份缺失视为无法验证。
+
+`listSessionsWithSource()` 返回逻辑记录、不含存储位置的持久化元数据，以及读取期间使用或解析的 Query、列表持久化、观察持久化和实时 Session store 身份。持久化元数据保留后端顺序和重复 id；即使列表为空，只要绑定了持久化也会返回其身份。只能对同一 Session id 和持久化身份比较修订，并在需要新鲜度时重新验证来源：合并后的语料库不是原子快照。覆写 `listSessions()` 的提供者还必须实现来源绑定方法，否则会以 `SESSION_QUERY_SOURCE_CONFLICT` 失败。此结果及其身份仅供 Host 使用，不得持久化或传输。
 
 ### 过滤器
 
@@ -107,7 +110,7 @@ kind: "package-reference"
 
 ### 观察缓存
 
-`observeSession` 不经过列表预检直接构建定点观察。实时观察以当前日志长度固定 cut，并在首次读取时才物化 `events`，因此只需要 header、cursor 或 projection 的消费者永远不会复制日志；日志只会追加，所以延后的首次读取得到的仍然正好是该前缀。冷路径先对存储会话执行 `stat`，再查询自有的有界缓存，缓存键为持久化实例加 `stat` 修订：修订未变则复用已恢复的未发布 Session，不再重读日志；修订变化或持久化实例被替换则经句柄 seam 重新加载并替换条目。缓存保留 `preparedSessionCacheSize` 个条目并按最久未用淘汰，被活跃观察租约钉住的条目从不被淘汰；读取中途转为实时的会话会重试实时路径。
+`observeSession` 不经过列表预检直接构建定点观察。实时观察以当前日志长度固定 cut，并在首次读取时才物化 `events`，因此只需要 header、cursor 或 projection 的消费者永远不会复制日志；日志只会追加，所以延后的首次读取得到的仍然正好是该前缀。冷路径先对存储会话执行 `stat`，再查询自有的有界缓存，缓存键为持久化实例加 `stat` 修订：修订未变则复用已恢复的未发布 Session，不再重读日志；修订变化或持久化实例被替换则经句柄 seam 重新加载并替换条目。缓存保留 `preparedSessionCacheSize` 个条目并按最久未用淘汰，被活跃观察租约钉住的条目从不被淘汰；读取中途转为实时的会话会重试实时路径。使用 `cachePolicy: 'transient'` 时，观察可复用已有缓存条目，但不会将新准备的 Session 加入缓存；租约仍在释放前持有该次读取。此选项不限制解码单个 Session 所需的内存，也不限制持久化提供者的缓存。
 
 ### 读取与追踪
 

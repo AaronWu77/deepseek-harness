@@ -14,8 +14,8 @@ import {
   sessionFormatCatalog,
 } from '@deepseek-ai/dsh-session-format-catalog'
 import { readdirSync, type Dirent } from 'node:fs'
-import { open, mkdir, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { open, mkdir, readdir, realpath, link, rename, rm, stat, truncate } from 'node:fs/promises'
+import { dirname, join, resolve, sep } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
 import { createHash, randomBytes } from 'node:crypto'
@@ -23,11 +23,12 @@ import pLimit, { type LimitFunction } from 'p-limit'
 import {
   SessionPersistence, SessionPersistenceRevision, SessionFormatUnsupportedError,
   SessionPersistenceCorruptionError,
-  SessionAlreadyExistsError, SessionPersistenceNotFoundError,
+  SessionAlreadyExistsError, SessionAlreadyOwnedError, SessionPersistenceNotFoundError,
   assertStoredId, materializeCreateHeader, sessionFormatVersionRefusal, validateStoredEvents,
   type SessionAccess, type SessionHandle,
   type SessionHandleReadResult,
   type SessionLocation, type SessionPersistenceCreateOptions,
+  type SessionPersistenceDeleteOptions, type SessionPersistenceDeleteOutcome,
   type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
   type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
   type SessionPersistenceRevision as PersistenceRevision,
@@ -103,11 +104,16 @@ export interface Config {
   /** Physical encoding; defaults to checksummed Zstandard frames. */
   compression?: JsonlCompression
   /**
-   * Maximum directory, header, and stat reads in flight across all concurrent
-   * listings of this backend (`list()`, the root encoding check, and historical
-   * fingerprints). Defaults to 3.
+   * Maximum project probes in per-id lookup and directory, header, and stat
+   * reads in listing traversals, shared across this backend. Defaults to 3.
    */
   listConcurrency?: number
+  /**
+   * Directory that receives a deleted session's directory. Defaults to
+   * `trash/sessions` beside `root`, so a deletion is recoverable by moving
+   * the directory back until the operator empties that folder.
+   */
+  trashRoot?: string
 }
 
 /** Logical header paired with the catalog's selected physical-generation classification. */
@@ -212,6 +218,12 @@ function isENOENT(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT'
 }
 
+/** Whether a filesystem error means another handle still holds the directory. */
+function isInUse(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES' || code === 'ENOTEMPTY'
+}
+
 /**
  * Run `task` over `items` through the backend's shared listing limiter and
  * settle every call. Callers consume the outcomes in input order, so the first
@@ -293,6 +305,7 @@ class JsonlSessionPersistence extends SessionPersistence {
   override readonly name = 'session-persistence-jsonl'
 
   private root: string
+  private trashRoot: string
   private compression: JsonlCompression
   /**
    * Bounds directory, header, and stat I/O across every concurrent listing of
@@ -324,6 +337,12 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     // Resolve once so later process.cwd() changes cannot split one backend across roots.
     this.root = resolve(config.root)
+    this.trashRoot = resolve(config.trashRoot ?? join(dirname(this.root), 'trash', 'sessions'))
+    // A trash root inside the storage root would be listed as a project and
+    // its deleted sessions would reappear as unreadable artifacts.
+    if (this.trashRoot === this.root || this.trashRoot.startsWith(this.root + sep)) {
+      throw new Error(`session-persistence-jsonl: trashRoot '${this.trashRoot}' must be outside root '${this.root}'`)
+    }
     this.compression = config.compression ?? DEFAULT_COMPRESSION
     this.listLimit = pLimit(config.listConcurrency ?? DEFAULT_LIST_CONCURRENCY)
     this.generationFormat = {
@@ -511,6 +530,47 @@ class JsonlSessionPersistence extends SessionPersistence {
       if (isENOENT(error)) return undefined
       throw error
     }
+  }
+
+  /**
+   * Move one stored session's directory into the trash root.
+   *
+   * The directory moves as a unit, so no observer can see a half-deleted
+   * session, and a same-volume rename keeps the operation atomic. This
+   * process forgets its cached decode of the log; a session this process still
+   * routes through a write handle refuses deletion instead.
+   * @param id - the stored session to remove.
+   * @param options - optional cancellation.
+   * @returns `deleted` when the directory moved, `absent` when the id stored nothing.
+   * @throws {SessionAlreadyOwnedError} when a write handle holds the session.
+   */
+  override async delete(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<SessionPersistenceDeleteOutcome> {
+    options?.signal?.throwIfAborted()
+    if (this.tracker.hasWriter(id)) throw new SessionAlreadyOwnedError(id)
+    const snapshot = await this.stat(id, options)
+    options?.signal?.throwIfAborted()
+    if (snapshot === undefined || snapshot.location === undefined) return 'absent'
+    const directory = dirname(snapshot.location.path)
+    const target = join(this.trashRoot, new Date().toISOString().replace(/[:.]/gu, '-'), String(id))
+    await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+    options?.signal?.throwIfAborted()
+    try {
+      await rename(directory, target)
+    } catch (error: unknown) {
+      options?.signal?.throwIfAborted()
+      if (isENOENT(error)) return 'absent'
+      // Windows refuses to rename a directory holding an open file, and a
+      // Unix mount can report the same condition as EACCES.
+      if (isInUse(error)) throw new SessionAlreadyOwnedError(id)
+      throw error
+    }
+    const preparation = this.migrationPreparations.get(id)
+    if (preparation !== undefined) {
+      preparation.controller.abort()
+      this.migrationPreparations.delete(id)
+    }
+    this.coldLogMemo.delete(id)
+    return 'deleted'
   }
 
   /**
@@ -1573,15 +1633,14 @@ class JsonlSessionPersistence extends SessionPersistence {
 
   /** Find the unique authoritative generation for an id across project directories. */
   private async findLog(id: SessionId, signal?: AbortSignal): Promise<ResolvedJsonlGeneration | undefined> {
-    const matches: ResolvedJsonlGeneration[] = []
-    for (const project of await this.listProjectDirs(signal)) {
+    const projects = await this.listLimit(() => this.listProjectDirs(signal))
+    const outcomes = await settleLimited(this.listLimit, projects, async (project) => {
       signal?.throwIfAborted()
       await this.rejectLegacyFlatArtifact(project, id, signal)
       signal?.throwIfAborted()
-      const dir = join(project, encodeSegment(id))
-      const selected = await this.resolveGenerationInDirectory(dir, signal)
-      if (selected !== undefined) matches.push(selected)
-    }
+      return this.resolveGenerationInDirectory(join(project, encodeSegment(id)), signal)
+    })
+    const matches = settledValues(outcomes).filter((selected): selected is ResolvedJsonlGeneration => selected !== undefined)
     if (matches.length > 1) {
       throw new Error(`duplicate JSONL session id "${id}" appears in multiple project directories`)
     }
@@ -1806,9 +1865,10 @@ class JsonlSessionPersistence extends SessionPersistence {
 /** JSONL persistence plugin label. */
 export const name = 'session-persistence-jsonl'
 
-/** Loader schema for the backend's root, physical encoding, and listing concurrency. */
+/** Loader schema for the backend's root, trash root, physical encoding, and listing concurrency. */
 export const Config: z<Config> = z.object({
   root: z.string().required(),
+  trashRoot: z.string(),
   compression: JsonlCompressionSchema,
   listConcurrency: z.natural().min(1).default(DEFAULT_LIST_CONCURRENCY),
 })

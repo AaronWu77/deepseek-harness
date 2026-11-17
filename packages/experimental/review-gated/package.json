@@ -1,5 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-experimental-review-gated",
+  "icon": "./icon.svg",
   "description": "PTC role model pools, bounded execution, and independent evidence-based review.",
   "version": "0.2.2-rc.1",
   "publishConfig": {
@@ -43,6 +44,7 @@
     }
   },
   "files": [
+    "icon.svg",
     "locale/*.json",
     "lib/index.js",
     "lib/client.js",
@@ -113,6 +115,7 @@
     "@deepseek-ai/dsh-timeout": "workspace:*"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-goal": "workspace:*",
     "@deepseek-ai/cordis": "workspace:~",
     "@deepseek-ai/cordis-plugin-loader": "workspace:~",
     "@deepseek-ai/dsh-agent-loop-testkit": "workspace:*",
@@ -147,6 +150,7 @@
     "react-dom": "^18.2.0",
     "@testing-library/react": "^16.3.3",
     "@deepseek-ai/dsh-client-ui-session": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "workspace:*",
     "@deepseek-ai/dsh-api-session-controller": "workspace:*",
     "@deepseek-ai/dsh-tool-subagent": "workspace:*",
     "@deepseek-ai/dsh-tool-executor-ptc": "workspace:*",

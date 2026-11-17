@@ -28,15 +28,6 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     agentPresets: AgentPresetRegistry
   }
-  interface Events {
-    /**
-     * Initialize consumers after a blank Agent commits its new preset, outside Session publication.
-     * A listener failure leaves the selected composition committed and rejects the selection operation.
-     * @param payload - live Agent and the committed preset id.
-     * @mode serial
-     */
-    'agent-preset/recomposed'(payload: { agent: Agent; agentPreset: string }): void | Promise<void>
-  }
 }
 
 interface Generation {
@@ -106,9 +97,6 @@ export class AgentPresetRegistry extends TypertRemoteService {
   async register(definition: PresetDefinition): Promise<() => Promise<void>> {
     const context = this.ctx
     if (!definition.id.trim()) throw new Error('Preset id must not be empty')
-    if (definition.selectable === false && definition.id === this.defaultId) {
-      throw new Error(`Agent preset is not selectable and cannot be the default: ${definition.id}`)
-    }
     if (this.definitions.has(definition.id)) throw new Error(`Duplicate agent preset: ${definition.id}`)
     const record: Definition = { config: definition, context, ready: Promise.resolve() }
     this.definitions.set(definition.id, record)
@@ -199,12 +187,11 @@ export class AgentPresetRegistry extends TypertRemoteService {
     }))
   }
 
-  /** Read every user-selectable declared preset, including activation failures.
-   * @returns Display metadata and loading diagnostics; non-selectable role presets are omitted.
+  /** Read every declared preset, including activation failures.
+   * @returns Display metadata and loading diagnostics.
    */
   async list(): Promise<AgentPreset[]> {
     const rows = await Promise.all([...this.definitions.values()]
-      .filter(record => record.config.selectable !== false)
       .map(async (record) => {
         const broken = await this.diagnostic(record)
         return {
@@ -362,9 +349,6 @@ export class AgentPresetRegistry extends TypertRemoteService {
    * @returns The bound identity.
    */
   async recompose(ctx: Context, id: string): Promise<AgentPreset> {
-    if (this.definitions.get(id)?.config.selectable === false) {
-      throw new RemoteError('agent-preset/invalid', `Agent preset is not selectable: ${id}`, { agentPreset: id, reason: 'selectable: false' })
-    }
     const preset = await this.mount(ctx, id)
     try { this.owner.emit('tools/change') }
     catch (error) { this.owner.logger.warn(`Preset tools observer: ${String(error)}`) }
@@ -390,7 +374,6 @@ export class AgentPresetRegistry extends TypertRemoteService {
         && this.agentPresetProjectionHandle.stateOf(agent.session) === agentPreset) return agentPreset
       const preset = await this.recompose(agent.ctx, agentPreset)
       agent.session.append('agent-preset/selected', { agentPreset: preset.id })
-      await this.owner.serial('agent-preset/recomposed', { agent, agentPreset: preset.id })
       return preset.id
     })
     const guard = turn.catch(() => undefined)

@@ -367,9 +367,7 @@ export function ModelSelect(
       seq: toastSeq.current,
       text: error.code === 'session/writer-held'
         ? t('error.sessionInUse')
-        : error.code === 'session/model-not-allowed'
-          ? t('error.modelNotAllowed')
-          : t('error.action', { message: `${error.code}: ${error.message}` }),
+        : t('error.action', { message: `${error.code}: ${error.message}` }),
     })
   }
 

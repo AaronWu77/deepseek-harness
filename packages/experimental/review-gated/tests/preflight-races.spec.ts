@@ -1,3 +1,4 @@
+import { appendRecord } from './records.ts'
 /** Model resolution cannot carry a role request across a delivery-mode change. */
 import { describe, expect, it, vi } from 'vitest'
 import { gitHandoff, gitRuntimeFixture } from './fixtures/git-runtime.ts'
@@ -43,11 +44,11 @@ describe('role preflight identity', { timeout: 120_000 }, () => {
     try {
       const state = f.runtime.read(agent.session)
       if (state?.task == null) throw new Error('Expected an existing task')
-      agent.session.append('review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'Changed task' } } })
+      appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'Changed task' } } })
     } finally { spy.mockRestore(); release.resolve(undefined) }
     const result = await settled
     expect(result).toHaveProperty('error')
-    expect(f.runtime.read(agent.session)?.task).toMatchObject({ objective: 'Changed task', workerAttempts: 0 })
+    expect(f.ctx.sessionProjections.snapshot(agent.session, ['reviewGated']).values.reviewGated?.state?.task).toMatchObject({ objective: 'Changed task', workerAttempts: 0 })
     expect(f.adapter.calls.some(call => call.model === 'worker')).toBe(false)
   })
 })

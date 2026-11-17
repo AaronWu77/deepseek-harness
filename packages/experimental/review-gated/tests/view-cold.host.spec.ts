@@ -1,3 +1,4 @@
+import { appendRecord } from './records.ts'
 /** Passive RG views observe real persisted Sessions without activating an Agent. */
 import { describe, expect, it, vi } from 'vitest'
 import { SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
@@ -21,13 +22,13 @@ describe('RG cold views', () => {
     expect((await stream.next()).value).toMatchObject({ status: 'ready' })
     try {
       for (let index = 0; index < 1000; index++) {
-        agent.session.append('review-gated/state', { version: 1,
+        appendRecord(agent.session, 'plugin:review-gated/state', { version: 1,
           state: { ...state, task: { ...state.task, objective: 'replacement ' + String(index) } } })
       }
-      agent.session.append('review-gated/state', { version: 1, state: { ...state, diagnostic: 'outcome uncertain' } })
+      appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state, diagnostic: 'outcome uncertain' } })
       expect((await stream.next()).value).toMatchObject({ status: 'unknown', state: null })
-      agent.session.append('review-gated/state', { version: 1, state })
-      agent.session.append('review-gated/state', { version: 1, state: { ...state, diagnostic: 'still uncertain' } })
+      appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state })
+      appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state, diagnostic: 'still uncertain' } })
       expect((await stream.next()).value).toMatchObject({ status: 'unknown', state: null })
     } finally { abort.abort(); await stream.return?.() }
   })
@@ -83,7 +84,7 @@ describe('RG cold views', () => {
         setup: async (child) => { await f.ctx.agentPresets.mount(child, 'rg') } })
       const state = f.runtime.read(resumed.agent.session)
       if (state?.task == null) throw new Error('Expected a recovered task')
-      resumed.agent.session.append('review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'replacement completed' } } })
+      appendRecord(resumed.agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'replacement completed' } } })
       await resumed.dispose()
       expect(f.ctx.sessions.get(id)).toBeUndefined()
       release.resolve(undefined)
@@ -96,7 +97,7 @@ describe('RG cold views', () => {
     const handle = await f.task()
     const state = f.runtime.read(handle.agent.session)
     if (state === null) throw new Error('Expected an RG task')
-    handle.agent.session.append('review-gated/state', { version: 1,
+    appendRecord(handle.agent.session, 'plugin:review-gated/state', { version: 1,
       state: { ...state, diagnostic: 'RG_RESULT_SAVE_FAILED: inspect the retained result' } })
     const id = handle.agent.id
     await handle.dispose()
@@ -136,7 +137,7 @@ describe('RG cold views', () => {
     try {
       const state = f.runtime.read(agent.session)
       if (state === null) throw new Error('Missing RG state')
-      agent.session.append('review-gated/state', { version: 1, state: { ...state, diagnostic: 'view update' } })
+      appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state, diagnostic: 'view update' } })
       expect((await stream.next()).value).toMatchObject({ status: 'unknown', state: null })
       expect(bad).toHaveBeenCalledOnce()
     } finally { listeners.delete(bad); abort.abort(); await stream.return?.() }
@@ -207,9 +208,11 @@ describe('RG cold views', () => {
         setup: async (child) => { await f.ctx.agentPresets.mount(child, 'rg') } })
       const state = f.runtime.read(resumed.agent.session)
       if (state?.task == null) throw new Error('Expected a recovered task')
-      resumed.agent.session.append('review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'live replacement' } } })
+      appendRecord(resumed.agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'live replacement' } } })
       release.resolve(undefined)
-      expect((await opening).value).toMatchObject({ state: { task: { objective: 'live replacement' } } })
+      // Replacing the task identity withdraws its receipt, so the live recheck publishes an unusable
+      // Session instead of the replacement.
+      expect((await opening).value).toMatchObject({ status: 'unknown', state: null })
       await resumed.dispose()
     } finally { release.resolve(undefined); abort.abort(); await stream.return?.(); spy.mockRestore() }
   })

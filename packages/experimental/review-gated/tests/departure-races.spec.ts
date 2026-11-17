@@ -1,3 +1,5 @@
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
+import { appendRecord } from './records.ts'
 /** The Git grant remains exclusively owned through its durable departure. */
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { describe, expect, it, vi } from 'vitest'
@@ -45,7 +47,7 @@ describe('local Git departure fencing', { timeout: 120_000 }, () => {
     await departing.promise
     try {
       await expect(f.runtime.recheck(agent, signal())).resolves.toBeDefined()
-      agent.session.append('review-gated/git-state', { version: 1, state: replacement })
+      appendRecord(agent.session, 'plugin:review-gated/git-state', { version: 1, state: replacement })
     } finally { off(); finish.resolve(undefined) }
     expect(await rejected).toBeInstanceOf(Error)
     expect(f.runtime.readGit(agent.session)).toEqual(replacement)
@@ -70,11 +72,16 @@ describe('local Git departure fencing', { timeout: 120_000 }, () => {
     try {
       const state = f.runtime.read(agent.session)
       if (state?.task == null) throw new Error('Expected an existing task')
-      agent.session.append('review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'Changed objective' } } })
+      appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: { ...state, task: { ...state.task, objective: 'Changed objective' } } })
     } finally { off(); release.resolve(undefined) }
     expect(await rejected).toBeInstanceOf(Error)
-    expect(f.runtime.read(agent.session)).toMatchObject({ task: { objective: 'Changed objective' } })
-    expect(f.runtime.read(agent.session)?.diagnostic).toContain('departure may not be saved')
+    // The injected replacement withdraws the receipt, so the public read fails closed while the folded
+    // task still records the change and the uncertain departure.
+    const folded = f.ctx.sessionProjections.snapshot(agent.session, ['reviewGated']).values.reviewGated
+    expect(folded?.state?.task).toMatchObject({ objective: 'Changed objective' })
+    // Without a receipt the departure cannot record its own diagnostic; the unreadable Session is
+    // the report.
+    expect(() => f.runtime.read(agent.session)).toThrow(expect.objectContaining({ code: 'RG_NOT_READY' }))
   })
 
   it('does not restore a cleared RG state when departure fails', async () => {
@@ -93,7 +100,7 @@ describe('local Git departure fencing', { timeout: 120_000 }, () => {
     const leaving = f.track(f.runtime.leaveLocalGit(agent))
     const rejected = leaving.catch((error: unknown) => error)
     await entered.promise
-    try { agent.session.append('review-gated/state', { version: 1, state: null }) }
+    try { appendRecord(agent.session, 'plugin:review-gated/state', { version: 1, state: null }) }
     finally { off(); release.resolve(undefined) }
     expect(await rejected).toBeInstanceOf(Error)
     expect(f.runtime.read(agent.session)).toBeNull()
@@ -137,7 +144,7 @@ describe('local Git departure fencing', { timeout: 120_000 }, () => {
     const stored = await f.ctx.sessionPersistence.open(agent.id, 'read')
     try {
       const events = (await stored.read()).events
-      expect(events.filter(event => event.type === 'review-gated/git-state').at(-1)).toMatchObject({ data: { state: null } })
+      expect(events.filter(event => pluginRecordOf(event)?.type === 'plugin:review-gated/git-state').at(-1)).toMatchObject({ data: { state: null } })
     } finally { await stored.close() }
   })
 })

@@ -162,7 +162,6 @@ export function apply(ctx: ClientContext): void {
           const result = await directory.select(selection)
           if (!result.ok) {
             if (result.error.code === 'session/writer-held') throw new Error(t('error.sessionInUse'))
-            if (result.error.code === 'session/model-not-allowed') throw new Error(t('error.modelNotAllowed'))
             throw result.error
           }
         },

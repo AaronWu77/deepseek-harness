@@ -1,0 +1,28 @@
+- text: "RG RG_REVIEW_BUDGET: Inspect the integrated probe.txt deliverable. Exercise review readiness and the last-attempt acknowledgement, report missing live acceptance evidence honestly, and stop when the review budget is exhausted. 无法判断 执行次数 0/2 · 审查次数 2/2"
+- region "RG 详情":
+  - region "任务角色":
+    - article:
+      - heading "主代理" [level=3]
+      - paragraph: 空闲
+      - paragraph: "最近实际请求模型: rg-scripted/rg-scripted · off"
+      - paragraph: "下次请求模型: rg-scripted/rg-scripted · off"
+    - article:
+      - heading "审查者 · 最近审查尝试" [level=3]
+      - paragraph: 已完成
+      - paragraph: "已接纳的角色模型: rg-scripted/rg-scripted · off"
+      - button "尝试详情"
+    - paragraph: 仅显示当前运行和最近的执行者、审查者尝试。角色尝试每次只运行一个。
+  - button "任务详情"
+  - status: 审查次数已用完，当前没有有效通过结论。目标自动续作将在本轮结束时停止；请检查未解决问题和缺失证据，再决定如何继续。这不会完成目标或重置任务。
+  - paragraph: 本次因证据不足未能给出结论，未报告具体缺陷。这不代表通过，请查看未验证部分。
+  - heading "最近报告" [level=3]
+  - paragraph: REVIEW_EVIDENCE_MISSING
+  - paragraph: 审查者报告通过只适用于所列范围和修改版本，不代表代码已被证明正确。
+  - text: 检查范围 probe.txt
+  - heading "报告中的验证" [level=4]
+  - list:
+    - listitem: Inspected probe.txt
+  - heading "未验证部分" [level=4]
+  - list:
+    - listitem: Authenticated live-page acceptance is unavailable
+  - button "切换到新任务"

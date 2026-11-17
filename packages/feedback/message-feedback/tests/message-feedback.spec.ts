@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import { SESSION_FLUSH_DURABLE, Session, SessionId, SessionLogOffset, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, SessionLogOffset, SessionSeq, type SessionEvent  } from '@deepseek-ai/dsh-session'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import MessageFeedbackService from '../src/index.ts'
 import type {
@@ -600,7 +600,7 @@ describe('canonical message feedback history', () => {
     ctx.on('session/flush', (current) => {
       if (fail) throw failure
       persistence.persist(current)
-      return SESSION_FLUSH_DURABLE
+      return
     })
     const request = { sessionId: session.id, messageId: fixture.assistantMessageIds[0], rating: 'positive' as const, ifVersion: null }
     await expect(ctx.messageFeedback.put(request)).rejects.toBe(failure)
@@ -625,7 +625,7 @@ describe('canonical message feedback history', () => {
         if (kind === 'different-tail') events[events.length - 1] = { ...events.at(-1)!, time: 0 }
         const meta = kind === 'different-lifecycle' ? { ...session.header, createdAt: 0 } : session.header
         persistence.setDurable({ meta, events })
-        return SESSION_FLUSH_DURABLE
+        return
       })
       await expect(ctx.messageFeedback.put({
         sessionId: session.id, messageId: fixture.assistantMessageIds[0], rating: 'positive', ifVersion: null,
@@ -637,7 +637,7 @@ describe('canonical message feedback history', () => {
   it('verifies an empty live no-op and captures its checkpoint before concurrent appends', async () => {
     const { ctx, persistence } = await harness()
     const session = ctx.sessions.create(SessionId('checkpoint-prefix'))
-    ctx.on('session/flush', () => { persistence.persist(session); return SESSION_FLUSH_DURABLE })
+    ctx.on('session/flush', () => { persistence.persist(session); return })
     await expect(ctx.messageFeedback.delete({ sessionId: session.id, messageId: 'absent' as MessageId, ifVersion: staleVersion() }))
       .resolves.toEqual({ ok: true, value: { absent: true } })
     const fixture = appendMessageFixture(session)
@@ -648,16 +648,17 @@ describe('canonical message feedback history', () => {
     expect(persistence.durable.get(session.id)!.events.length).toBe(session.snapshotEvents().length - 1)
   })
 
-  it('rejects an unowned durability checkpoint and closes cold handles on failures', async () => {
+  it('accepts an observer-only live flush and closes cold handles on failures', async () => {
     const { ctx, persistence } = await harness()
     const live = ctx.sessions.create(SessionId('no-flush-owner'))
     const fixture = appendMessageFixture(live)
     const observer = vi.fn()
     ctx.on('session/flush', observer)
+    // A plugin-only Host has no durability acknowledgement, so the write proceeds and fails on the
+    // missing stored Session instead of on an unacknowledged flush.
     await expect(ctx.messageFeedback.put({ sessionId: live.id, messageId: fixture.assistantMessageIds[0], rating: 'positive', ifVersion: null }))
-      .rejects.toThrow(/no durability listener participated/u)
+      .rejects.toThrow(/not found/u)
     expect(observer).toHaveBeenCalledWith(live)
-    expect(persistence.openCalls).toEqual([])
     const cold = messageFixture('cold-failures')
     persistence.persist(cold.session)
     const request = { sessionId: cold.session.id, messageId: cold.assistantMessageIds[0], rating: 'positive' as const, ifVersion: null }

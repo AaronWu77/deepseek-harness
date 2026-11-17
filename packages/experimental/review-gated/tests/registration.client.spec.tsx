@@ -10,10 +10,12 @@ import { apply as applySettings, inject as settingsInject } from '@deepseek-ai/d
 import type { SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import Schema from '@deepseek-ai/schemastery'
 import { settingsSchema } from '../src/settings-schema.ts'
+import { settingsDocumentSchema } from '../src/settings-document.ts'
 import { RemoteError, SlotTestRuntime, sessionSnapshot } from '@deepseek-ai/dsh-client-test-runtime'
 import { resolveSlotLabel, type OwnerOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import { mountRgUi } from '../src/client/mount.ts'
+import { RgSettingsIcon } from '../src/client/RgSettingsIcon.tsx'
 import { RemoteStream, RemoteStreamCarrierError } from '@deepseek-ai/dsh-api-gateway/client'
 import type { RgView, RgSessionState, RgGitState } from '../src/types.ts'
 import * as Client from '../src/client/index.ts'
@@ -36,7 +38,10 @@ vi.mock('@deepseek-ai/dsh-experimental-review-gated/remote', () => ({
 
 const ID = 'review-gated'
 const CONFIG = 'settings.section'
+const ICON = 'settings.section.icon'
 const DOCK = 'conversation.input.dock'
+const PANE = 'sidebar.right.pane.tab'
+const PANE_TITLE = 'sidebar.right.pane.tab.title'
 const plugin = { inject: ['remote', 'slots', 'locale', 'configForms', 'remote.session', 'remote.reviewGated'], apply: mountRgUi }
 
 class ViewHost {
@@ -102,8 +107,12 @@ async function boot(served = true) {
     reviewGated: { newTask, recheck, authorizeLocalGit, leaveLocalGit, watchView: host.watch.bind(host) } })
   const setState = async (id: string, state: RgSessionState | null) => { await act(async () => { host.set(id, { state }) }) }
   const setGit = async (id: string, git: RgGitState | null) => { await act(async () => { host.set(id, { git }) }) }
+  const tabInfo = () => () => { throw new Error('These tests do not render sidebar tab information') }
   const declare = () => rt.declare({ [CONFIG]: { kind: 'list', scope: 'root' },
-    'plugins.bundle.config': { kind: 'keyed', scope: 'root' }, [DOCK]: { kind: 'list', scope: 'session' } })
+    [ICON]: { kind: 'list', scope: 'root' },
+    'plugins.bundle.config': { kind: 'keyed', scope: 'root' }, [DOCK]: { kind: 'list', scope: 'session' },
+    [PANE]: { kind: 'keyed', scope: 'session', inject: { hooks: { tabInfo } } },
+    [PANE_TITLE]: { kind: 'keyed', scope: 'session', inject: { hooks: { tabInfo } } } })
   return { rt, locale, f, modelCatalog, get, registerDecoder, unregisterDecoder,
     newTask, recheck, authorizeLocalGit, leaveLocalGit, declare, setState, setGit, host, failCarrier: () => { failCarrier() } }
 }
@@ -122,6 +131,105 @@ async function dock(h: Awaited<ReturnType<typeof boot>>, idText = 'rg-main') {
 }
 
 describe('RG client registration', () => {
+  it('shares the chosen layout between RG sessions and restores it after plugin reload', async () => {
+    const key = 'dsh.rg.role-layout'
+    const previous = localStorage.getItem(key)
+    localStorage.removeItem(key)
+    onTestFinished(() => { if (previous === null) localStorage.removeItem(key); else localStorage.setItem(key, previous) })
+    const h = await boot()
+    h.rt.ctx.provide('sidebarRightTabs', { register: () => () => {} } as never)
+    h.rt.ctx.provide('sidebarRight', { openTabIn: vi.fn() } as never)
+    await h.declare()
+    const feature = await h.rt.mount(plugin)
+    const first = await h.rt.sessions.add({ id: 'layout-first' })
+    const second = await h.rt.sessions.add({ id: 'layout-second' })
+    await h.setState(first, rgState())
+    await h.setState(second, rgState())
+    const firstSession = h.rt.sessions.retain(first)
+    const secondSession = h.rt.sessions.retain(second)
+    onTestFinished(async () => { await h.rt.dispose(); firstSession.release(); secondSession.release() })
+    const options = { entryKey: '@deepseek-ai/dsh-experimental-review-gated', hookContext: {} }
+    const pane = h.rt.renderSlot(PANE, {}, { ...options, session: firstSession })
+    await pane.view.findByRole('button', { name: en.taskDetails })
+    expect(pane.view.getByRole('tab', { name: en.viewClassic }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(pane.view.getByRole('tab', { name: en.viewFocus }))
+    expect(pane.view.getByRole('tabpanel', { name: en.viewFocus })).toBeTruthy()
+    expect(localStorage.getItem(key)).toBe(JSON.stringify('focus'))
+    pane.update({}, { ...options, session: secondSession })
+    expect(pane.view.getByRole('tab', { name: en.viewFocus }).getAttribute('aria-selected')).toBe('true')
+    await feature.dispose()
+    await h.rt.mount(plugin)
+    pane.update({}, { ...options, session: firstSession })
+    expect(pane.view.getByRole('tab', { name: en.viewFocus }).getAttribute('aria-selected')).toBe('true')
+    expect(h.newTask).not.toHaveBeenCalled()
+    expect(h.recheck).not.toHaveBeenCalled()
+  })
+
+  it('retains task controls until a sidebar body is declared', async () => {
+    const h = await boot()
+    h.rt.ctx.provide('sidebarRightTabs', { register: () => () => {} } as never)
+    h.rt.ctx.provide('sidebarRight', { openTabIn: vi.fn() } as never)
+    await h.rt.declare({ [CONFIG]: { kind: 'list', scope: 'root' }, [DOCK]: { kind: 'list', scope: 'session' } })
+    await h.rt.mount(plugin)
+    const id = await h.rt.sessions.add({ id: 'rg-no-pane' })
+    await h.setState(id, rgState())
+    const session = h.rt.sessions.retain(id)
+    onTestFinished(async () => { await h.rt.dispose(); session.release() })
+    const owner: OwnerOf<typeof DOCK> = { session: sessionSnapshot(id),
+      input: { draft: '', draftRev: 0, attachmentIds: [], phase: 'plain', occurrences: [], queue: [] } }
+    const view = h.rt.renderSlot(DOCK, owner, { session })
+    expect(await view.view.findByText('Repair the requested output', { selector: 'summary span' })).toBeTruthy()
+    expect(view.view.queryByRole('button', { name: en.openTaskView })).toBeNull()
+  })
+
+  it('opens the registered sidebar for the current session and withdraws it with the plugin', async () => {
+    const h = await boot()
+    const unregister = vi.fn()
+    const register = vi.fn(() => unregister)
+    const openTabIn = vi.fn()
+    h.rt.ctx.provide('sidebarRightTabs', { register } as never)
+    h.rt.ctx.provide('sidebarRight', { openTabIn } as never)
+    await h.declare()
+    const feature = await h.rt.mount(plugin)
+    expect(register).toHaveBeenCalledOnce()
+    expect(h.rt.slots.entries(PANE)).toHaveLength(1)
+    expect(h.rt.slots.entries(PANE_TITLE)).toHaveLength(1)
+    const id = await h.rt.sessions.add({ id: 'rg-sidebar' })
+    await h.rt.sessions.setProjection(id, 'reviewGated', rgState())
+    await h.setState(id, rgState())
+    const session = h.rt.sessions.retain(id)
+    onTestFinished(async () => { await h.rt.dispose(); session.release() })
+    const owner: OwnerOf<typeof DOCK> = { session: sessionSnapshot(id),
+      input: { draft: '', draftRev: 0, attachmentIds: [], phase: 'plain', occurrences: [], queue: [] } }
+    const view = h.rt.renderSlot(DOCK, owner, { session })
+    fireEvent.click(await view.view.findByRole('button', { name: en.openTaskView }))
+    expect(openTabIn).toHaveBeenCalledWith(id, 'review-gated')
+    const state = rgState()
+    await h.setState(id, { ...state, task: { ...state.task!, lastReview: { ...state.task!.lastReview!, scope: null } } })
+    expect(view.view.getByRole('status').textContent).toBe(en.entryReviewBudgetExhausted)
+    await act(async () => { h.host.set(id, { status: 'unknown' }) })
+    expect(view.view.getByRole('status').textContent).toBe(en.entryUnavailable)
+    expect(view.view.getByRole('button', { name: en.openTaskView })).toBeTruthy()
+    await act(async () => { h.host.set(id, { status: 'saving', claim: { phase: 'unsettled', text: 'Recovery input', truncated: true, otherContent: true } }) })
+    expect(view.view.getByRole('status').textContent).toBe(en.entryProcessing)
+    expect(view.view.queryByText(en.claimPending)).toBeNull()
+    expect(view.view.queryByText('Recovery input')).toBeNull()
+    const pane = h.rt.renderSlot(PANE, {}, { session, entryKey: '@deepseek-ai/dsh-experimental-review-gated', hookContext: {} })
+    const inspect = await pane.view.findByRole('button', { name: en.showInputDetails })
+    expect(inspect.getAttribute('aria-expanded')).toBe('false')
+    expect(pane.view.queryByRole('region', { name: en.inputDetails })).toBeNull()
+    fireEvent.click(inspect)
+    expect(pane.view.getByRole('region', { name: en.inputDetails }).textContent).toContain('Recovery input')
+    expect(pane.view.queryByRole('button', { name: en.newTask })).toBeNull()
+    await act(async () => { h.host.set(id, { status: 'unknown', claim: { phase: 'rejected', text: 'Rejected input', truncated: false, otherContent: false } }) })
+    expect(view.view.getByRole('status').textContent).toBe(en.entryUnavailable)
+    expect(pane.view.getByText(en.recoveryNotEntered)).toBeTruthy()
+    expect(pane.view.getByText('Rejected input')).toBeTruthy()
+    await feature.dispose()
+    expect(unregister).toHaveBeenCalledOnce()
+    expect(h.rt.slots.entries(PANE)).toEqual([])
+  })
+
   it('hides ordinary Sessions while keeping an unknown RG Session fail-closed', async () => {
     const h = await boot()
     await h.declare()
@@ -144,7 +252,7 @@ describe('RG client registration', () => {
     onTestFinished(async () => { await h.rt.dispose(); session.release() })
     h.host.set(id, { status: 'unknown', state: null })
     normal.update({ ...owner, session: sessionSnapshot(id) }, { session })
-    expect(normal.view.getByRole('status').textContent).toBe(en.statusUnknown)
+    expect(normal.view.getByRole('status').textContent).toContain(en.recoveryUnavailable)
     expect(normal.view.queryByRole('button')).toBeNull()
     await act(async () => { h.host.set(id, { status: 'ready', state: rgState() }) })
     expect(normal.view.getByText(en.reportedPass)).toBeTruthy()
@@ -157,14 +265,15 @@ describe('RG client registration', () => {
     const d = await dock(h)
     const id = d.id
     await act(async () => { h.host.set(id, { claim: { phase: 'rejected', text: '<script>raw input</script>', truncated: true, otherContent: true } }) })
-    expect(d.view.getByText(en.claimRejected)).toBeTruthy()
-    expect(d.view.getByText(en.claimNotEnteredHint)).toBeTruthy()
+    expect(d.view.getByText(en.recoveryNotEntered)).toBeTruthy()
+    expect(d.view.getByText(en.recoveryNotEnteredHint)).toBeTruthy()
+    fireEvent.click(d.view.getByRole('button', { name: en.showInputDetails }))
     expect(d.view.getByText(en.claimTruncated)).toBeTruthy()
     expect(d.container.querySelector('script')).toBeNull()
     expect(d.container.querySelector('pre')?.textContent).toBe('<script>raw input</script>')
     expect(d.container.querySelector('pre')?.parentElement?.getAttribute('tabindex')).toBe('0')
     await act(async () => { h.host.set(id, { claim: { phase: 'empty', text: 'unchanged input', truncated: false, otherContent: false } }) })
-    expect(d.view.getByText(en.claimEmpty)).toBeTruthy()
+    expect(d.view.getByText(en.recoveryNotEntered)).toBeTruthy()
     await act(async () => { h.host.set(id, { claim: null }) })
     fireEvent.click(d.view.getByRole('button', { name: en.newTask }))
     await act(async () => { h.host.set(id, { status: 'saving' }) })
@@ -175,7 +284,7 @@ describe('RG client registration', () => {
     expect(d.view.getByText(en.reportedPass)).toBeTruthy()
     await act(async () => { h.failCarrier() })
     expect(d.view.queryByText(en.reportedPass)).toBeNull()
-    expect(d.view.getByRole('status').textContent).toBe(en.statusUnknown)
+    expect(d.view.getByRole('status').textContent).toContain(en.recoveryUnavailable)
     await act(async () => { h.host.set(id, { status: 'ready' }) })
     expect(d.view.getByText(en.reportedPass)).toBeTruthy()
   })
@@ -209,17 +318,47 @@ describe('RG client registration', () => {
     expect(h.rt.slots.entries(DOCK)).toEqual([])
   })
 
-  it('re-registers the settings slot after its declaration owner collapses', async () => {
+  it('re-registers the settings slot and its navigation glyph after their declaration owner collapses', async () => {
     const h = await boot(false)
     await h.rt.mount(plugin)
     await h.declare()
     expect(h.rt.slots.entries(CONFIG)).toHaveLength(1)
+    expect(h.rt.slots.entries(ICON)).toHaveLength(1)
     h.rt.root.release()
     expect(h.rt.slots.entries(CONFIG)).toEqual([])
+    expect(h.rt.slots.entries(ICON)).toEqual([])
     expect(h.rt.slots.entries(DOCK)).toEqual([])
     await h.declare()
     expect(h.rt.slots.entries(CONFIG)).toHaveLength(1)
+    expect(h.rt.slots.entries(ICON)).toHaveLength(1)
     expect(h.rt.slots.entries(DOCK)).toHaveLength(1)
+  })
+
+  it('registers the branch glyph under its own section id and renders the shell size', async () => {
+    const h = await boot()
+    await h.declare()
+    await h.rt.mount(plugin)
+    const [entry] = h.rt.slots.entries(ICON)
+    expect(entry?.options.id).toBe(ID)
+    expect(entry?.component).toBe(RgSettingsIcon)
+    const view = h.rt.renderSlot(ICON, { size: 16, active: false }, { only: ID })
+    const glyph = view.container.querySelector('svg')
+    expect(glyph?.getAttribute('data-icon')).toBe('dsw-icon-branch-outline-medium')
+    expect(glyph?.getAttribute('width')).toBe('16')
+    expect(glyph?.getAttribute('height')).toBe('16')
+    expect(glyph?.getAttribute('aria-hidden')).toBe('true')
+    view.update({ size: 16, active: true }, { only: ID })
+    expect(view.container.querySelector('svg')?.getAttribute('data-icon')).toBe('dsw-icon-branch-outline-medium')
+    view.update({ size: 16, active: false }, { only: 'codex-connect' })
+    expect(view.container.querySelector('svg')).toBeNull()
+  })
+
+  it('keeps its settings page when a composed shell declares no icon slot', async () => {
+    const h = await boot()
+    await h.rt.declare({ [CONFIG]: { kind: 'list', scope: 'root' } })
+    await h.rt.mount(plugin)
+    expect(h.rt.slots.entries(CONFIG).map(row => row.options.id)).toEqual([ID])
+    expect(h.rt.slots.entries(ICON)).toEqual([])
   })
 
   it('clears the settings draft when the section declaration is withdrawn and restored', async () => {
@@ -304,19 +443,6 @@ describe('RG client registration', () => {
     expect(h.f.mutate).not.toHaveBeenCalled()
   })
 
-  it('registers a strict settings decoder for the lifetime of the RG client', async () => {
-    const h = await boot()
-    const feature = await h.rt.mount(plugin)
-    expect(h.registerDecoder).toHaveBeenCalledOnce()
-    const [namespace, decode] = h.registerDecoder.mock.calls[0]!
-    expect(namespace).toBe('rg-settings')
-    expect(decode({ settings: settings(), git: { timeoutMs: 123 } })).toEqual({ settings: settings() })
-    expect(decode({ settings: { ...settings(), unexpected: true } })).toBeUndefined()
-    expect(decode([])).toBeUndefined()
-    await feature.dispose()
-    expect(h.unregisterDecoder).toHaveBeenCalledOnce()
-  })
-
   it('renders unavailable when the namespace is absent at initial activation', async () => {
     const h = await boot(false)
     await h.declare()
@@ -349,7 +475,7 @@ describe('RG client registration', () => {
     expect(view.view.getByText(zh.poolHint)).toBeTruthy()
   })
 
-  it('renders and saves through real ConfigForms with the serialized Host transform schema', async () => {
+  it('renders and saves through real ConfigForms with the serialized Host settings schema', async () => {
     const rt = await SlotTestRuntime.create()
     onTestFinished(() => rt.dispose())
     const locale = new LocaleRuntime(rt.ctx)
@@ -358,8 +484,10 @@ describe('RG client registration', () => {
     await act(async () => { locale.setLocale('en') })
     let hostSettings = settings()
     let revision = 1
+    // The settings page validates each section against this serialized form, so
+    // it must be the real declaration rather than a hand-written copy.
     const schema = JSON.parse(JSON.stringify(Schema.object({
-      settings: Schema.transform(Schema.any(), value => settingsSchema.parse(value)), git: Schema.any(),
+      settings: settingsDocumentSchema, git: Schema.any(),
     }).toJSON())) as SettingsNamespaceView['schema']
     const view = (): SettingsNamespaceView => ({ ns: 'rg-settings', schema,
       value: JSON.parse(JSON.stringify({ settings: hostSettings, git: { timeoutMs: 60000 } })) as SettingsNamespaceView['value'],
@@ -381,7 +509,9 @@ describe('RG client registration', () => {
     await rt.mount({ inject: settingsInject, apply: applySettings })
     await rt.ctx.configForms.describe().ensure()
     const scope = rt.ctx.configForms.get('rg-settings')
-    expect(scope.getSnapshot().status).toBe('loading')
+    // The serialized Host schema must decode on its own: no client-side
+    // decoder participates, so a non-object section node would stay loading.
+    expect(scope.getSnapshot().status).toBe('ready')
     await rt.declare({ [CONFIG]: { kind: 'list', scope: 'root' }, [DOCK]: { kind: 'list', scope: 'session' } })
     const feature = await rt.mount(plugin)
     expect(scope.getSnapshot().status).toBe('ready')
@@ -469,9 +599,11 @@ describe('RG client registration', () => {
     const reads = h.modelCatalog.mock.calls.length
     await act(async () => { h.rt.remote.emit('llm/models-updated', []) })
     expect(h.modelCatalog).toHaveBeenCalledTimes(reads + 1)
+    expect(h.rt.slots.entries(ICON)).toHaveLength(1)
     await feature.dispose()
     expect(h.f.listenerCount()).toBe(listeners)
     expect(h.rt.slots.entries(CONFIG)).toEqual([])
+    expect(h.rt.slots.entries(ICON)).toEqual([])
     expect(h.rt.slots.entries(DOCK)).toEqual([])
     expect(h.locale.bind('review-gated')('effectiveHint')).toBe('effectiveHint')
     await act(async () => { h.rt.remote.emit('llm/models-updated', []) })
@@ -572,6 +704,15 @@ describe('RG client registration', () => {
       })
     })
     expect(d.view.getByText('actual/child-route')).toBeTruthy()
+    const unrelated = await h.rt.sessions.add({ id: 'unrelated-child' })
+    await act(async () => {
+      h.rt.sessions.list.update((draft) => {
+        draft.projectionsBySession = { ...draft.projectionsBySession, [unrelated]: { state: 'ready', error: null,
+          values: { modelSelection: { lastUsed: { provider: 'other', model: 'unrelated' }, next: null } } } }
+      })
+    })
+    expect(d.view.getByText('actual/child-route')).toBeTruthy()
+    expect(d.view.queryByText('other/unrelated')).toBeNull()
   })
 
   it('isolates a hot-reloaded form from its retired directory request and event listeners', async () => {

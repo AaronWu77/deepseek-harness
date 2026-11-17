@@ -4,7 +4,6 @@ import { modelAvailable } from './catalog.ts'
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { ModelPolicyViolationError } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelection as AgentModelSelection } from '@deepseek-ai/dsh-agent'
 import { AttachmentError } from '@deepseek-ai/dsh-attachment'
 import type {
@@ -143,7 +142,7 @@ export class SessionCommandController {
   }
 
   /**
-   * Validate and record one Session model selection; remember its default only when the Session policy permits.
+   * Validate and record one Session model selection; save the default in the background.
    * @param request - Session identity and requested model selection.
    * @returns the normalized selection recorded for the Session, without waiting for default persistence.
    */
@@ -151,6 +150,7 @@ export class SessionCommandController {
     const agent = await this.resolveAgent(request.sessionId)
     return this.agents.serializeImageAdmission(agent, async () => {
       try {
+        await this.requireModel(request)
         const selected: AgentModelSelection = {
           provider: request.provider,
           model: request.model,
@@ -158,26 +158,15 @@ export class SessionCommandController {
             ? {}
             : { reasoningEffort: ReasoningEffortId(request.reasoningEffort) }),
         }
-        this.ctx.agents.assertModelSelectionAllowed(agent, selected)
-        await this.requireModel(request)
         await this.ctx.llm.resolveCallConfig(selected)
-        this.ctx.agents.assertModelSelectionAllowed(agent, selected)
-        const policy = this.ctx.agents.modelPolicyFor(agent)
         agent.model.select(selected)
-        if (policy?.rememberDefault !== false) {
-          void this.ctx.agentDefaultModel.saveSelection(selected).catch((error: unknown) => {
-            this.ctx.logger.warn(
-              `session-controller: model selection changed for the Session but the default was not saved: ${String(error)}`,
-            )
-          })
-        }
+        void this.ctx.agentDefaultModel.saveSelection(selected).catch((error: unknown) => {
+          this.ctx.logger.warn(
+            `session-controller: model selection changed for the Session but the default was not saved: ${String(error)}`,
+          )
+        })
         return { selected: { ...selected } }
       } catch (error) {
-        if (error instanceof ModelPolicyViolationError) {
-          throw new RemoteError('session/model-not-allowed', error.message, {
-            provider: request.provider, model: request.model,
-          })
-        }
         if (remoteErrorOf(error) !== undefined) throw error
         throw new RemoteError(
           'session/model-unavailable',
@@ -395,7 +384,6 @@ export class SessionCommandController {
    */
   async updateQueue(request: SessionUpdateQueueRequest): Promise<SessionUpdateQueueValue> {
     if (request.action.kind === 'edit') {
-      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Remote callers can submit untyped JSON.
       if (request.action.content.some(block => block.type !== 'text')) {
         throw new RemoteError(
           'session/attachment-invalid',
@@ -556,7 +544,6 @@ function hasPromptRequest(agent: Agent, requestId: SessionRequestId): boolean {
     return source.kind === 'user' && 'rpcId' in source && source.rpcId === requestId
   }
   if (agent.inbox.nextTurn.some(matches) || agent.inbox.nextStep.some(matches)) return true
-  // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
   return agent.session.snapshotEvents().some((event) => {
     if (event.type !== 'user/message') return false
     const source = event.data.source

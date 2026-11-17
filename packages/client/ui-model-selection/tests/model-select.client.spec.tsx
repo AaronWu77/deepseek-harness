@@ -366,7 +366,7 @@ describe('ModelSelect reasoning effort', () => {
     })
   })
 
-  it.each(['writer', 'unavailable', 'policy'] as const)('announces rejected selections with category-specific guidance (%s)', async (reason) => {
+  it.each(['writer', 'unavailable'] as const)('announces rejected selections with category-specific guidance (%s)', async (reason) => {
     const groups = [{
       id: 'deepseek-official',
       name: 'DeepSeek',
@@ -379,9 +379,7 @@ describe('ModelSelect reasoning effort', () => {
     const select = vi.fn(async () => {
       const error = reason === 'writer'
         ? new RemoteError('session/writer-held', 'writer held', { sessionId: SessionId('owned') })
-        : reason === 'policy'
-          ? new RemoteError('session/model-not-allowed', 'outside policy', { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
-          : new RemoteError('session/model-unavailable', 'session already contains images', { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+        : new RemoteError('session/model-unavailable', 'session already contains images', { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
       directory.set(state({ groups, status: 'error', error: 'unrelated catalog refresh' }))
       return { ok: false as const, error }
     })
@@ -404,8 +402,7 @@ describe('ModelSelect reasoning effort', () => {
     expect(document.activeElement).toBe(trigger)
     expect(toast.textContent).toBe(reason === 'writer'
       ? zh['error.sessionInUse']
-      : reason === 'policy' ? zh['error.modelNotAllowed']
-        : '模型操作失败：session/model-unavailable: session already contains images')
+      : '模型操作失败：session/model-unavailable: session already contains images')
     // The selection failure does not render the in-menu load strip (no Retry).
     expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
     fireEvent.keyDown(trigger, { key: 'Tab' })

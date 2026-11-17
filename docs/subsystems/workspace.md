@@ -561,6 +561,18 @@ archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promi
 unarchiveSession(sessionId: SessionId): Promise<void>
 
 /**
+ * Remove every registry trace of one session that no longer exists: its
+ * archive slot, its pin, and its accounting slot in whichever workspace
+ * records it. Callers use this after deleting a stored session so the
+ * registry stops resolving an id with no session behind it. Removing an id
+ * cannot introduce an unknown one, so no existence check runs and an unknown
+ * id resolves without writing.
+ * @param sessionId - The session to forget.
+ * @returns whether any registry record changed.
+ */
+removeSession(sessionId: SessionId): Promise<boolean>
+
+/**
  * Pin one session durably, prepending it to the registry-global pin set.
  * The session must exist (live or in session persistence) and must not be
  * archived. An already pinned id resolves without writing or reordering.

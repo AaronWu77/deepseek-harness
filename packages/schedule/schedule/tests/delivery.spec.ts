@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { SESSION_FLUSH_DURABLE, SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId  } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { expect, it, vi } from 'vitest'
 import { createAfterScheduleRecord, ScheduleId } from '../src/domain.ts'
@@ -29,12 +29,12 @@ it('acknowledges the real synchronous inbox splice after flush without claiming 
       const releaseFlush = Promise.withResolvers<undefined>()
       let eventsAtFlush: readonly SessionEvent[] = []
       const stored = new Map<SessionId, readonly SessionEvent[]>()
-      ctx.on('session/flush', async (session): Promise<typeof SESSION_FLUSH_DURABLE> => {
+      ctx.on('session/flush', async (session): Promise<void> => {
         eventsAtFlush = session.snapshotEvents()
         flushStarted.resolve(undefined)
         await releaseFlush.promise
         stored.set(session.id, structuredClone(eventsAtFlush))
-        return SESSION_FLUSH_DURABLE
+        return
       })
       const commit = vi.fn(async (task: ScheduleTask) => { tasks[0] = task })
       const runtime = new ScheduleRuntime(ctx, () => tasks, work => work(), commit, () => {}, {

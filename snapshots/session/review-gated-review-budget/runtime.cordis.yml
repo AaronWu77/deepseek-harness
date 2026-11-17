@@ -1,0 +1,38 @@
+# Shared record/replay composition; filesystem operations and RG coordination remain real.
+- id: agent-default-model
+  config:
+    provider: !!js process.env.DSH_SNAPSHOT_PROVIDER
+    model: !!js process.env.DSH_SNAPSHOT_MODEL
+    reasoningEffort: 'off'
+- insert:
+    - id: review-gated-preset-registry
+      name: '@deepseek-ai/dsh-agent-preset-registry'
+      config:
+        default: rg
+    - id: review-gated-bundle
+      name: ../review-gated/bundle.ts
+    - id: review-gated-root-selection
+      name: ../../../packages/test-support/session-snapshot/tests/fixtures/parent-agent-preset.ts
+      config:
+        presets: [rg]
+# Search availability is external-provider dependent and is not an input to the RG scenario.
+- id: tool-web
+  config:
+    search: false
+# Shell execution and confinement are not inputs to this portable PTC scenario.
+- id: tool-fs
+  config:
+    applyPatch: false
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: sandbox
+  config:
+    runnerCommand: [snapshot-no-confinement-runner]
+    runnerFailureSignatures: [snapshot-no-confinement-runner]
+# The reviewer role enforces its read-only claim through this service.
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+    workspaceRoot: !!js process.cwd()

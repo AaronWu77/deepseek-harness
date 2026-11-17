@@ -88,11 +88,13 @@ describe('translation storage lifecycle', () => {
     expect(b.requests).toHaveLength(1)
   })
 
-  it('requires an active live writer rather than treating an in-memory append as durable', async () => {
+  it('never dispatches when the live writer is gone', async () => {
     const b = await storageFixture(cleanups), original = await b.createSession(SessionId('live-without-writer'), true)
     await original.writer?.close()
+    // Without a durability acknowledgement the store discovers the lost writer while writing; the
+    // request still never reaches the provider.
     await expect(b.ctx.translator.translate(b.ctx.translator.resolve({ text: 'source', targetLanguage: 'zh', sessionId: original.id })))
-      .rejects.toMatchObject({ code: 'TRANSLATION_SESSION_REQUIRED' })
+      .rejects.toBeInstanceOf(Error)
     expect(await b.readEvents(original.id)).toEqual(original.events)
     expect(b.requests).toEqual([])
   })

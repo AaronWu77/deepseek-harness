@@ -84,7 +84,7 @@ async function boot(script: ConstructorParameters<typeof MockAdapter>[0] = [], e
   await ctx.loader.await()
   ctx.subagents.registerProvider({ name: 'once', inheritsParentContext: false,
     capabilities: { agentOptions: false, depthLimit: true, agentPreset: false, outputSchema: false },
-    prepareLocalOneShot: async () => ({}) })
+    prepareContinuable: async () => ({}) })
   const adapter = new MockAdapter(script)
   ctx.llm.registerAdapter(['mock'], adapter)
   return { ctx, root, adapter }
@@ -120,7 +120,7 @@ describe('non-Team subagents in a globally mounted Team YAML composition', () =>
       publicationTools = assembled.tools.map(tool => tool.name)
       publicationPolicy = assembled.sections.some(section => section.name === 'team:policy')
     })
-    const run = await ctx.subagents.startActivation({ provider: 'once', lifecycle: 'one-shot', label: 'one-shot task', delivery: 'caller', signal: SIGNAL,
+    const run = await ctx.subagents.startActivation({ provider: 'once', label: 'one-shot task', delivery: 'caller', signal: SIGNAL,
       request: { parent: lead, prompt: [{ type: 'text', text: 'one-shot task' }] },
     })
     try {

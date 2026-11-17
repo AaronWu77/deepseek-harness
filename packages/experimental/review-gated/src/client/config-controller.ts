@@ -3,6 +3,8 @@ import type { ModelCatalog, ModelProviderGroup } from '@deepseek-ai/dsh-api-remo
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsFormScope, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
+import { z } from 'zod'
+import { poolSchema, settingsSchema } from '../settings-schema.ts'
 import type { RgModelPool, RgSettings } from '../types.ts'
 import { modelKey, modelRows, poolError, poolOf, type LimitField, type ModelRow, type PoolError, type PoolRole } from './model-pools.ts'
 
@@ -11,6 +13,8 @@ export interface RgSettingsSection { readonly settings: RgSettings }
 /** Whole form snapshot; failures and conflicts stay visible beside the controls. */
 export interface RgConfigState extends SettingsFormShell {
   readonly settings: RgSettings | null
+  readonly invalidDocument: boolean
+  readonly validationPaths: readonly string[]
   readonly configured: boolean
   readonly rows: Readonly<Record<PoolRole, readonly ModelRow[]>>
   readonly errors: Readonly<Record<PoolRole, PoolError | null>>
@@ -37,6 +41,17 @@ export interface RgConfigFace {
   readonly acknowledgeUncertain: () => void
 }
 
+// Preserve structurally valid saved values for editing; full invariants gate persistence below.
+const editablePoolSchema = z.object(poolSchema.shape).strict()
+const editableSettingsSchema = z.object({
+  ...settingsSchema.shape,
+  main: editablePoolSchema, worker: editablePoolSchema,
+  reviewer: z.discriminatedUnion('mode', [
+    settingsSchema.shape.reviewer.options[0],
+    settingsSchema.shape.reviewer.options[1].extend({ pool: editablePoolSchema }),
+  ]),
+}).strict()
+const sectionSchema = z.object({ settings: editableSettingsSchema })
 const LIMIT_FIELDS: readonly LimitField[] = ['maxWorkerAttempts', 'maxReviewAttempts', 'maxHandoffChars', 'maxReportChars', 'maxScopeFiles', 'maxScopeBytes']
 const same = (left: RgSettings | undefined, right: RgSettings | undefined): boolean => JSON.stringify(left) === JSON.stringify(right)
 
@@ -67,7 +82,7 @@ export class RgConfigController {
    * @param scope - the single RG Host settings namespace.
    * @param readCatalog - read-only model directory loader; it must not make a model request.
    */
-  constructor(private readonly scope: SettingsFormScope<RgSettingsSection>, private readonly readCatalog: () => Promise<ModelCatalog>) {
+  constructor(private readonly scope: SettingsFormScope<unknown>, private readonly readCatalog: () => Promise<ModelCatalog>) {
     this.store = createSnapshotStore(this.snapshot())
     this.source = {
       getSnapshot: () => this.store.getSnapshot(),
@@ -91,7 +106,7 @@ export class RgConfigController {
         this.saving = false
         this.savedNotice = null
       } else if (!this.saving && this.draft !== undefined && current.revision !== this.draftRevision) {
-        if (same(current.value?.settings, this.desired())) this.clearDraft()
+        if (same(this.savedSettings(), this.desired())) this.clearDraft()
         else this.conflicted = true
       }
       this.publish()
@@ -186,11 +201,19 @@ export class RgConfigController {
     this.unsubscribe()
   }
 
+  private savedSettings(): RgSettings | undefined {
+    const host = this.scope.getSnapshot()
+    if (host.status !== 'ready') return undefined
+    const result = sectionSchema.safeParse(host.value)
+    return result.success ? result.data.settings : undefined
+  }
+
   private beginEdit(): RgSettings | undefined {
     const host = this.scope.getSnapshot()
-    if (this.disposed || host.status !== 'ready' || !host.writable || this.saving || this.conflicted || host.value === undefined) return undefined
+    const saved = this.savedSettings()
+    if (this.disposed || host.status !== 'ready' || !host.writable || this.saving || this.conflicted || saved === undefined) return undefined
     if (this.draft === undefined) {
-      this.draft = structuredClone(host.value.settings)
+      this.draft = structuredClone(saved)
       this.draftRevision = host.revision
     }
     this.failed = false
@@ -199,7 +222,7 @@ export class RgConfigController {
   }
 
   private desired(): RgSettings | undefined {
-    const value = this.draft ?? this.scope.getSnapshot().value?.settings
+    const value = this.draft ?? this.savedSettings()
     if (value === undefined || this.draft === undefined) return value
     const limits = Object.fromEntries(LIMIT_FIELDS.map(field => [field, Number(this.numbers[field] ?? value[field])]))
     return { ...value, ...limits, configured: true }
@@ -215,7 +238,7 @@ export class RgConfigController {
 
   private rows(role: PoolRole): ModelRow[] {
     const settings = this.desired()
-    const saved = this.scope.getSnapshot().value?.settings
+    const saved = this.savedSettings()
     if (settings === undefined || saved === undefined) return []
     return modelRows(this.groups, poolOf(saved, role), poolOf(settings, role))
   }
@@ -240,8 +263,9 @@ export class RgConfigController {
   private async save(): Promise<void> {
     const state = this.snapshot()
     const desired = this.desired()
+    const validation = settingsSchema.safeParse(desired)
     if (this.disposed || !state.available || !state.writable || !state.dirty || state.invalid
-      || this.saving || desired === undefined) return
+      || this.saving || !validation.success) return
     const generation = this.writeGeneration
     this.saving = true
     this.failed = false
@@ -249,14 +273,14 @@ export class RgConfigController {
     this.publish()
     let transportFailed = false
     try {
-      await this.scope.mutate([{ op: 'set', path: ['settings'], value: desired }], this.draftRevision)
+      await this.scope.mutate([{ op: 'set', path: ['settings'], value: validation.data }], this.draftRevision)
     } catch (_error) {
       // A missing response does not establish whether the Host committed the write.
       transportFailed = true
     }
     if (!this.currentWrite(generation)) return
     this.saving = false
-    if (same(this.scope.getSnapshot().value?.settings, desired)) {
+    if (same(this.savedSettings(), desired)) {
       this.clearDraft()
       this.savedNotice = ++this.noticeSequence
     } else {
@@ -308,12 +332,17 @@ export class RgConfigController {
       const value = Number(limits[field])
       return !Number.isSafeInteger(value) || value < 1
     })
+    const saved = this.savedSettings()
+    const invalidDocument = host.status === 'ready' && saved === undefined
+    const validation = settingsSchema.safeParse(desired)
+    const validationPaths = desired === undefined || validation.success ? []
+      : [...new Set(validation.error.issues.map(issue => issue.path.join('.') || 'settings'))]
     return { available: host.status === 'ready', writable: host.writable,
-      dirty: this.draft !== undefined && !same(host.value?.settings, desired),
-      invalid: !host.writable || this.conflicted || this.uncertain || settings === null
+      dirty: this.draft !== undefined && !same(saved, desired),
+      invalid: !host.writable || this.conflicted || this.uncertain || invalidDocument || !validation.success
         || Object.values(errors).some(error => error !== null) || invalidLimits.length > 0,
-      saving: this.saving, failed: this.failed, settings, configured: host.value?.settings.configured ?? false,
-      rows, errors, limits, invalidLimits,
+      saving: this.saving, failed: this.failed, settings, configured: saved?.configured ?? false,
+      invalidDocument, validationPaths, rows, errors, limits, invalidLimits,
       catalogStatus: this.catalogStatus, partialCatalog: this.partialCatalog,
       conflicted: this.conflicted, uncertain: this.uncertain, savedNotice: this.savedNotice }
   }

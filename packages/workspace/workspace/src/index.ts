@@ -410,6 +410,41 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * Remove every registry trace of one session that no longer exists: its
+   * archive slot, its pin, and its accounting slot in whichever workspace
+   * records it. Callers use this after deleting a stored session so the
+   * registry stops resolving an id with no session behind it. Removing an id
+   * cannot introduce an unknown one, so no existence check runs and an unknown
+   * id resolves without writing.
+   * @param sessionId - The session to forget.
+   * @returns whether any registry record changed.
+   */
+  removeSession(sessionId: SessionId): Promise<boolean> {
+    return this.enqueueOperation(async () => {
+      // One queued operation owns the check-then-write pairs below, so a
+      // concurrent archive or pin cannot re-add the id mid-removal.
+      const state = this.requireState()
+      const table = this.requireTable()
+      const archivedSessionIds = state.archivedSessionIds.filter(id => id !== sessionId)
+      const pinnedSessionIds = state.pinnedSessionIds.filter(id => id !== sessionId)
+      const changedGlobal = archivedSessionIds.length !== state.archivedSessionIds.length
+        || pinnedSessionIds.length !== state.pinnedSessionIds.length
+      const owners = [...table.entries()].filter(([, record]) => record.sessionIds.includes(sessionId))
+      for (const [id] of owners) {
+        await table.update(id, current => ({
+          ...current,
+          sessionIds: current.sessionIds.filter(entry => entry !== sessionId),
+          updatedAt: new Date().toISOString(),
+        }))
+      }
+      if (changedGlobal) await this.setState({ ...state, archivedSessionIds, pinnedSessionIds })
+      // Entities hold a record snapshot, so a rewritten account needs new ones.
+      if (owners.length > 0) this.rebuildEntities()
+      return changedGlobal || owners.length > 0
+    })
+  }
+
+  /**
    * The registry-global pin set: sessions surfaced ahead of every unpinned
    * session on grouping surfaces. Pinning never touches workspace accounting.
    * @returns Session ids in pin order (most recently pinned first).

@@ -51,25 +51,37 @@ const CLOSER_TEXT = {
  * @returns the synthetic closer events to append after `events`, in order; empty when the log is already balanced.
  */
 export function openTurnClosers(events: readonly SessionEvent[], cause: OpenTurnCloseCause): SessionEvent[] {
-  let openTurn: number | null = null
-  let openStep: number | null = null
-  const recovery = new ToolCallRecovery(cause)
-  for (const event of events) {
-    recovery.observe(event)
+  const state = new OpenTurnRecovery(cause)
+  for (const event of events) state.observe(event)
+  return state.finish(events.at(-1))
+}
+
+/** Incremental lifecycle cursor and tool state for an open tail. */
+class OpenTurnRecovery {
+  private openTurn: number | null = null
+  private openStep: number | null = null
+  private readonly recovery: ToolCallRecovery
+
+  constructor(private readonly cause: OpenTurnCloseCause) {
+    this.recovery = new ToolCallRecovery(cause)
+  }
+
+  observe(event: SessionEvent): void {
+    this.recovery.observe(event)
     switch (event.type) {
       case 'turn/start':
-        openTurn = event.data.turn
-        openStep = null
+        this.openTurn = event.data.turn
+        this.openStep = null
         break
       case 'turn/end':
-        openTurn = null
-        openStep = null
+        this.openTurn = null
+        this.openStep = null
         break
       case 'step/start':
-        openStep = event.data.step
+        this.openStep = event.data.step
         break
       case 'step/end':
-        openStep = null
+        this.openStep = null
         break
       // Other event types do not move the turn/step boundary cursor.
       default:
@@ -77,24 +89,17 @@ export function openTurnClosers(events: readonly SessionEvent[], cause: OpenTurn
     }
   }
 
-  // Balanced log (no open tail turn): nothing to close. An open turn implies
-  // `events` is non-empty (its turn/start was logged), so `last` exists.
-  const last = events.at(-1)
-  if (openTurn === null || last === undefined) return []
-
-  // The last real event supplies the seq base and the timestamp for the
-  // synthetic closers (reusing the last timestamp keeps them deterministic and
-  // never invents a "future" time).
-  const closers: SessionEvent[] = recovery.results()
-  let seq = last.seq + closers.length + 1
-  const time = last.time
-
-  // Close an open step before its turn.
-  if (openStep !== null) {
-    closers.push({ type: 'step/end', seq: SessionSeq(seq++), time, data: { turn: openTurn, step: openStep } })
+  finish(last: SessionEvent | undefined): SessionEvent[] {
+    if (this.openTurn === null || last === undefined) return []
+    const closers: SessionEvent[] = this.recovery.results()
+    let seq = last.seq + closers.length + 1
+    const time = last.time
+    if (this.openStep !== null) {
+      closers.push({ type: 'step/end', seq: SessionSeq(seq++), time, data: { turn: this.openTurn, step: this.openStep } })
+    }
+    closers.push({ type: 'turn/end', seq: SessionSeq(seq++), time, data: { turn: this.openTurn, reason: { kind: this.cause.kind } } })
+    return closers
   }
-  closers.push({ type: 'turn/end', seq: SessionSeq(seq++), time, data: { turn: openTurn, reason: { kind: cause.kind } } })
-  return closers
 }
 
 /**

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { Session } from '@deepseek-ai/dsh-session'
+import { appendPluginRecord, type Session } from '@deepseek-ai/dsh-session'
 import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
 import type { WorktreeService } from '@deepseek-ai/dsh-experimental-worktree'
 import type {} from '@deepseek-ai/dsh-experimental-worktree'
@@ -136,7 +136,7 @@ export class LocalGitDelivery {
    * @param session - owner Session.
    */
   clear(session: Session): void {
-    if (this.read(session) !== null) session.append('review-gated/git-state', { version: 1, state: null })
+    if (this.read(session) !== null) appendPluginRecord(session, 'plugin:review-gated/git-state', { version: 1, state: null })
   }
 
   /** Recover facts only; interrupted operations are never replayed.
@@ -373,7 +373,7 @@ export class LocalGitDelivery {
     }
     return state
   }
-  private commit(session: Session, state: RgGitState): void { session.append('review-gated/git-state', { version: 1, state }) }
+  private commit(session: Session, state: RgGitState): void { appendPluginRecord(session, 'plugin:review-gated/git-state', { version: 1, state }) }
   private async save(session: Session, state: RgGitState): Promise<void> {
     this.commit(session, state)
     const published = this.read(session)
