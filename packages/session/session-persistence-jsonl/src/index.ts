@@ -111,8 +111,13 @@ export interface Config {
   root: string
   /** Absolute or cwd-relative recycle-bin root; defaults to <root parent>/trash/sessions. */
   trashRoot?: string
-  /** Host-only maintenance opt-in; omitted or false leaves writers on the ordinary protocol. */
-  maintenance?: { enabled?: boolean }
+  /**
+   * Host-only maintenance opt-in; omitted or false leaves writers on the ordinary protocol.
+   * allowHistoricalCorpus additionally permits moving a current Session while other
+   * Sessions still hold generations below the current format version. Enable it only for a
+   * single-process deployment that accepts the cross-Session migration risk.
+   */
+  maintenance?: { enabled?: boolean; allowHistoricalCorpus?: boolean }
   /** Physical encoding; defaults to checksummed Zstandard frames. */
   compression?: JsonlCompression
   /**
@@ -339,7 +344,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     // Resolve once so later process.cwd() changes cannot split one backend across roots.
     this.root = resolve(config.root)
     this.compression = config.compression ?? DEFAULT_COMPRESSION
-    this.maintenance = new JsonlMaintenance(this.root, config.trashRoot, config.maintenance?.enabled === true, this.compression, {
+    this.maintenance = new JsonlMaintenance(this.root, config.trashRoot, config.maintenance?.enabled === true, config.maintenance?.allowHistoricalCorpus === true, this.compression, {
       hasWriter: id => this.tracker.hasWriter(id),
       inspect: (id, expected, signal) => this.inspectForMaintenance(id, expected, signal),
       readCorpusHeader: (path, version) => this.readCorpusHeader(path, version),

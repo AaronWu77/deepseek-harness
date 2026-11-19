@@ -47,6 +47,7 @@ kind: "package-reference"
 | `root` | 必填 | 所有会话文件的根目录 |
 | `trashRoot` | `<root 的父目录>/trash/sessions` | 必须与会话根目录同卷且互不包含 |
 | `maintenance.enabled` | `false` | 宿主受控维护；开关并不证明部署隔离 |
+| `maintenance.allowHistoricalCorpus` | `false` | 允许在语料仍含历史代际时移动当前会话；需单进程部署并接受跨会话迁移风险 |
 | `compression` | `'zstd'` | 物理编码：`'zstd'` 带校验和帧，或 `'none'` 换行分隔 UTF-8 文本 |
 | `listConcurrency` | `3` | 同时进行的目录、header 与 stat 读取上限，由该后端所有并发的列举共用 |
 
@@ -98,7 +99,7 @@ kind: "package-reference"
 
 严格引用清点检查所有保留 v3/v4 代的头部、布局和实体身份，默认包含已核验的可还原回收站项。遇到未知布局、重复 ID、未核定的维护日志或不可读的头部即拒绝。清点不解码事件正文或迁移会话。调用方可在同一 epoch 内用 `inspectReferenceLog()` 从未经修改的清点项流式读取事件，无需打开会话句柄或创建锁；读取结果未知时必须丢弃临时发现。
 
-`inspectMaintenance(id)` 对所有已提交代际计算摘要，不创建文件也不取得所有权。删除重新校验已确认的 revision 与目录身份。删除及还原均拒绝带迁移暂存文件或仍有历史权威代际的语料，因为迁移可能读取其他会话。获准的操作仅移动整个会话目录，不跨卷、不覆盖已有目标。单会话批次在 `<trashRoot>/<batchId>/manifest.json` 记录删除意图；还原写独立的反向记录。稳定锁目录保存阻止重用会话 id 的墓碑，在还原完成时解除。恢复只核对并补记账；不自动移动或清除目录。报告为 `reserved-empty` 的 POSIX 占位只能显式释放；损坏或无从确认的批次须人工处理。
+`inspectMaintenance(id)` 对所有已提交代际计算摘要，不创建文件也不取得所有权。删除重新校验已确认的 revision 与目录身份。删除及还原均拒绝带迁移暂存文件或仍有历史权威代际的语料，因为迁移可能读取其他会话；`maintenance.allowHistoricalCorpus` 仅为接受该风险的单进程部署解除这一语料级拒绝。获准的操作仅移动整个会话目录，不跨卷、不覆盖已有目标。单会话批次在 `<trashRoot>/<batchId>/manifest.json` 记录删除意图；还原写独立的反向记录。稳定锁目录保存阻止重用会话 id 的墓碑，在还原完成时解除。恢复只核对并补记账；不自动移动或清除目录。报告为 `reserved-empty` 的 POSIX 占位只能显式释放；损坏或无从确认的批次须人工处理。
 
 -----
 

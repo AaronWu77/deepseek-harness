@@ -224,6 +224,7 @@ export type SessionMaintenanceBatches =
 /** Deploy-time information, not proof that external participants respect the protocol. */
 export interface SessionMaintenanceCapability {
   readonly enabled: boolean
+  readonly allowHistoricalCorpus?: boolean
   readonly coordination: 'unsupported' | 'cooperative-kernel-locks'
   readonly isolation: 'not-verified'
   readonly sessionsRoot?: string

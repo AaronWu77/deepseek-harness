@@ -36,15 +36,15 @@ afterEach(async () => {
   }
 })
 
-async function backend(enabled = true) {
+async function backend(enabled = true, allowHistoricalCorpus = false) {
   const ctx = new Context()
   contexts.push(ctx)
-  await ctx.plugin(jsonl, { root, compression: 'none', maintenance: { enabled } })
+  await ctx.plugin(jsonl, { root, compression: 'none', maintenance: { enabled, allowHistoricalCorpus } })
   return ctx.sessionPersistence
 }
 
-async function fixture() {
-  const persistence = await backend()
+async function fixture(allowHistoricalCorpus = false) {
+  const persistence = await backend(true, allowHistoricalCorpus)
   const writer = await persistence.create(meta)
   await writer.flush()
   await writer.close()
@@ -251,6 +251,20 @@ it('refuses both a migration staging file and a different historical-only sessio
   expect(await f.persistence.withMaintenance(id, 'delete', policy, f.options))
     .toMatchObject({ status: 'refused', reason: 'migration-pending' })
   expect(await f.persistence.listMaintenanceBatches()).toEqual({ status: 'ok', batches: [] })
+})
+
+it('moves a current Session beside a historical corpus only with the explicit historical-corpus opt-in', async () => {
+  const f = await fixture()
+  const sibling = join(dirname(f.source), 'other-pending')
+  await mkdir(sibling)
+  await writeFile(join(sibling, 'session.v' + (SESSION_FORMAT_VERSION - 1) + '.jsonl'), 'older generation fixture')
+  expect(await f.persistence.withMaintenance(id, 'delete', policy, f.options))
+    .toMatchObject({ status: 'refused', reason: 'migration-pending' })
+  const optedIn = await backend(true, true)
+  const inspection = await optedIn.inspectMaintenance(id)
+  if (inspection.state !== 'available') throw new Error(JSON.stringify(inspection))
+  const options = { caller: 'fixture-owner', expectedRevision: inspection.revision, expectedIdentity: inspection.identity }
+  expect(await optedIn.withMaintenance(id, 'delete', policy, options)).toMatchObject({ status: 'moved' })
 })
 
 it('rejects linked project directories instead of following their targets', async () => {

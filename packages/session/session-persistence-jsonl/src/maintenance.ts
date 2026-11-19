@@ -30,6 +30,8 @@ const DIGEST = /^[0-9a-f]{64}$/u
 const INTEGER = /^\d+$/u
 const BATCH_LOCK_ID = SessionId('maintenance-batch')
 const JOURNAL_LIMIT = 64 * 1024
+/** Oldest generation the corpus reader admits; historical Sessions below it cannot be moved beside. */
+const MINIMUM_CORPUS_VERSION = 3
 
 // The browser VFS does not offer Node's nonrecursive directory removal or
 // cross-process kernel locks. Do not statically import a missing VFS export.
@@ -111,11 +113,13 @@ export class JsonlMaintenance {
    * @param sessionsRoot - resolved artifact root.
    * @param trashRoot - optional sibling root; must not overlap storage or locks.
    * @param enabled - explicit deployment opt-in; not an isolation check.
+   * @param allowHistoricalCorpus - opt-in to move a current Session beside historical generations.
    * @param compression - physical generation encoding.
    * @param hooks - JSONL observations and invalidation owned by the backend instance.
    */
   constructor(
     readonly sessionsRoot: string, trashRoot: string | undefined, readonly enabled: boolean,
+    readonly allowHistoricalCorpus: boolean,
     private readonly compression: JsonlCompression, private readonly hooks: Hooks,
   ) {
     if (enabled && this.rmdir === undefined) throw new TypeError('JSONL maintenance is supported only on the Node host')
@@ -259,7 +263,7 @@ export class JsonlMaintenance {
       if (error instanceof SessionAlreadyOwnedError) batchBusy = true
     }
     return {
-      enabled: this.enabled, sessionsRoot: this.sessionsRoot, trashRoot: this.trashRoot,
+      enabled: this.enabled, allowHistoricalCorpus: this.allowHistoricalCorpus, sessionsRoot: this.sessionsRoot, trashRoot: this.trashRoot,
       lockRoot: this.lockRoot, sameVolume, batchBusy, coordination: 'cooperative-kernel-locks', isolation: 'not-verified',
       boundaries: [
         'When enabled, writers hold a stable lock from create/open to close, including materialization and migration.',
@@ -360,7 +364,7 @@ export class JsonlMaintenance {
           if (!this.epochActive(epoch)) throw new CorpusIncomplete('stale-epoch', 'exclusive callback has already settled')
         }
         signal?.throwIfAborted()
-        const identify = () => identifyArtifact(file.path, this.compression, SESSION_FORMAT_VERSION, 3, signal)
+        const identify = () => identifyArtifact(file.path, this.compression, SESSION_FORMAT_VERSION, MINIMUM_CORPUS_VERSION, signal)
         const before = await identify()
         if (before === undefined || !sameArtifact(before, artifact.identity)) return unknownCorpus('unstable', 'artifact differs from the corpus item')
         const generation = before.generations.reduce((selected, value) => value.version > selected.version ? value : selected)
@@ -442,7 +446,7 @@ export class JsonlMaintenance {
   }
 
   private async corpusArtifact(epoch: MaintenanceEpoch, path: string, project: string, location: ArtifactHeader['location']): Promise<ArtifactHeader> {
-    const identify = () => identifyArtifact(path, this.compression, SESSION_FORMAT_VERSION, 3)
+    const identify = () => identifyArtifact(path, this.compression, SESSION_FORMAT_VERSION, MINIMUM_CORPUS_VERSION)
     const identity = await identify()
     if (identity === undefined) throw new CorpusIncomplete('unstable', 'artifact disappeared: ' + path)
     let selected: { version: number; header: SessionHeader; revision: SessionPersistenceRevision } | undefined
@@ -787,7 +791,10 @@ export class JsonlMaintenance {
           }
           highest = Math.max(highest, generation)
         }
-        if (highest < SESSION_FORMAT_VERSION) throw new MaintenanceRefused('migration-pending', 'the Session corpus has a historical or unmaterialized generation')
+        if (highest < SESSION_FORMAT_VERSION) {
+          if (!this.allowHistoricalCorpus) throw new MaintenanceRefused('migration-pending', 'the Session corpus has a historical or unmaterialized generation')
+          if (highest < MINIMUM_CORPUS_VERSION) throw new MaintenanceRefused('corrupt', 'historical generation is below the minimum readable version')
+        }
       }
     }
   }
