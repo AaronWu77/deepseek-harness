@@ -39,7 +39,7 @@ export type AppFrameProps =
 
 /** Center column grid item (session-body building block). */
 function CenterColumn(props: { children?: ReactNode; inert: boolean }) {
-  return <div className={css.centerCol} {...{ inert: props.inert ? '' : undefined }}>{props.children}</div>
+  return <div className={css.centerCol} data-dsh-surface="center" {...{ inert: props.inert ? '' : undefined }}>{props.children}</div>
 }
 
 /** Subscribe to the main key without subscribing the column frame to each panel id. */
@@ -123,6 +123,11 @@ function DragHandle(props: { side: 'sidebar' | 'rightbar'; left: number; onStart
       onLostPointerCapture={onPointerCancel}
     />
   )
+}
+
+/** Decorative canvas that stays hidden until a skin displays it. */
+function AmbientCanvas() {
+  return <div className={css.ambient} data-dsh-part="ambient" aria-hidden="true" />
 }
 
 /** The three-column frame (see module doc). */
@@ -289,6 +294,7 @@ export function AppFrame({
     <div
       ref={frameRef}
       className={css.frame}
+      data-dsh-surface="frame"
       style={{
         ...(windowsTitlebar
           ? { '--dsh-windows-sidebar-width': `${cols.sidebar}px` } : {}),
@@ -311,7 +317,7 @@ export function AppFrame({
       />
       {drawer && <div className={css.drawerMask} data-sidebar-mask aria-hidden="true"
         onClick={drawerOpen ? () => { actions.toggleSidebar() } : undefined} />}
-      <div className={css.sidebarCol}
+      <div className={css.sidebarCol} data-dsh-part="sidebar-column"
         style={drawer ? { width: sidebarWidth } : undefined}
         {...{ inert: drawer && sidebarCollapsed ? '' : undefined }}>
         {sidebar}
@@ -338,6 +344,7 @@ export function AppFrame({
       {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
         <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
       )}
+      <AmbientCanvas />
     </div>
   )
 }

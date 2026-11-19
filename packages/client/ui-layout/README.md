@@ -50,6 +50,8 @@ The root publishes `--dsh-frame-top-clearance` for the reserved strip (48px on m
 
 The presenter consumes resolved theme snapshots and projects them onto the document: `html { color-scheme }` for native UA chrome, `body[data-ds-dark-theme]` from the active color scheme, the theme's alias tokens, `--dsh-content-font-size`, `--dsh-code-font-size`, `--dsh-terminal-font-size`, and each non-empty `--dsh-font-family-<role>` list as inline variables on body, and one owned `<meta name="theme-color">` whose content follows the computed body background. Disposing the presenter removes its metadata node with its other global writes.
 
+Optional fork skins can style the frame (`[data-dsh-surface="frame"]`), the center column (`[data-dsh-surface="center"]`), and the sidebar column wrapper (`[data-dsh-part="sidebar-column"]`). The frame’s `[data-dsh-part="ambient"]` child is decorative and hidden unless a skin displays it. The frame owns column measurements and drag-handle placement.
+
 -----
 
 <a id="understand-the-implementation"></a>

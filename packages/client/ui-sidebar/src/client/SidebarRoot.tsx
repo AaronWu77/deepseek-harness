@@ -307,6 +307,7 @@ export function SidebarRoot({
   return (
     <div
       ref={column}
+      data-dsh-surface="sidebar"
       onFocusCapture={(event) => { sidebarFocus.current = event.target }}
       role={drawer ? 'dialog' : undefined}
       data-shortcut-modal={drawer ? 'sidebar' : undefined}

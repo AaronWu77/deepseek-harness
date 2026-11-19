@@ -24,6 +24,13 @@ function statusHarness(startTime?: number) {
 }
 
 describe('RunningStatus', () => {
+  it('marks the existing decorative glyph without adding a wrapper', () => {
+    const content = statusHarness().content()
+    const glyph = content?.querySelector(':scope > span[data-dsh-part="running-glyph"][aria-hidden="true"]')
+    expect(glyph).toBe(content?.firstElementChild)
+    expect(Array.from(glyph?.children ?? [], child => child.localName)).toEqual(['span', 'svg'])
+  })
+
   it('waits for an open Turn start before allocating its clock', () => {
     const view = statusHarness()
     expect(view.content()?.textContent).toBe('深度求索中')

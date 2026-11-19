@@ -330,7 +330,7 @@ export const ToolRow = memo(function ToolRow({
   ), [summaryLinkKeyDown, fileContextMenuProps, urlContextMenuProps, linkHref, openFile, fileTargets, openTarget,
     fileTargetContextMenuProps, state, suffix, totals, summaryText, exitLabel])
   const expandedContent = useMemo(() => open ? (
-    <div className={clsx(css.bodyWrap, detailsBody !== null && css.detailsBodyWrap)}>
+    <div className={clsx(css.bodyWrap, detailsBody !== null && css.detailsBodyWrap)} data-dsh-part="tool-body">
       {askQuestionBody !== null
         ? <AskQuestionCard card={askQuestionBody} />
         : terminalBody !== null
@@ -347,7 +347,7 @@ export const ToolRow = memo(function ToolRow({
               <>
                 <DiffBlock {...diffBody.card} labels={diffLabels} maxLines={CHAT_DIFF_MAX_LINES} className={css.diffBody} />
                 {state === 'error' && outputText !== null && (
-                  <div className={css.ioCard}>
+                  <div className={css.ioCard} data-dsh-surface="tool-io">
                     <div className={css.ioSection}>
                       <span className={css.ioLabel}>{t('row.output')}</span>
                       <span className={css.ioText} data-error>{outputText}</span>
@@ -364,7 +364,7 @@ export const ToolRow = memo(function ToolRow({
                      These come from the image card model, never from the row's
                      flattened output, which JSON.stringifies the image block. They
                      stay visible when the attachment slot renders nothing. */
-                  <div className={css.imageBody}>
+                  <div className={css.imageBody} data-dsh-part="tool-image">
                     {renderSlot !== undefined && loadImage !== undefined && renderSlot('tool.call.images', {
                       images: imageBody.images,
                       loadImage,
@@ -412,13 +412,13 @@ export const ToolRow = memo(function ToolRow({
                       : (
                         <>
                           {variant === 'code' && bodyText !== null && (
-                            <div className={css.bodyScroll}>
+                            <div className={css.bodyScroll} data-dsh-part="tool-code-scroll">
                               <CodeBlock code={bodyText} lang="typescript" copyLabel={t('copy')} copiedLabel={t('copied')}
                                 toolbarLabels={codeToolbarLabels(t)} className={css.codeBody} />
                             </div>
                           )}
                           {(cardBody !== null || outputText !== null) && (
-                            <div className={css.ioCard}>
+                            <div className={css.ioCard} data-dsh-surface="tool-io">
                               {cardBody !== null && (
                                 <div className={css.ioSection}>
                                   <span className={css.ioLabel}>{t('row.input')}</span>
@@ -457,7 +457,14 @@ export const ToolRow = memo(function ToolRow({
     variant, bodyText, cardBody, outputText, state,
   ])
   return (
-    <div className={css.root} data-variant={variant} data-tool={toolName} data-state={state}>
+    <div
+      className={css.root}
+      data-dsh-surface="tool-call"
+      data-variant={variant}
+      data-tool={toolName}
+      data-state={state}
+      data-expanded={open || undefined}
+    >
       {status !== null && <span className={css.visuallyHidden}>{status}</span>}
       <DisclosureRow
         rowClassName={css.row}

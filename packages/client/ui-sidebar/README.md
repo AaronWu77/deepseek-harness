@@ -94,6 +94,8 @@ The sidebar root supplies inherited CSS properties to `sidebar.workspaces` and `
 
 Declaration-aware `slots.inject()` lets a replacing package activate before or after the sidebar. The `sidebar.footer.action` entries stack vertically and scroll when height is limited. The separate `sidebar.settings` slot stays pinned below the actions. Both receive the sidebar width state (`wide`). The `/client` exports are the plugin body (`apply`/`inject`) plus the contract types only; SidebarRoot, the row components, and the tree derivation remain package-internal behind the slot registration.
 
+Optional fork skins can target the sidebar’s content root with `[data-dsh-surface="sidebar"]`. Use `[data-sidebar-footer]` for the area that contains both the footer actions and Settings, or `[data-sidebar-footer-actions]` for just the actions.
+
 </details>
 
 -----

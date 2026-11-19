@@ -9,7 +9,7 @@ const REST_PATH = 'M8.844 13.742C8.967 12.328 8.45 10.4 8.45 9.65C8.45 8.94 8.88
  */
 export function RunningWhaleTail() {
   return (
-    <span className={css.runningIcon} aria-hidden="true">
+    <span className={css.runningIcon} data-dsh-part="running-glyph" aria-hidden="true">
       <span className={css.runningWhaleAnimated} />
       <svg className={css.runningWhaleStill} width="100%" height="100%" viewBox="0 0 16 16" fill="none">
         <path d={REST_PATH} stroke="currentColor" strokeWidth={1} />
