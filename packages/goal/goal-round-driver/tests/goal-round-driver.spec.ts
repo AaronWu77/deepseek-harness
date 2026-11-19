@@ -92,11 +92,20 @@ afterEach(async () => {
   await Promise.allSettled(contexts.splice(0).map(context => context.fiber.dispose()))
 })
 
-/** Mount a real loop with only its model scripted. */
-async function harness(script: ScriptEntry[]): Promise<Harness> {
+/** Capture detached snapshots for tests that supply a flush listener. */
+function mountSnapshotWriter(ctx: Context): void {
+  const snapshots = new Map<SessionId, unknown>()
+  ctx.on('session/flush', (session) => {
+    snapshots.set(session.id, structuredClone({ header: session.header, events: session.snapshotEvents() }))
+  })
+}
+
+/** Mount a real loop with a scripted model. */
+async function harness(script: ScriptEntry[], withWriter = true): Promise<Harness> {
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
+  if (withWriter) mountSnapshotWriter(ctx)
   await ctx.plugin(GoalService)
   const driver = await ctx.plugin(goalSession)
   await ctx.plugin(AgentLoop, { agents: [] })
@@ -228,6 +237,7 @@ describe('same-session goal driving', () => {
     const ctx = new Context()
     contexts.push(ctx)
     await mountAgentLoopTestDependencies(ctx)
+    mountSnapshotWriter(ctx)
     await ctx.plugin(GoalService)
     await ctx.plugin(AgentLoop, { agents: [] })
     const adapter = new ScriptedAdapter([textResponse('after resume')])
@@ -570,6 +580,15 @@ describe('same-session goal driving', () => {
     expect(requestText(test.adapter.requests[0]!)).not.toContain('<goal_round>')
     expect(requestText(test.adapter.requests[1]!)).toContain('revised after claim')
     expect(requestText(test.adapter.requests[1]!)).not.toContain('stale before admission')
+  })
+
+  it('does not start a goal round with no participating flush listener', async () => {
+    const test = await harness([textResponse('unexpected round')], false)
+    test.ctx.goals.create(test.agent, { objective: 'wait for the Session writer' })
+    const goal = await waitForGoal(test.ctx, test.agent, state => state?.activation === 'disarmed')
+    expect(goal).toMatchObject({ phase: 'active', roundsStarted: 0 })
+    expect(test.adapter.requests).toHaveLength(0)
+    expect(test.agent.inbox.nextTurn).toHaveLength(0)
   })
 
   it('disarms without dispatch when a durability checkpoint fails', async () => {

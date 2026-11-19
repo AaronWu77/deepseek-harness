@@ -150,7 +150,9 @@ export function apply(ctx: Context): void {
     if (state.needsCheckpoint) {
       state.needsCheckpoint = false
       try {
-        await ctx.sessions.flush(agent.session)
+        if (!await ctx.sessions.flush(agent.session)) {
+          throw new Error('no Session flush listener participated; restore persistence before resuming the goal')
+        }
       } catch (error: unknown) {
         ctx.logger.warn(`goal-round-driver: durability checkpoint failed for agent "${agent.id}": ${renderThrown(error)}`)
         disarm(state)

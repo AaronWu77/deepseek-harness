@@ -274,10 +274,13 @@ export class InputHub implements SessionInputResolver {
     signal: AbortSignal,
     accept: () => void,
   ): Promise<SubmitOutcome> {
+    const conversation = this.conversation()
+    const block = conversation.blocks.storeFor(session.sessionId).getSnapshot()
+    if (block !== undefined) return Promise.resolve({ kind: 'error', text: block.reason })
     if (text === '' && attachmentIds.length === 0) {
       return session.prompt([], mode, signal).then(result => result.ok ? { kind: 'success' } : { kind: 'error' })
     }
-    return this.conversation().sendSession(session, text, attachmentIds, mode, signal, accept)
+    return conversation.sendSession(session, text, attachmentIds, mode, signal, accept)
   }
 
   /**

@@ -189,11 +189,11 @@ export const InputBar = memo(function InputBar({
     revealDraftSelection(scrollRef)
   }
 
-  // Automatic desktop focus restores and reveals the draft selection without
-  // scrolling the conversation.
+  // Unlocking the editor must not take focus from another composer control.
   useEffect(() => {
-    if (locked || editor === null) return
-    if (isMobileDevice()) return
+    if (locked || editor === null || isMobileDevice()) return
+    const active = cardRef.current?.ownerDocument.activeElement
+    if (active !== editor.getRootElement() && active != null && cardRef.current?.contains(active)) return
     focusDraftEditor(editor, revealSelection)
   }, [locked, sessionId, editor])
 

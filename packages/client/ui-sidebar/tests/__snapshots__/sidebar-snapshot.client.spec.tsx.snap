@@ -85,9 +85,11 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
     </div>
     <div
       class="footArea"
+      data-sidebar-footer="true"
     >
       <div
         class="footerActions"
+        data-sidebar-footer-actions="true"
       >
         <div
           data-slot="sidebar.footer.action"
@@ -251,9 +253,11 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
     </div>
     <div
       class="footArea"
+      data-sidebar-footer="true"
     >
       <div
         class="footerActions"
+        data-sidebar-footer-actions="true"
       >
         <div
           data-slot="sidebar.footer.action"
@@ -376,9 +380,11 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
     </div>
     <div
       class="footArea"
+      data-sidebar-footer="true"
     >
       <div
         class="footerActions"
+        data-sidebar-footer-actions="true"
       >
         <div
           data-slot="sidebar.footer.action"
@@ -542,9 +548,11 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
     </div>
     <div
       class="footArea"
+      data-sidebar-footer="true"
     >
       <div
         class="footerActions"
+        data-sidebar-footer-actions="true"
       >
         <div
           data-slot="sidebar.footer.action"
@@ -708,9 +716,11 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
     </div>
     <div
       class="footArea"
+      data-sidebar-footer="true"
     >
       <div
         class="footerActions"
+        data-sidebar-footer-actions="true"
       >
         <div
           data-slot="sidebar.footer.action"

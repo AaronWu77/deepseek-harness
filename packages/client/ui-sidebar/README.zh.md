@@ -92,7 +92,7 @@ root 作用域的 `sidebar.session.action` 是包裹新建会话行内容的 HOC
 
 ### slot 纪律
 
-声明感知的 `slots.inject()` 让替换包无论先于还是后于侧边栏激活都能生效。页脚承载 `sidebar.settings` 席位：侧边栏只渲染固定在底部的布局 slot，并共享其栏状态（`wide`）。`/client` 导出接口只包含插件主体（`apply`/`inject`）及约定类型；SidebarRoot、行组件与树派生仍由 slot 注册封装在包内。
+声明感知的 `slots.inject()` 让替换包无论先于还是后于侧边栏激活都能生效。`sidebar.footer.action` 的条目纵向排列，在高度不足时可滚动。独立的 `sidebar.settings` 插槽固定在操作区下方。两个插槽均接收侧栏宽态（`wide`）。`/client` 导出接口只包含插件主体（`apply`/`inject`）及约定类型；SidebarRoot、行组件与树派生仍由 slot 注册封装在包内。
 
 </details>
 

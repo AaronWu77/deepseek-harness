@@ -433,7 +433,9 @@ export class AcpSession {
         failures.push(new Error('subagent teardown failed', { cause: error }))
       }
       try {
-        await this.ctx.sessions.flush(this.agent.session)
+        if (!await this.ctx.sessions.flush(this.agent.session)) {
+          throw new Error('no persistence listener flushed the closing ACP session')
+        }
       } catch (error: unknown) {
         failures.push(new Error('ACP session persistence flush failed', { cause: error }))
       }

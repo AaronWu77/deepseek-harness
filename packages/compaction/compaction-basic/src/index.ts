@@ -398,7 +398,9 @@ export class BasicCompactionEngine extends CompactionEngine {
 
   /**
    * Force one useful idle-session compaction below the pressure threshold, and
-   * resolve only after its standalone marker pair is durably checkpointed.
+   * resolve only after its standalone marker pair closes and a flush listener participates.
+   * If no flush listener participates, the caller must inspect the current state
+   * before retrying; this failure does not roll back the in-memory replacement.
    * @param agent - idle agent whose next-turn admission this call reserves.
    * @param signal - cancellation scoped to this compaction request.
    * @param sourceCommandId - initiating command identity for presentation correlation.
@@ -432,7 +434,9 @@ export class BasicCompactionEngine extends CompactionEngine {
               stability: 'selected-span',
               ...sourceCommandId === undefined ? {} : { sourceCommandId },
               flush: async () => {
-                await this.ctx.sessions.flush(agent.session)
+                if (!await this.ctx.sessions.flush(agent.session)) {
+                  throw new Error('no Session flush listener participated; restore persistence and inspect the session before retrying')
+                }
               },
             },
             operationSignal,

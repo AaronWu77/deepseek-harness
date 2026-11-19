@@ -69,13 +69,16 @@ export function sessionLogExportDeps(ctx: Context): SessionLogExportDeps {
   }
 }
 
+/** A live log could not be prepared because no scoped flush listener participated. */
+export class SessionLogFlushUnavailableError extends Error {}
+
 /**
- * Flush one currently live session through the store's authoritative durability
- * barrier immediately before its logical log is read. A cold or absent id has
- * no in-memory work to flush.
+ * Flush one currently live Session immediately before reading its logical log.
+ * A cold or absent id has no in-memory work to flush.
  * @param deps - export services, including the optional live-session store.
  * @param id - the session whose artifact is about to be read.
  * @param signal - optional cancellation observed around the flush barrier.
+ * @throws When no scoped flush listener participates or a listener fails.
  */
 export async function flushLiveSessionLog(
   deps: Pick<SessionLogExportDeps, 'sessions'>,
@@ -87,8 +90,9 @@ export async function flushLiveSessionLog(
   if (sessions === undefined) return
   const session = sessions.get(id)
   if (session === undefined) return
-  await sessions.flush(session)
+  const participated = await sessions.flush(session)
   signal?.throwIfAborted()
+  if (!participated) throw new SessionLogFlushUnavailableError('no Session flush listener participated in log export')
 }
 
 /** One exported file: a serialized session log or one referenced attachment object. */

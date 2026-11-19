@@ -57,7 +57,7 @@ kind: "package-reference"
 <a id="protocol-contract"></a><a id="standard-acp-v1-surface"></a>
 ### 协议约定
 
-一个连接可以同时运行多个会话，彼此独立。客户端发出的调用如下：
+一个连接可以同时运行多个会话，彼此独立。如果没有监听器参与持久化 flush，`session/new` 会返回错误并释放新 Agent；`session/close` 则在释放指定 Agent 后返回错误。创建其他会话前请恢复 Session 写入器，尝试恢复会话前请先检查已持久化状态。客户端发出的调用如下：
 
 | 调用 | 你会得到什么 |
 |---|---|

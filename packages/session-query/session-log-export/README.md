@@ -84,7 +84,7 @@ Attachment collection reads declared content fields of built-in Session events a
 
 ### Failures
 
-The dialog shows a preparation error when the preflight fails before ZIP streaming starts — for example an unreachable or misconfigured host endpoint. A descendant read failure, or an attachment read failure other than a missing object, is reported by the browser download manager after the browser accepts the GET, not by the dialog. A Markdown preparation failure reports a toast asking the user to retry the Session read; a clipboard write failure reports a separate toast asking the user to check clipboard permission. Neither reports success for a partial or missing transcript, and no pending toast is shown.
+The dialog shows a preparation error when the preflight fails before ZIP streaming starts — for example an unreachable or misconfigured host endpoint. If no flush listener participates for a live root Session, the Host rejects the export before reading its stored log. Restore the Session writer before retrying. A descendant read failure, or an attachment read failure other than a missing object, is reported by the browser download manager after the browser accepts the GET, not by the dialog. A Markdown preparation failure reports a toast asking the user to retry the Session read; a clipboard write failure reports a separate toast asking the user to check clipboard permission. Neither reports success for a partial or missing transcript, and no pending toast is shown.
 
 -----
 

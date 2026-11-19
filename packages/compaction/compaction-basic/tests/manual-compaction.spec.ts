@@ -219,7 +219,7 @@ function fakeAgent(
 }
 
 /** Service over a store-detached session for failure classification. */
-function detachedService(): { ctx: Context; compact: GatedCompactionEngine; flushes: () => number } {
+function detachedService(flushParticipated = true): { ctx: Context; compact: GatedCompactionEngine; flushes: () => number } {
   const ctx = new Context()
   void new LlmRuntime(ctx)
   void new SessionStore(ctx)
@@ -229,7 +229,7 @@ function detachedService(): { ctx: Context; compact: GatedCompactionEngine; flus
   let flushes = 0
   vi.spyOn(ctx.sessions, 'flush').mockImplementation(() => {
     flushes += 1
-    return Promise.resolve(false)
+    return Promise.resolve(flushParticipated)
   })
   return { ctx, compact: new GatedCompactionEngine(ctx, { auto: false }), flushes: () => flushes }
 }
@@ -735,6 +735,20 @@ describe('compactNow transaction and failure classification', () => {
     expect(session.snapshotEvents().some(event => event.type === 'turn/start')).toBe(false)
     expect(session.snapshotEvents().find(event => event.type === 'compaction/start')?.data)
       .toEqual({ compactionId: result?.compactionId, turn: null })
+  })
+
+  it('rejects a closed manual bracket when no flush listener participates', async () => {
+    const { compact, flushes } = detachedService(false)
+    const session = closedConversation(2)
+    const release = vi.fn()
+    const agent = fakeAgent(session, () => release)
+
+    expect((await rejection(compact.compactNow(agent, SIGNAL))).code).toBe('persistence')
+    expect(flushes()).toBe(1)
+    expect(release).toHaveBeenCalledOnce()
+    expect(compactEvents(session).map(event => event.type)).toEqual([
+      'compaction/start', 'compaction/summary', 'compaction/end',
+    ])
   })
 
   it('classifies a durability failure after the standalone bracket committed', async () => {

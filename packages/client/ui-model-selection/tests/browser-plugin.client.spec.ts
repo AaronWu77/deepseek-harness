@@ -112,6 +112,10 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
   ctx.provide('conversation', {
     blocks: {
       set: (id: SessionId, block: { reason: string } | undefined) => { blocks.set(id, block) },
+      hold: (id: SessionId, block: { reason: string }) => {
+        blocks.set(id, block)
+        return () => { if (blocks.get(id) === block) blocks.delete(id) }
+      },
     },
   })
   let contribution: CommandContribution | undefined
@@ -367,10 +371,13 @@ describe('ui-model-selection dual entry', () => {
     await b.ctx.modelDirectories.directoryFor(sid('s1')).load()
     const late = face.select({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
     expect(face.directory.getSnapshot().pending).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+    expect(b.blockOf('s1')).toBeDefined()
     b.ctx.emit('connection/reset')
     expect(face.directory.getSnapshot()).toMatchObject({ status: 'loading', pending: null })
+    expect(b.blockOf('s1')).toBeUndefined()
     await late
     expect(face.directory.getSnapshot().pending).toBeNull()
+    expect(b.blockOf('s1')).toBeUndefined()
   })
 
   it('hides the effective selection until the reconnected catalog validates it', async () => {

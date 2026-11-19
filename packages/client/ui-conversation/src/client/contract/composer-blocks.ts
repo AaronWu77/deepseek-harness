@@ -16,6 +16,13 @@ export interface ComposerBlocks {
    */
   set(sessionId: SessionId, block: ComposerBlock | undefined): void
   /**
+   * Block submission until the caller's operation settles, without replacing another block.
+   * @param sessionId - Session whose composer is affected.
+   * @param block - Localized reason to display while held.
+   * @returns An idempotent disposer for this block alone.
+   */
+  hold(sessionId: SessionId, block: ComposerBlock): () => void
+  /**
    * Resolve the observable block state for one Session.
    * @param sessionId - Session to observe.
    * @returns Identity-stable block store.

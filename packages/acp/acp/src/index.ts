@@ -227,8 +227,9 @@ export function apply(ctx: Context, config: AcpConfig): void {
       try {
         const configOptions = await record.configOptions(signal)
         assertOpen()
-        // The attached log writer's flush materializes an empty session durably.
-        await ctx.sessions.flush(record.agent.session)
+        if (!await ctx.sessions.flush(record.agent.session)) {
+          throw internalError('no persistence listener flushed the new ACP session; restore the Session writer before retrying')
+        }
         assertOpen()
         return { sessionId, configOptions }
       } catch (error: unknown) {

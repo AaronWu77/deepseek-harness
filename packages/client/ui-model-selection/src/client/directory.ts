@@ -45,6 +45,7 @@ export class ModelDirectory {
   /** Latest selection operation wins; an older response never overwrites a newer one. */
   private generation = 0
   private disposed = false
+  private readonly selectionBlocks = new Set<() => void>()
   private readonly unsubscribeCatalog: () => void
   private readonly unsubscribeSelection: () => void
 
@@ -56,6 +57,7 @@ export class ModelDirectory {
    * @param projected - durable model selection projected from Session history.
    * @param isBlank - whether this Session has no first message yet.
    * @param track - desktop-only callback after a successful user selection.
+   * @param blockSubmission - hold this Session’s draft until an explicit selection settles.
    */
   constructor(
     private readonly sessions: Pick<TypertClientRemote['session'], 'selectModel'>,
@@ -65,6 +67,7 @@ export class ModelDirectory {
     private readonly projected: ObservableSnapshot<unknown>,
     private readonly isBlank: () => boolean,
     private readonly track?: TrackProductEvent,
+    private readonly blockSubmission?: () => () => void,
   ) {
     this.unsubscribeCatalog = catalog.store.subscribe(() => { this.syncInputs() })
     this.unsubscribeSelection = projected.subscribe(() => { this.syncInputs() })
@@ -91,6 +94,16 @@ export class ModelDirectory {
    */
   async select(selection: ModelSelection): Promise<RemoteResult<void>> {
     this.assertAvailable()
+    const release = this.blockSubmission?.()
+    if (release !== undefined) this.selectionBlocks.add(release)
+    try {
+      return await this.sendSelection(selection)
+    } finally {
+      if (release !== undefined && this.selectionBlocks.delete(release)) release()
+    }
+  }
+
+  private async sendSelection(selection: ModelSelection): Promise<RemoteResult<void>> {
     const previous = this.store.getSnapshot().current
     const previousEffort = previous?.reasoningEffort ?? (previous === null ? undefined : this.catalog.reasoningFor(previous)?.defaultEffort)
     const nextEffort = selection.reasoningEffort ?? this.catalog.reasoningFor(selection)?.defaultEffort
@@ -134,6 +147,7 @@ export class ModelDirectory {
   resetConnected(): void {
     if (this.disposed) return
     ++this.generation
+    this.releaseSelectionBlocks()
     this.store.update((state) => {
       if (state.status === 'selecting') state.status = 'idle'
       state.pending = null
@@ -145,8 +159,15 @@ export class ModelDirectory {
   /** Scope teardown: late settlements lose write access to the store. */
   dispose(): void {
     this.disposed = true
+    this.releaseSelectionBlocks()
     this.unsubscribeSelection()
     this.unsubscribeCatalog()
+  }
+
+  private releaseSelectionBlocks(): void {
+    const releases = [...this.selectionBlocks]
+    this.selectionBlocks.clear()
+    for (const release of releases) release()
   }
 
   private assertAvailable(): void {

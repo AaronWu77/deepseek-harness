@@ -464,9 +464,8 @@ export function SidebarRoot({
         <Toast key={copiedToast} tone="success" text={t('version.copied')} onDone={() => { setCopiedToast(null) }} />
       )}
 
-      {/* Footer actions stack above Settings in both sidebar widths. */}
-      <div className={css.footArea}>
-        <div className={css.footerActions}>
+      <div className={css.footArea} data-sidebar-footer>
+        <div className={css.footerActions} data-sidebar-footer-actions>
           {renderSlot('sidebar.footer.action', { wide })}
         </div>
         <div className={css.settingsArea}>

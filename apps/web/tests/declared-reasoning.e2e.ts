@@ -6,7 +6,7 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
-import type { Browser, Page, Request } from 'playwright'
+import type { Browser, Page, Request, Route } from 'playwright'
 import { chromium, webkit } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed, onTestFinished } from 'vitest'
 import {
@@ -256,6 +256,72 @@ describe.skipIf(MODE === 'record').each([
     await page.mouse.click(0, 0)
     await menu.waitFor({ state: 'detached' })
     expect(tripwire.pageErrors).toEqual([])
+  })
+
+  it.each(['acknowledged', 'rejected'] as const)('does not send a draft before its reasoning selection is %s', async outcome => {
+    const decision = Promise.withResolvers<'continue' | 'reject' | 'abort'>()
+    const routeDone = Promise.withResolvers<void>()
+    let intercepted = false
+    let promptCalls = 0
+    const selectionPattern = '**/api/session/selectModel'
+    const promptPattern = '**/api/session/prompt'
+    const holdSelection = async (route: Route) => {
+      intercepted = true
+      try {
+        const action = await decision.promise
+        if (action === 'continue') await route.continue()
+        else if (action === 'abort') await route.abort()
+        else {
+          const { rpcId } = route.request().postDataJSON() as { rpcId: string }
+          await route.fulfill({
+            json: {
+              type: 'server-response', rpcId,
+              result: { ok: false, error: { code: 'session/writer-held', message: 'writer held', details: { sessionId: 'held-session' } } },
+            },
+          })
+        }
+      } finally { routeDone.resolve() }
+    }
+    const countPrompt = async (route: Route) => {
+      promptCalls += 1
+      await route.abort()
+    }
+    await page.route(selectionPattern, holdSelection, { times: 1 })
+    await page.route(promptPattern, countPrompt)
+    try {
+      const input = page.locator('[data-composer-input]').first()
+      const draft = 'A draft with a newly selected reasoning level'
+      await input.fill(draft)
+      const trigger = page.getByRole('button', { name: /^选择模型/ })
+      await trigger.click()
+      await page.getByRole('menuitem', { name: /推理等级/ }).click()
+      const current = await page.getByRole('menuitemradio', { name: 'Max', exact: true }).getAttribute('aria-checked')
+      const effort = current === 'true' ? 'High' : 'Max'
+      await page.getByRole('menuitemradio', { name: effort, exact: true }).click()
+      await expect.poll(() => intercepted).toBe(true)
+      await expect.poll(() => input.getAttribute('contenteditable')).toBe('false')
+      expect(await input.getAttribute('aria-label')).toBe('正在保存模型选择…')
+      await input.press('Enter')
+      expect(await input.textContent()).toBe(draft)
+      expect(promptCalls).toBe(0)
+      decision.resolve(outcome === 'acknowledged' ? 'continue' : 'reject')
+      if (outcome === 'acknowledged') {
+        await expect.poll(() => trigger.getAttribute('aria-label')).toContain(`推理等级 ${effort}`)
+      } else await page.getByRole('alert').filter({ hasText: '当前会话已被占用' }).waitFor()
+      await expect.poll(() => input.getAttribute('contenteditable')).toBe('true')
+      expect(await input.textContent()).toBe(draft)
+      expect(promptCalls).toBe(0)
+      if (outcome === 'acknowledged') {
+        await Promise.all([page.waitForRequest(promptPattern), input.press('Enter')])
+        await expect.poll(() => promptCalls).toBe(1)
+        await expect.poll(() => input.getAttribute('contenteditable')).toBe('true')
+      }
+    } finally {
+      decision.resolve('abort')
+      await page.unroute(selectionPattern, holdSelection)
+      if (intercepted) await routeDone.promise
+      await page.unroute(promptPattern, countPrompt)
+    }
   })
 
   it('keeps its snapshot inventory closed', async () => {

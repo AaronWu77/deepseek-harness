@@ -35,7 +35,7 @@ interface LiveState {
 
 /** The `ctx.modelDirectories` session model-selection service. */
 export class ModelDirectoryResolver extends Service {
-  static inject = ['sessions', 'remote', 'remote.session']
+  static inject = ['sessions', 'remote', 'remote.session', 'conversation', 'locale']
 
   private readonly live: LiveState = { directories: new WeakMapWithValues() }
   private readonly catalog: ModelCatalogDirectory
@@ -73,6 +73,8 @@ export class ModelDirectoryResolver extends Service {
     if (binding === undefined) throw new Error(`ui-model-selection: session "${String(sessionId)}" resolved no binding`)
     const existing = live.directories.get(binding)
     if (existing !== undefined) return existing
+    const { blocks } = this.ctx.conversation
+    const t = this.ctx.locale.bind('model')
     const directory = new ModelDirectory(
       this.ctx.remote.session,
       sessionId,
@@ -81,6 +83,7 @@ export class ModelDirectoryResolver extends Service {
       binding.session.projections.faceOf('modelSelection'),
       () => binding.session.getSnapshot().blank,
       (name, attributes) => this.ctx.get('productAnalytics')?.track(name, attributes),
+      () => blocks.hold(sessionId, { reason: t('status.savingSelection') }),
     )
     live.directories.set(binding, directory)
     actx.effect(() => () => {

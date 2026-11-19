@@ -584,6 +584,20 @@ describe('session.export download endpoint', () => {
     expect(body).not.toContain('/host/private/')
   })
 
+  it('does not read a live root log when no flush listener participated', async () => {
+    const open = vi.fn(async () => readHandle(log('session-root')))
+    const api = await buildApi({ 'session-root': log('session-root') }, [], {
+      open,
+      sessions: { get: id => ({ id }), flush: async () => false },
+    })
+    const response = await toFetchHandler(api).fetch(
+      new Request('http://host/api/session.export?sessionId=session-root'),
+    )
+    expect(response.status).toBe(500)
+    expect(await response.text()).toContain('restore the Session writer')
+    expect(open).not.toHaveBeenCalled()
+  })
+
   it('answers the private-error-safe 500 when the live root flush fails', async () => {
     const api = await buildApi({ 'session-root': log('session-root') }, [], {
       sessions: {

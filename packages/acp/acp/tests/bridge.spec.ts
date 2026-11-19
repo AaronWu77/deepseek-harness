@@ -190,6 +190,25 @@ describe('automation-only ACP bridge', () => {
     ])
   })
 
+  it('rejects ACP creation without a participating flush listener and releases its Agent', async () => {
+    harness = await makeBridgeHarness()
+    await harness.client.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} })
+    using flush = vi.spyOn(harness.ctx.sessions, 'flush').mockResolvedValueOnce(false)
+    await expect(harness.client.newSession({ cwd: process.cwd(), mcpServers: [] })).rejects.toThrow()
+    expect(flush).toHaveBeenCalled()
+    expect(harness.ctx.agents.list()).toHaveLength(0)
+  })
+
+  it('reports a missing flush listener while still releasing the closing ACP Agent', async () => {
+    harness = await makeBridgeHarness()
+    await harness.client.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} })
+    const { sessionId } = await harness.client.newSession({ cwd: process.cwd(), mcpServers: [] })
+    using flush = vi.spyOn(harness.ctx.sessions, 'flush').mockResolvedValueOnce(false)
+    await expect(harness.client.closeSession({ sessionId })).rejects.toThrow(/session close failed/)
+    expect(flush).toHaveBeenCalled()
+    expect(harness.ctx.agents.get(SessionId(sessionId))).toBeUndefined()
+  })
+
   it('materializes an empty closed session for list and resume', async () => {
     harness = await makeBridgeHarness()
     await harness.client.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} })

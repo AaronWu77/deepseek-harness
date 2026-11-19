@@ -57,7 +57,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 <a id="protocol-contract"></a><a id="standard-acp-v1-surface"></a>
 ### Protocol contract
 
-One connection can run several sessions at once, each independent. The calls a client makes:
+One connection can run several sessions at once, each independent. If no listener participates in the persistence flush, `session/new` returns an error and releases its Agent. In the same case, `session/close` returns an error after releasing the addressed Agent. Restore the Session writer before creating another session, and check persisted state before attempting to resume. The calls a client makes:
 
 | Call | What you get |
 |---|---|
