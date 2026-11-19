@@ -8,11 +8,15 @@ import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-settings'
 import { appendPluginRecord } from '@deepseek-ai/dsh-session'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+import type { Evidence, MaintenanceEpoch } from '@deepseek-ai/dsh-session-persistence'
 import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { WorktreeReclamation } from './archive.ts'
+import { ReferenceProducerGate, ReferenceQuiescenceDisabled } from './reference-quiescence.ts'
+import { inspectCheckoutReferences, type CheckoutReference } from './checkout-references.ts'
+export type { CheckoutReference } from './checkout-references.ts'
 import { PREPARE_DIRECTORY } from './directory.ts'
 import { generatedWorktreeName } from './name.ts'
 import { runCommand, scanCommand } from './process.ts'
@@ -34,6 +38,8 @@ export type { WorktreeProjectionState } from './projection.ts'
 
 /** Worktree location, generated names, executables, subprocess resource limits, and the archive cleanup switch. */
 export interface Config {
+  /** Opt in to maintenance coordination for checkout mutations. */
+  referenceQuiescence?: boolean
   /** Keep every checkout when its Session is archived; editable live from the Plugins page. */
   retainOnArchive: Volatile<boolean>
   /** Relative checkout pool inside the source repository. */
@@ -87,6 +93,7 @@ export class WorktreeService extends Service {
   static inject = ['workingDirectory', 'fs', 'subprocess', 'sandbox', 'sandboxPolicy', 'sessionProjections']
 
   static Config = z.object({
+    referenceQuiescence: z.boolean().default(false),
     retainOnArchive: z.boolean().default(false).volatile(),
     directory: z.string().default('.agents/worktrees'),
     namePrefix: z.string().default('dsh-'),
@@ -98,14 +105,20 @@ export class WorktreeService extends Service {
   })
 
   private readonly config: ResolvedConfig
+  private readonly referenceGate: ReferenceProducerGate | undefined
   private readonly lifetime = new AbortController()
   private readonly pending = new Set<Promise<unknown>>()
   private readonly checkouts = new Map<string, Promise<void>>()
+  private operationRevision = 0
+  private starting = 0
+  private mutationUnresolved = false
   private projection!: ProjectionHandle<WorktreeProjectionState>
   private reclamation: WorktreeReclamation | undefined
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'worktrees')
+    this.referenceGate = config.referenceQuiescence
+      ? new ReferenceProducerGate(() => { this.reclamation?.resumeDeferred() }) : undefined
     this.config = config as ResolvedConfig
     if (!relativePath(this.config.directory)) throw new Error('worktree: directory must be a relative directory without dot segments')
     if (!relativePath(`${this.config.namePrefix}name`) || this.config.namePrefix.startsWith('-')) {
@@ -137,10 +150,32 @@ export class WorktreeService extends Service {
         retainOnArchive: () => this.config.retainOnArchive.get(),
         exclusiveCheckout: (path, body) => this.exclusiveCheckout(path, body),
         removeCheckout: (session, request, signal, admit) => this.removeCheckout(session, request, signal, admit),
-      }, this.projection)
+      }, this.projection, this.referenceGate)
       this.reclamation = reclamation
       scope.effect(() => () => { this.reclamation = undefined })
     })
+  }
+
+  /** @returns Whether Worktree opted in to producer admission control. Does not acquire a scope. */
+  referenceQuiescenceEnabled(): boolean {
+    return this.referenceGate !== undefined
+  }
+
+  /**
+   * Stop new checkout creation and restore, and defer archive cleanup intake until release.
+   * @param holder - diagnostic label for the maintenance caller.
+   * @param fn - work to finish before intake reopens; the scope's holder is diagnostic only.
+   * @param options - cancellation before callback entry and maximum drain time (default 30 seconds).
+   * @returns The callback result. Rejects with REFERENCE_QUIESCENCE_DISABLED (reason disabled) when not opted in,
+   * or REFERENCE_PRODUCER_BUSY (reason busy, phase held or drain-timeout) when acquisition fails.
+   */
+  async withReferenceQuiescence<T>(
+    holder: string, fn: (scope: Readonly<{ holder: string }>) => Promise<T>,
+    options?: { signal?: AbortSignal; drainTimeoutMs?: number },
+  ): Promise<T> {
+    options?.signal?.throwIfAborted()
+    if (this.referenceGate === undefined) throw new ReferenceQuiescenceDisabled('worktree')
+    return this.referenceGate.withQuiescence(holder, fn, options)
   }
 
   /**
@@ -156,16 +191,33 @@ export class WorktreeService extends Service {
    * @param onPhase - receives each stage before it begins; it must not throw.
    * @returns canonical checkout path, branch name, pinned commit, and source repository root.
    */
-  async create(
+  create(
     agent: Agent,
     request: CreateWorktreeRequest = {},
     signal?: AbortSignal,
     onPhase?: (phase: CreateWorktreePhase) => void,
   ): Promise<CreatedWorktree> {
+    if (this.referenceGate === undefined) return this.createAdmitted(agent, request, signal, onPhase)
+    return this.referenceGate.run(() => this.createAdmitted(agent, request, signal, onPhase))
+  }
+
+  private async createAdmitted(
+    agent: Agent,
+    request: CreateWorktreeRequest,
+    signal?: AbortSignal,
+    onPhase?: (phase: CreateWorktreePhase) => void,
+  ): Promise<CreatedWorktree> {
     const operationSignal = signal === undefined ? this.lifetime.signal : AbortSignal.any([this.lifetime.signal, signal])
     operationSignal.throwIfAborted()
-    const operation = this.createCheckout(agent, this.resolve(agent, request), operationSignal, onPhase)
-    this.pending.add(operation)
+    this.operationRevision++
+    this.starting++
+    let operation: Promise<CreatedWorktree>
+    try {
+      operation = this.createCheckout(agent, this.resolve(agent, request), operationSignal, onPhase)
+      this.pending.add(operation)
+    } finally {
+      this.starting--
+    }
     try {
       return await operation
     } finally {
@@ -187,7 +239,17 @@ export class WorktreeService extends Service {
    * @param onPhase - receives each stage before it begins; it must not throw.
    * @returns the directory and whether the branch was created again.
    */
-  async restore(
+  restore(
+    agent: Agent,
+    request: RestoreWorktreeRequest,
+    signal?: AbortSignal,
+    onPhase?: (phase: CreateWorktreePhase) => void,
+  ): Promise<RestoredWorktree> {
+    if (this.referenceGate === undefined) return this.restoreAdmitted(agent, request, signal, onPhase)
+    return this.referenceGate.run(() => this.restoreAdmitted(agent, request, signal, onPhase))
+  }
+
+  private async restoreAdmitted(
     agent: Agent,
     request: RestoreWorktreeRequest,
     signal?: AbortSignal,
@@ -195,12 +257,49 @@ export class WorktreeService extends Service {
   ): Promise<RestoredWorktree> {
     const operationSignal = signal === undefined ? this.lifetime.signal : AbortSignal.any([this.lifetime.signal, signal])
     operationSignal.throwIfAborted()
+    this.operationRevision++
     const operation = this.exclusiveCheckout(request.path, () => this.restoreCheckout(agent, request, operationSignal, onPhase))
     this.pending.add(operation)
     try {
       return await operation
     } finally {
       this.pending.delete(operation)
+    }
+  }
+
+  /**
+   * Observe candidate worktree records and working directories without opening a Session or taking checkout locks.
+   * @param epoch - active Session persistence maintenance epoch.
+   * @param sessionIds - Sessions whose checkout dependencies are inspected.
+   * @returns blocking checkout dependencies or unknown if work or Git identity cannot be resolved.
+   */
+  async inspectSessionCheckout(epoch: MaintenanceEpoch, sessionIds: readonly SessionId[]): Promise<Evidence<CheckoutReference>> {
+    const persistence = this.ctx.get('sessionPersistence')
+    const stale = { state: 'unknown', reason: { code: 'stale-epoch' } } as const
+    if (persistence?.isMaintenanceEpochActive(epoch) !== true) return stale
+    const revision = this.operationRevision
+    const reclamation = this.reclamation
+    const archiveRevision = reclamation?.quiescentRevision()
+    const idle = () => reclamation === this.reclamation && archiveRevision !== undefined
+      && reclamation?.quiescentRevision() === archiveRevision && revision === this.operationRevision
+      && this.starting === 0 && this.pending.size === 0 && this.checkouts.size === 0 && !this.lifetime.signal.aborted
+      && !this.mutationUnresolved
+    const busy = { state: 'unknown', reason: { code: 'busy', detail: 'Worktree operation or archive cleanup could not be proven quiescent' } } as const
+    if (!idle()) return busy
+    try {
+      const signal = this.lifetime.signal
+      const policy = this.ctx.sandboxPolicy.resolve()
+      // Some confined runners allocate temporary directories or ACL grants even for a read-only command.
+      if (policy.mode !== 'danger-full-access') {
+        return { state: 'unknown', reason: { code: 'io', detail: 'Worktree Git inspection requires a non-writing Host runner' } }
+      }
+      const result = await inspectCheckoutReferences(this.ctx, persistence, epoch, sessionIds, this.config.directory, {
+        read: this.gitRunner(policy, signal, true), scan: this.gitScanner(policy, signal, true),
+      }, signal)
+      return !persistence.isMaintenanceEpochActive(epoch) ? stale : !idle() ? busy : result
+    } catch (error: unknown) {
+      if (!persistence.isMaintenanceEpochActive(epoch)) return stale
+      return { state: 'unknown', reason: { code: 'io', detail: error instanceof Error ? error.message : String(error) } }
     }
   }
 
@@ -282,6 +381,7 @@ export class WorktreeService extends Service {
       appendPluginRecord(agent.session, CREATED_RECORD, created)
       return created
     } catch (error) {
+      this.mutationUnresolved = true
       throw new Error(`Could not finish worktree ${branch} at ${path}. Any created checkout and branch are retained. ${error instanceof Error ? error.message : String(error)}`, { cause: error })
     }
   }
@@ -303,11 +403,16 @@ export class WorktreeService extends Service {
     await run(repositoryRoot, ['check-ref-format', `refs/heads/${branch}`])
     await run(repositoryRoot, ['rev-parse', '--verify', '--end-of-options', `${baseCommit}^{commit}`])
     const scan = this.gitScanner(policy, signal)
-    const fields = await registration(this.ctx, { path, branch, baseCommit, repositoryRoot }, identity.target, scan, signal)
+    const fields = await registration(this.ctx, { repositoryRoot }, identity.target, scan, signal)
     if (fields !== undefined) {
       if (fields.some(field => field === 'locked' || field.startsWith('locked '))) throw new Error(`worktree is locked: ${path}`)
       if (await this.ctx.fs.lstat(path, undefined, signal) !== undefined) throw new Error(`worktree path already exists: ${path}`)
-      await run(repositoryRoot, ['worktree', 'remove', '--', path])
+      try {
+        await run(repositoryRoot, ['worktree', 'remove', '--', path])
+      } catch (error) {
+        this.mutationUnresolved = true
+        throw error
+      }
     }
     const existing = await run(repositoryRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], [0, 1])
     const branchRecreated = existing.exitCode !== 0
@@ -323,25 +428,27 @@ export class WorktreeService extends Service {
       await run(path, ['--work-tree', path, 'reset', '--hard', '--no-recurse-submodules', 'HEAD'], undefined, overrides)
       return { path, branchRecreated }
     } catch (error) {
+      this.mutationUnresolved = true
       throw new Error(`Could not restore worktree ${branch} at ${path}. Any created checkout and branch are retained. ${error instanceof Error ? error.message : String(error)}`, { cause: error })
     }
   }
 
   /** Confine Git commands to the caller's sandbox policy, collecting bounded stdout. */
-  private gitRunner(policy: SandboxExecutionPolicy, signal: AbortSignal): GitRun {
+  private gitRunner(policy: SandboxExecutionPolicy, signal: AbortSignal, readOnly = false): GitRun {
     return (directory, args, allowedExitCodes, env) => runCommand(
-      this.ctx, this.config, policy, directory, this.gitArgv(args), signal, allowedExitCodes, env,
+      this.ctx, this.config, policy, directory, this.gitArgv(args, readOnly), signal, allowedExitCodes, env,
     )
   }
 
   /** Confine Git commands to the caller's sandbox policy, streaming stdout instead of collecting it. */
-  private gitScanner(policy: SandboxExecutionPolicy, signal: AbortSignal): GitScan {
-    return (directory, args, onField) => scanCommand(this.ctx, this.config, policy, directory, this.gitArgv(args), signal, onField)
+  private gitScanner(policy: SandboxExecutionPolicy, signal: AbortSignal, readOnly = false): GitScan {
+    return (directory, args, onField) => scanCommand(this.ctx, this.config, policy, directory, this.gitArgv(args, readOnly), signal, onField)
   }
 
   /** The configured Git executable with hooks and the filesystem monitor disabled, followed by `args`. */
-  private gitArgv(args: string[]): [string, ...string[]] {
-    return [this.config.gitCommand, '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args]
+  private gitArgv(args: string[], readOnly: boolean): [string, ...string[]] {
+    return [this.config.gitCommand, ...readOnly ? ['--no-optional-locks'] : [],
+      '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args]
   }
 
   /** Allocate the checkout directory exclusively inside the pool, creating a self-ignoring pool when it is new. */

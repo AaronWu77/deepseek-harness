@@ -31,10 +31,11 @@
 import { mkdir, open, stat } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { join } from 'node:path'
+import { getSystemErrorName } from 'node:util'
 import { tryLockExclusive } from '@deepseek-ai/node-addon-system/flock'
 import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { acquireLockHandleWin32, releaseLockHandleWin32 } from './win32.ts'
+import { acquireLockHandleWin32, acquireRootFileWin32, closeRootFileWin32, releaseLockHandleWin32 } from './win32.ts'
 
 /** Base name of the kernel lock file inside a session's directory. */
 export const LEASE_FILENAME = 'session.lock'
@@ -43,6 +44,20 @@ export const LEASE_FILENAME = 'session.lock'
 type HeldLock =
   | { readonly kind: 'posix'; readonly handle: FileHandle }
   | { readonly kind: 'win32'; readonly handle: number }
+  | { readonly kind: 'win32-root'; readonly handle: number }
+
+type LockMode = 'session' | 'root-shared' | 'root-exclusive'
+
+let sharedFlock: ((fd: number, flags: number) => number) | undefined
+
+async function tryLockShared(fd: number): Promise<void> {
+  const koffi = (await import('koffi')).default
+  sharedFlock ??= koffi.load(null).func('flock', 'int', ['int', 'int'])
+  // The existing addon exports only LOCK_EX. These flags are common to Linux and Darwin.
+  if (sharedFlock(fd, 1 | 4) === 0) return // LOCK_SH | LOCK_NB
+  const code = getSystemErrorName(-koffi.errno())
+  throw Object.assign(new Error(code + ': shared flock failed'), { code })
+}
 
 /** Whether a flock failure means another descriptor holds the lock. */
 function isLockContention(error: unknown): boolean {
@@ -68,30 +83,48 @@ export class SessionWriteLease {
    * @throws {SessionAlreadyOwnedError} while another holder keeps the lock.
    */
   static async acquire(dir: string, id: SessionId): Promise<SessionWriteLease> {
-    const path = join(dir, LEASE_FILENAME)
-    // Owner-only like materializePosix's directories: the lock may create the
-    // session directory first, and both creators must agree on the mode.
     await mkdir(dir, { recursive: true, mode: 0o700 })
+    const lease = await this.acquirePath(join(dir, LEASE_FILENAME), id, true)
+    if (lease === undefined) throw new SessionAlreadyOwnedError(id)
+    return lease
+  }
+
+  /**
+   * Acquire an external lock or an existing legacy lock, without creating its parent.
+   * @param path - stable lock path or the existing legacy lock's canonical path.
+   * @param id - session naming lock contention.
+   * @param create - allow creation of the POSIX lock file (never its parent).
+   * @param mode - legacy session lease or shared/exclusive root file ownership.
+   * @returns the lock, or undefined for an absent file lock when creation is disabled.
+   */
+  static async acquirePath(path: string, id: SessionId, create: boolean, mode: LockMode = 'session'): Promise<SessionWriteLease | undefined> {
     /* v8 ignore start -- native Windows coverage exercises this platform branch; Linux covers the POSIX peer */
     if (process.platform === 'win32') {
-      let handle: number
       try {
-        handle = await acquireLockHandleWin32(path)
+        if (mode !== 'session') {
+          const handle = await acquireRootFileWin32(path, mode === 'root-shared', create)
+          return handle === undefined ? undefined : new SessionWriteLease({ kind: 'win32-root', handle })
+        }
+        return new SessionWriteLease({ kind: 'win32', handle: await acquireLockHandleWin32(path) })
       } catch (error: unknown) {
         // Sharing violation: another handle already holds the write exclusion.
         if ((error as NodeJS.ErrnoException | null)?.code === 'EBUSY') throw new SessionAlreadyOwnedError(id)
         throw error
       }
-      return new SessionWriteLease({ kind: 'win32', handle })
     }
     /* v8 ignore stop */
     // Bounded retry: locking an inode a releasing creator just unlinked (or a
     // recreated path) re-opens the fresh file; steady state needs one pass.
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const handle = await open(path, 'w')
+      const handle = await open(path, create ? 'a' : mode === 'root-shared' ? 'r' : 'r+', 0o600).catch((error: unknown) => {
+        if (!create && (error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return undefined
+        throw error
+      })
+      if (handle === undefined) return undefined
       try {
         try {
-          await tryLockExclusive(handle.fd)
+          if (mode === 'root-shared') await tryLockShared(handle.fd)
+          else await tryLockExclusive(handle.fd)
         } catch (error: unknown) {
           if (isLockContention(error)) throw new SessionAlreadyOwnedError(id)
           throw error
@@ -127,6 +160,10 @@ export class SessionWriteLease {
     /* v8 ignore start -- native Windows coverage exercises this platform branch; Linux covers the POSIX peer */
     if (this.held.kind === 'win32') {
       await releaseLockHandleWin32(this.held.handle)
+      return
+    }
+    if (this.held.kind === 'win32-root') {
+      await closeRootFileWin32(this.held.handle)
       return
     }
     /* v8 ignore stop */

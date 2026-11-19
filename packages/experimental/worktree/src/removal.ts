@@ -39,7 +39,7 @@ export interface CheckoutIdentity {
  * @returns the resolved root and target, or null when any identity check fails.
  */
 export async function checkoutIdentity(
-  ctx: Context, directory: string, request: RestoreWorktreeRequest, run: GitRead, signal: AbortSignal,
+  ctx: Pick<Context, 'fs'>, directory: string, request: RestoreWorktreeRequest, run: GitRead, signal: AbortSignal,
 ): Promise<CheckoutIdentity | null> {
   const { path, repositoryRoot } = request
   const root = await ctx.fs.resolve(repositoryRoot, { signal })
@@ -65,7 +65,7 @@ export async function checkoutIdentity(
  * @returns the porcelain fields of the matching entry, or undefined when none is registered.
  */
 export async function registration(
-  ctx: Context, request: RestoreWorktreeRequest, target: CheckoutIdentity['target'], scan: GitScan, signal: AbortSignal,
+  ctx: Pick<Context, 'fs'>, request: Pick<RestoreWorktreeRequest, 'repositoryRoot'>, target: CheckoutIdentity['target'], scan: GitScan, signal: AbortSignal,
 ): Promise<readonly string[] | undefined> {
   const entries: { path: string; fields: string[] }[] = []
   // Each entry of the -z porcelain listing starts with its worktree line and ends with an empty field.

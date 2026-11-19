@@ -12,6 +12,8 @@ import { HarnessError } from '@deepseek-ai/dsh-error'
  * - `JOB_OWNER_NOT_LIVE` — the owning Agent is no longer live.
  * - `JOB_OWNER_REGISTRY_UNAVAILABLE` — a job names an owner, but the composition has no Agent registry to resolve it.
  * - `JOB_LIMIT_REACHED` — the registry's configured job limit is reached.
+ * - `REFERENCE_PRODUCER_BUSY` — maintenance owns admission or its drain deadline elapsed.
+ * - `REFERENCE_QUIESCENCE_DISABLED` — the provider has not opted in to maintenance coordination.
  */
 export const JOB_ERROR_CODES = [
   'JOB_BACKGROUND_DISABLED',
@@ -21,6 +23,8 @@ export const JOB_ERROR_CODES = [
   'JOB_OWNER_NOT_LIVE',
   'JOB_OWNER_REGISTRY_UNAVAILABLE',
   'JOB_LIMIT_REACHED',
+  'REFERENCE_PRODUCER_BUSY',
+  'REFERENCE_QUIESCENCE_DISABLED',
 ] as const
 
 /** One code from {@link JOB_ERROR_CODES}. */

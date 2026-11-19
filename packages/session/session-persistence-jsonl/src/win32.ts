@@ -21,6 +21,7 @@ type WaitForSingleObject = (handle: number, milliseconds: number) => number
 type ReleaseSemaphore = (handle: number, count: number, previous: null) => number
 type CloseHandle = (handle: number) => number
 type GetLastError = () => number
+type CreateFileW = (path: string, access: number, share: number, security: null, disposition: number, attributes: number, template: null) => number
 
 interface Win32Bindings {
   moveFileExW: MoveFileExW
@@ -28,6 +29,7 @@ interface Win32Bindings {
   waitForSingleObject: WaitForSingleObject
   releaseSemaphore: ReleaseSemaphore
   closeHandle: CloseHandle
+  createFileW: CreateFileW
   getLastError: GetLastError
 }
 
@@ -36,7 +38,13 @@ interface Win32ErrnoException extends NodeJS.ErrnoException {
   dest: string
 }
 
+const MOVEFILE_REPLACE_EXISTING = 0x00000001
 const MOVEFILE_WRITE_THROUGH = 0x00000008
+const GENERIC_READ = 0x80000000
+const FILE_SHARE_READ = 0x00000001
+const OPEN_EXISTING = 3
+const OPEN_ALWAYS = 4
+const FILE_ATTRIBUTE_NORMAL = 0x00000080
 const WAIT_OBJECT_0 = 0
 const WAIT_TIMEOUT = 0x00000102
 const ERROR_FILE_NOT_FOUND = 2
@@ -61,6 +69,7 @@ async function win32(): Promise<Win32Bindings> {
     waitForSingleObject: kernel32.func('__stdcall', 'WaitForSingleObject', 'uint', ['intptr', 'uint']) as WaitForSingleObject,
     releaseSemaphore: kernel32.func('__stdcall', 'ReleaseSemaphore', 'int', ['intptr', 'int', 'void*']) as ReleaseSemaphore,
     closeHandle: kernel32.func('__stdcall', 'CloseHandle', 'int', ['intptr']) as CloseHandle,
+    createFileW: kernel32.func('__stdcall', 'CreateFileW', 'intptr', ['str16', 'uint', 'uint', 'void*', 'uint', 'uint', 'void*']) as CreateFileW,
     getLastError: kernel32.func('__stdcall', 'GetLastError', 'uint', []) as GetLastError,
   }
   return bindings
@@ -129,11 +138,13 @@ async function assertDirectory(path: string): Promise<boolean> {
  * semantics. The destination must not already exist; the move must stay within
  * the volume (no copy fallback flag is set).
  * @param existing - the synced staging path to move.
- * @param replacement - the final path, which must not already exist.
+ * @param replacement - final path, which must not already exist unless replacing a journal record.
+ * @param replaceJournal - opt in only when atomically updating the regular journal file.
  */
-export async function publishNewFileWin32(existing: string, replacement: string): Promise<void> {
+export async function publishNewFileWin32(existing: string, replacement: string, replaceJournal = false): Promise<void> {
   const api = await win32()
-  const ok = api.moveFileExW(toNamespacedPath(existing), toNamespacedPath(replacement), MOVEFILE_WRITE_THROUGH)
+  const flags = MOVEFILE_WRITE_THROUGH | (replaceJournal ? MOVEFILE_REPLACE_EXISTING : 0)
+  const ok = api.moveFileExW(toNamespacedPath(existing), toNamespacedPath(replacement), flags)
   if (ok === 0) throw win32Error('MoveFileExW', api.getLastError(), existing, replacement)
 }
 
@@ -158,6 +169,30 @@ export async function acquireLockHandleWin32(path: string): Promise<number> {
   api.closeHandle(handle)
   if (wait === WAIT_TIMEOUT) throw win32Error('WaitForSingleObject', ERROR_SHARING_VIOLATION, path, name)
   throw win32Error('WaitForSingleObject', api.getLastError(), path, name)
+}
+
+/**
+ * Acquire a real root file handle. Shared readers request and share read access;
+ * exclusive owners share no access. Win32 closes either handle on process exit.
+ * @param path - stable root lock path.
+ * @param shared - whether to allow other shared holders.
+ * @param create - create the lock file if absent; never create its directory.
+ * @returns the handle, or undefined for an absent file when creation is disabled.
+ */
+export async function acquireRootFileWin32(path: string, shared: boolean, create: boolean): Promise<number | undefined> {
+  const api = await win32()
+  const handle = api.createFileW(toNamespacedPath(path), GENERIC_READ, shared ? FILE_SHARE_READ : 0, null,
+    create ? OPEN_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null)
+  if (handle !== -1) return handle
+  const code = api.getLastError()
+  if (!create && (code === ERROR_FILE_NOT_FOUND || code === ERROR_PATH_NOT_FOUND)) return undefined
+  throw win32Error('CreateFileW', code, path, path)
+}
+
+/** @param handle - the root file handle to release. */
+export async function closeRootFileWin32(handle: number): Promise<void> {
+  const api = await win32()
+  if (api.closeHandle(handle) === 0) throw win32Error('CloseHandle', api.getLastError(), 'root lock', 'root lock')
 }
 
 /**

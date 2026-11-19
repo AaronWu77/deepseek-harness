@@ -91,6 +91,10 @@ Each read or control operation accepts an optional caller `SessionId`; omitting 
 
 Every implementation also answers the Workspace registry's archive admission ([seam](../../workspace/workspace/README.md)), installed by the seam's constructor through the abstract `list` and `kill` alone: `workspace/session-activity` reports the running or stopping jobs the asked Session owns as the `job` family, one item per job with its label; `workspace/session-stop` kills each of them with the reason `session archived`, one at a time, so a producer that throws on cancel is logged while the Session's other jobs still stop. Unowned jobs belong to nobody and are never reported or killed for a Session.
 
+The optional host inspection API, `inspectSessionQuiescence`, reports only provider-proven evidence inside an active Session maintenance epoch. An implementation without lifecycle coverage returns `unknown`; caller-scoped `list()` cannot substitute for it.
+
+A provider that supports `withReferenceQuiescence` closes job and dependency registration before draining accepted work. The default provider method rejects with `REFERENCE_QUIESCENCE_DISABLED`; `referenceQuiescenceEnabled()` is a read-only opt-in check, not an acquisition. Readers and job cancellation remain available during a scope.
+
 </details>
 
 -----

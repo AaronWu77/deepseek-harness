@@ -141,6 +141,12 @@ Task mutations honor cancellation before appending `team/task` to the exact live
 
 The projection ignores historical roster and mailbox records without validating or retaining their payloads. It stores only the task board, saved mode, and recovery metadata. Version-7 checkpoints without `ownerName` remain usable; suffix replay records names from later task events without backfilling historical tasks. Incompatible projection checkpoints rebuild from the unchanged Session log; see the [upgrade guide](../../../docs/upgrade-guide/v0.2.1-rc.3/team-projection/guide.md).
 
+### Retained task references
+
+Host maintenance reads retained Lead logs in each Lead’s task mutation queue without publishing Sessions. A matching pending or in-progress task blocks removal whether the match is the Lead or the task owner. Deleted tasks remain observable as non-blocking tombstones, and completed tasks are historical only. An unreadable log or projection prevents clearance.
+
+The host-only `referenceQuiescence` option defaults to `false`. When enabled, maintenance can drain admitted Team writes before acquiring storage exclusivity and refuse new writes for the duration of the scope. It leaves reads and cancellation available. `referenceQuiescenceEnabled()` reports opt-in without acquiring the gate or granting maintenance permission.
+
 ### Disposal
 
 Unloading the service unregisters the projection. The retained handle remains readable and folds Session events on demand while admitted work settles. Team owns no Agent: teammates remain under the subagent runtime, which owns their capacity, settlement, and teardown.

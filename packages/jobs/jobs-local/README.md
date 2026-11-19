@@ -45,6 +45,7 @@ Loading the plugin registers `ctx.jobs`; every field is optional.
 | `retainBytes` | `262144` | Live ring retention per job, in UTF-8 bytes |
 | `settledRetainBytes` | `16384` | Ring retention kept after a job settles, in UTF-8 bytes; bytes the model has not read stay until its first terminal read |
 | `pumpPollMs` | `150` | Poll interval for a job's pull sources, in milliseconds |
+| `referenceQuiescence` | `false` | Opt in to coordinated maintenance of job registrations and declared Session dependencies |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-jobs-local) is the exhaustive source for the accepted fields.
 
@@ -105,6 +106,10 @@ This section explains the design decisions behind the registry and points at the
 ### Teardown
 
 Owner disposal (`disposeOwned`) cancels the owner's jobs, awaits their settlement, removes their records, and announces each removal — the one visible-set change no per-job record carries. Service disposal (`disposeAll`) cancels all live jobs, awaits settlement, removes every record (announcing each removal, so a subscriber mounted outside the service drops its rows), then detaches the cross-fiber owner-cleanup effects.
+
+`inspectSessionQuiescence` reads the registry used for registration and owner drain. A stop request does not establish resource release. Declare indirect Session bindings with `JobSpec.sessionDependencies`; live work with undeclared dependencies cannot establish quiescence for Sessions other than its direct owner.
+
+With `referenceQuiescence: true`, `withReferenceQuiescence` rejects new job starts and their indirect bindings, and waits for accepted jobs to settle through producer completion and output drain. A forced terminal record is not producer completion. Reads and stop or kill remain available. Maintenance callers must reject disabled or busy acquisition and obtain every required producer scope before taking a storage epoch.
 
 </details>
 

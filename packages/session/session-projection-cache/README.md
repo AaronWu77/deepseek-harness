@@ -66,6 +66,8 @@ The log leads and the cache follows: a live checkpoint flushes the session's buf
 
 Upgrades never block startup or expose an unproven fold. Records stamped with a version in the spec's `compatibleVersions` remain structurally readable for a current checkpoint rewrite, but a missing or older `formatVersion` never matches a current Session and therefore cannot seed hydration. A lifecycle-matching predecessor title remains available only through the listing hint above because title text is invariant across the adjacent Session-format edges and its row still passes the current projection `stateVersion` and schema. Once the format matches, absent lineage fields decode as the unseeded lineage — exact for unseeded sessions, while a seeded caller fails the identity match and refolds cold. A stored record that still fails schema validation is moved aside as `<id>.json.bak.<stamp>` under the domain's `invalidRecords: 'backup-and-skip'` policy, logged with its cause, and rebuilt by the next checkpoint.
 
+A host maintenance caller can discard one checkpoint with `purge(id)` after quiescing its producers. The method clears the durable and in-memory record on the storage write queue and invalidates older checkpoint work. It does not remove the session log or prevent a new live or cold read from creating another checkpoint.
+
 -----
 
 <a id="understand-the-implementation"></a>

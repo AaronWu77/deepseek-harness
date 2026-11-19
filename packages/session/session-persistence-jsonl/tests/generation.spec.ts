@@ -1249,7 +1249,11 @@ describe('JSONL immutable generation publication', () => {
       await writeFile(request.sourcePath, source)
       if (kind === 'different') await writeFile(request.currentPath, line(header(SESSION_FORMAT_VERSION)) + line(event1))
       if (kind === 'malformed') await writeFile(request.currentPath, '{not-json}\n')
-      if (kind === 'symlink') await symlink(request.sourcePath, request.currentPath)
+      if (kind === 'symlink') {
+        // A junction exercises the same no-follow check without Windows symlink privileges.
+        if (process.platform === 'win32') await symlink(root, request.currentPath, 'junction')
+        else await symlink(request.sourcePath, request.currentPath, 'file')
+      }
       if (kind === 'directory') await mkdir(request.currentPath)
 
       await expect(ensureJsonlGenerationCurrent(request)).rejects.toBeInstanceOf(

@@ -115,10 +115,11 @@ export async function compressZstdFrame(input: Buffer | string): Promise<Buffer>
 /**
  * Decompress one complete frame and validate its checksum.
  * @param input - one structurally complete Zstandard frame.
+ * @param maxOutputLength - optional limit on the frame plaintext bytes.
  * @returns the frame plaintext.
  */
-export async function decompressZstdFrame(input: Buffer): Promise<Buffer> {
-  return zstdDecompressAsync(input)
+export async function decompressZstdFrame(input: Buffer, maxOutputLength?: number): Promise<Buffer> {
+  return maxOutputLength === undefined ? zstdDecompressAsync(input) : zstdDecompressAsync(input, { maxOutputLength })
 }
 
 /** Common lifecycle for interchangeable synchronous multi-frame decoders. */

@@ -12,6 +12,19 @@ import type { SessionHandle, SessionAccess } from './handle.ts'
 import type { SessionLocation } from './errors.ts'
 import type { SessionPersistenceRevision } from './revision.ts'
 
+import {
+  SessionMaintenanceDisabledError,
+  type SessionMaintenanceAdmission, type SessionMaintenanceBatches, type SessionMaintenanceContext,
+  type SessionMaintenanceCapability, type SessionMaintenanceInspection, type SessionMaintenanceOperation, type SessionMaintenanceOptions,
+  type SessionMaintenanceBatchId, type SessionMaintenanceOperationId, type SessionMaintenanceRefusal,
+  type SessionMaintenanceResult, type ArtifactHeader, type Evidence, type MaintenanceEpoch, type ReferenceCorpusScope,
+  type SessionMaintenanceGate, type SessionMaintenanceGateOptions,
+  type ReferenceArtifactRef, type ReferenceLogOptions, type ReferenceLogSummary, type SessionEventLike,
+} from './maintenance.ts'
+
+export * from './maintenance.ts'
+export { referenceDescendants } from './reference-lineage.ts'
+
 // Re-export the metadata vocabulary so Consumers import it from the Service Definition.
 export type { SessionHeader } from '@deepseek-ai/dsh-session'
 export { SessionPersistenceRevision } from './revision.ts'
@@ -208,6 +221,118 @@ export abstract class SessionPersistence extends Service {
    * @returns one snapshot per stored session.
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+  /** @returns read-only root-lock status, never ownership. @throws {SessionMaintenanceDisabledError} when disabled. */
+  async maintenanceGate(): Promise<SessionMaintenanceGate> {
+    throw new SessionMaintenanceDisabledError()
+  }
+
+  /**
+   * Try root exclusion without waiting for existing handles to close. The callback must await all work it starts.
+   * Cooperating storage handles cannot open while the callback runs. This does not establish deployment isolation.
+   * @param holder - diagnostic name of the caller.
+   * @param fn - exclusive work, with the epoch for comparing evidence from cooperating providers.
+   * @param options - optional cancellation before entering the callback.
+   * @returns the callback result, after root ownership has been released.
+   * @throws {SessionMaintenanceDisabledError} when disabled; rejects with reason 'maintenance-gate' on contention.
+   */
+  async withExclusiveMaintenance<T>(
+    _holder: string, _fn: (epoch: MaintenanceEpoch) => Promise<T>, _options?: SessionMaintenanceGateOptions,
+  ): Promise<T> {
+    throw new SessionMaintenanceDisabledError()
+  }
+
+  /**
+   * Check whether the caller is inside this instance's exclusive callback for the given epoch.
+   * Providers must not return complete evidence when this check fails.
+   * @param epoch - epoch supplied to the callback by this service.
+   * @returns whether the epoch may currently authorize evidence from this caller's scope.
+   */
+  isMaintenanceEpochActive(_epoch: MaintenanceEpoch): boolean {
+    return false
+  }
+
+  /**
+   * Read the retained header corpus. Complete results require this backend's active exclusive callback.
+   * Do not call from a move admission callback; collect evidence before taking the target locks.
+   * @param scope - corpus coverage; defaults to active and restorable trash.
+   * @returns complete header evidence or a typed reason why the result cannot be used.
+   */
+  async inspectReferenceCorpus(_scope?: ReferenceCorpusScope): Promise<Evidence<ArtifactHeader>> {
+    throw new SessionMaintenanceDisabledError()
+  }
+
+  /**
+   * Visit decoded events from an unchanged active or trash corpus item under its originating exclusive epoch.
+   * This read does not acquire locks, create files, or decode migrations. Visitor results remain provisional
+   * until the read returns complete. The visitor must be synchronous, must not mutate storage, and may see
+   * inherited events; use the returned cut to distinguish them from own events.
+   * @param epoch - active exclusive epoch that produced the item.
+   * @param artifact - the unchanged corpus item (not a clone or a path).
+   * @param visit - callback for each validated source-generation event, in sequence order.
+   * @param options - cancellation or a maximum event count.
+   * @returns a one-item summary only after clean EOF and identity checks; otherwise unknown.
+   */
+  async inspectReferenceLog(
+    _epoch: MaintenanceEpoch, _artifact: ReferenceArtifactRef, _visit: (event: SessionEventLike) => void, _options?: ReferenceLogOptions,
+  ): Promise<Evidence<ReferenceLogSummary>> {
+    return { state: 'unknown', reason: { code: 'stale-epoch' } }
+  }
+
+  /** @returns backend capabilities and known limits, without acquiring ownership. */
+  async maintenanceCapability(): Promise<SessionMaintenanceCapability> {
+    return { enabled: false, coordination: 'unsupported', isolation: 'not-verified', sameVolume: 'unknown', batchBusy: 'unknown', boundaries: [] }
+  }
+
+  /**
+   * Read complete backend artifact identity without writing or admitting a move.
+   * @param id - the requested session.
+   * @returns preview observations, never ownership or authorization.
+   */
+  async inspectMaintenance(id: SessionId): Promise<SessionMaintenanceInspection> {
+    return { id, state: 'unsupported', sameVolume: 'unknown', migrationPending: false }
+  }
+
+  /**
+   * Run a policy check and, if admitted and still valid, move the entire session directory.
+   * The callback must not re-enter maintenance or mutate the artifact. Its evidence
+   * is persisted separately from backend checks. The caller owns isolation, lifecycle
+   * admission and derived registry/cache updates; a receipt certifies only the move.
+   * @param id - stored session id.
+   * @param operation - move to trash or restore to the recorded original location.
+   * @param admit - policy callback, called while storage exclusion is held.
+   * @param options - caller, plus preview revision and artifact identity for delete, or the confirmed batch and operation ids for restore.
+   * @returns a move receipt or a refusal; unknown outcomes require recovery before retrying.
+   * @throws {SessionMaintenanceDisabledError} from an unsupported or disabled backend.
+   */
+  async withMaintenance<T extends SessionMaintenanceAdmission>(
+    _id: SessionId, _operation: SessionMaintenanceOperation,
+    _admit: (ctx: SessionMaintenanceContext) => Promise<T>, _options?: SessionMaintenanceOptions,
+  ): Promise<SessionMaintenanceResult> {
+    throw new SessionMaintenanceDisabledError()
+  }
+
+  /** @returns known journal records and isolation findings, without changing them. */
+  async listMaintenanceBatches(): Promise<SessionMaintenanceBatches> {
+    return { status: 'ok', batches: [] }
+  }
+
+  /** @returns observed/recorded recovery results. Recovery never moves artifact directories. */
+  async recoverMaintenance(): Promise<SessionMaintenanceBatches> {
+    throw new SessionMaintenanceDisabledError()
+  }
+
+  /**
+   * Explicitly release an empty POSIX reservation matching a persisted identity.
+   * @param batchId - batch whose pending operation reserved the target.
+   * @param operationId - expected reservation owner.
+   * @returns the updated report or a refusal; never removes artifact directories.
+   */
+  async releaseMaintenanceReservation(
+    _batchId: SessionMaintenanceBatchId, _operationId: SessionMaintenanceOperationId,
+  ): Promise<SessionMaintenanceBatches | SessionMaintenanceRefusal> {
+    throw new SessionMaintenanceDisabledError()
+  }
 }
 
 export default SessionPersistence

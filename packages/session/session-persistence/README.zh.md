@@ -66,6 +66,10 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 
 当前构建无法忠实解读的存储日志会被拒绝，并返回指明拒绝方向的错误，绝不会被误读。`SessionHandle` 只暴露由 `SESSION_FORMAT_VERSION` 标识的当前逻辑记录；提供方必须在返回句柄前转换任何受支持的历史存储，随产品交付的 JSONL 提供方会通过静态 catalog 迁移受支持的历史代际。更新的格式会要求操作者升级 harness。本构建不认识的事件类型会被拒绝，除非其信封标记为 `ignorable`；已提交前缀中的损坏以 `SessionPersistenceCorruptionError` 拒绝。
 
+宿主调用方可以用 `maintenanceCapability()` 查询可选的可逆存储能力，并用 `inspectMaintenance(id)` 只读取得确认所需的 revision 与产物身份。`withMaintenance()` 在后端持有排它锁时检查准入，再移动整个会话产物。它返回收据或结构化拒绝；不支持或未启用的后端抛出 `SessionMaintenanceDisabledError`。收据只涵盖文件移动。调用方负责部署隔离、生命周期准入及派生数据补记账。
+
+用于引用准入前，先用 `withExclusiveMaintenance(holder, fn)` 取得根级排他权。后端向 `fn` 传入 epoch；证据提供方在自身调用中检查 `isMaintenanceEpochActive(epoch)`。只有在同一有效排他 epoch 内使用完整证据，空结果才表示指定范围内没有发现引用。`inspectReferenceCorpus({ epoch })` 默认包含可还原的回收站项；`referenceDescendants(corpus, id)` 反查直接和传递头部血缘，并拒绝父项缺失和循环。未知结果或仅覆盖活动目录的扫描不能授权移除。
+
 -----
 
 <a id="understand-the-implementation"></a>

@@ -66,6 +66,8 @@ kind: "package-reference"
 
 升级绝不拖垮启动，也不会暴露未经证明的折叠结果。版本戳落在 spec `compatibleVersions` 集合内的记录仍可被结构化读取并等待当前检查点重写，但缺失或更旧的 `formatVersion` 绝不匹配当前 Session，因此不能作为 hydrate seed。生命周期匹配的 predecessor title 只能通过上述列表 hint 读取，因为 title 文本在相邻 Session format edge 之间保持不变，并且该 row 仍须通过当前 projection `stateVersion` 与 schema。格式匹配后，缺失的 lineage 字段解码为 unseeded lineage——对非 fork 会话精确无误，seeded 调用方则通不过身份比对、回落冷折叠。仍然通不过 schema 校验的存量记录会按域的 `invalidRecords: 'backup-and-skip'` 策略移出为 `<id>.json.bak.<时间戳>`、连同原因写入日志，并由下一次检查点重建。
 
+宿主维护调用方可先停止该会话的检查点生产方，再用 `purge(id)` 丢弃一个检查点。此方法在存储写队列上清除持久和内存记录，并作废较早的检查点写入。它不会移除会话日志，也不阻止新的实时或冷读创建检查点。
+
 -----
 
 <a id="understand-the-implementation"></a>

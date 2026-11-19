@@ -57,6 +57,7 @@ The service requires `agents`, `sessions`, `storageDomain`, and `sessionPersiste
 | `deliveryHistoryDays` | `30` | Retain 1–3650 days of receipts, measured back from each appended delivery. |
 | `deliveryHistoryRecords` | `200` | Retain the newest 1–10,000 receipts per task. |
 | `newSessionIntervalSeconds` | `60` | Delivery floor for `new` targets, from 60 through 604,800 seconds. |
+| `referenceQuiescence` | `false` | Opt in to coordinated maintenance of task changes and dispatch. |
 
 The [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-schedule) defines all fields. Remote `deliveryLimits()` exposes the effective new-Session interval for UI hints.
 
@@ -179,6 +180,10 @@ Management and delivery writes share one Host FIFO. Mutations recheck cancellati
 History stays with the task and is pruned only on append. Missing old history keeps the latest receipt and marks earlier records unavailable. Historical Session-log `schedule/change` events retain their frozen types as recorded data; Schedule does not interpret them, warn about them, or import them into the Host store.
 
 `archiveAdmission()` reports active tasks whose `session` or reserved `new_once` target has the matching Session id. Stop deletes the set in one domain batch inside the same FIFO. A rejected batch announces `schedule/changed` so observers read the catalog again; an `unknown-state` failure quarantines the domain until it is reopened. Delivery refuses archived destination Sessions, including reserved retries. Reads and deletion never activate Sessions. Shutdown drains accepted work and notices before closing storage.
+
+The Host-only `inspectSessionBindings` observes private reservations and in-flight deliveries in the management and delivery queue. An ended task can still be run manually, and its last receipt can recover queued work. Only older receipts and involved links are historical; missing or pruned history prevents a complete result.
+
+With `referenceQuiescence: true`, `withReferenceQuiescence` drains accepted changes, their notices, and dispatch transactions. It refuses new task changes, deletions, and manual runs, and defers timer dispatch, including creation of new Sessions. Reads and Workspace archive stop remain available; notices from stops during the scope run after release. `referenceQuiescenceEnabled()` only reports opt-in. Do not proceed on disabled or busy acquisition, or take a storage epoch before acquiring every required producer scope.
 
 </details>
 

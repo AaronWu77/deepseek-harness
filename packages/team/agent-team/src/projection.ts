@@ -2,7 +2,7 @@
 
 import { z } from 'zod'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import type { SessionEvent, SessionEventMap, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type { SessionEventMap, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import type {
   TeamId,
@@ -104,7 +104,9 @@ function parsePersisted<T>(type: 'team/task' | 'team/mode', schema: z.ZodType<T>
   }
 }
 
-function applyProjectionEvent(state: TeamProjectionState, event: SessionEvent): TeamProjectionState {
+type TeamLogEvent = { readonly type: string; readonly seq: number; readonly data?: unknown }
+
+function applyProjectionEvent(state: TeamProjectionState, event: TeamLogEvent, requireOwnTeam = false): TeamProjectionState {
   try {
     if (event.type === 'team/mode') {
       if (event.seq < state.inheritedEventCount) return state
@@ -112,7 +114,10 @@ function applyProjectionEvent(state: TeamProjectionState, event: SessionEvent): 
     }
     if (state.failure !== undefined || event.type !== 'team/task') return state
     const selector = parsePersisted(event.type, teamEventSelectorSchema, event.data)
-    if (selector.teamId !== state.id) return state
+    if (selector.teamId !== state.id) {
+      if (requireOwnTeam) throw new Error('own task event belongs to another Lead')
+      return state
+    }
     if (selector.version !== 2) {
       throw new Error(`unsupported Agent Teams event version ${String(selector.version)}`)
     }
@@ -121,6 +126,25 @@ function applyProjectionEvent(state: TeamProjectionState, event: SessionEvent): 
     /* v8 ignore next -- the owned Team transition throws Error instances. */
     return { ...state, failure: state.failure ?? (error instanceof Error ? error.message : String(error)) }
   }
+}
+
+/**
+ * Replay the Lead's own Team records without a client view or projection checkpoint.
+ * @param rootId - durable Session identity selecting its Team.
+ * @param inheritedEventCount - strict log reader's validated inherited prefix length.
+ * @param events - candidate Team events streamed in log order.
+ * @returns the board including tombstones and any decode failure.
+ */
+export function inspectTeamProjection(
+  rootId: SessionId, inheritedEventCount: SessionLogOffset, events: readonly TeamLogEvent[],
+): TeamProjectionState {
+  let state = emptyTeamState(rootId, inheritedEventCount)
+  for (const event of events) {
+    if (event.seq < inheritedEventCount) continue
+    state = applyProjectionEvent(state, event, true)
+    if (state.failure !== undefined) return state
+  }
+  return state
 }
 
 function replaceAt<T>(items: readonly T[], index: number, item: T): T[] {

@@ -11,8 +11,10 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Evidence, MaintenanceEpoch } from '@deepseek-ai/dsh-session-persistence'
 import { installJobArchiveAdmission } from './archive-admission.ts'
-import type { JobEvents, JobId, JobOutputRead, JobRead, JobSpec, JobView } from './types.ts'
+import { JobError } from './error.ts'
+import type { JobDependency, JobEvents, JobId, JobOutputRead, JobRead, JobSpec, JobView } from './types.ts'
 
 export { JobId } from './types.ts'
 export { JOB_ERROR_CODES, JobError, type JobErrorCode } from './error.ts'
@@ -20,6 +22,7 @@ export type {
   JobAppendOptions,
   JobChannel,
   JobChunk,
+  JobDependency,
   JobEvent,
   JobEventFilter,
   JobEventListener,
@@ -113,12 +116,45 @@ export abstract class JobRegistry extends Service {
    */
   abstract start(spec: JobSpec): JobId
 
+  /** @returns Whether this provider opted in to producer admission control. Does not acquire a scope. */
+  referenceQuiescenceEnabled(): boolean {
+    return false
+  }
+
+  /**
+   * Close new job and dependency registration before draining admitted work; reads and kill remain available.
+   * @param _holder - diagnostic label for the maintenance caller.
+   * @param _fn - work to finish before registration reopens; the scope's holder is diagnostic only.
+   * @param options - cancellation before callback entry and maximum drain time (default 30 seconds).
+   * @returns The callback result. Rejects with REFERENCE_QUIESCENCE_DISABLED (reason disabled) when not opted in,
+   * or REFERENCE_PRODUCER_BUSY (reason busy, phase held or drain-timeout) when acquisition fails.
+   */
+  async withReferenceQuiescence<T>(
+    _holder: string, _fn: (scope: Readonly<{ holder: string }>) => Promise<T>,
+    options?: { signal?: AbortSignal; drainTimeoutMs?: number },
+  ): Promise<T> {
+    options?.signal?.throwIfAborted()
+    throw Object.assign(new JobError('job reference producer coordination is disabled', 'REFERENCE_QUIESCENCE_DISABLED'), {
+      name: 'ReferenceQuiescenceDisabled', reason: 'disabled' as const,
+    })
+  }
+
   /**
    * List caller-owned and unowned jobs in registration order.
    * @param caller - reading session; omission sees only unowned jobs.
    * @returns fresh projections.
    */
   abstract list(caller?: SessionId): JobView[]
+
+  /**
+   * Observe live job dependencies without starting, stopping, or waiting for producers.
+   * @param _epoch - active Session persistence maintenance epoch.
+   * @param _sessionIds - candidate Session owners and declared dependencies.
+   * @returns blocking jobs or unknown when the provider cannot establish lifecycle coverage.
+   */
+  async inspectSessionQuiescence(_epoch: MaintenanceEpoch, _sessionIds: readonly SessionId[]): Promise<Evidence<JobDependency>> {
+    return { state: 'unknown', reason: { code: 'io', detail: 'Job registry does not provide quiescence evidence' } }
+  }
 
   /**
    * Project one job without changing its cursor. Throws for an unknown or

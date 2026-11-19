@@ -57,6 +57,7 @@ Schedule 拥有任务存储与投递。Agent 工具和 Web UI 使用同一管理
 | `deliveryHistoryDays` | `30` | 保留 1–3650 天回执，从每次追加的投递向前计算。 |
 | `deliveryHistoryRecords` | `200` | 每个任务保留最新的 1–10,000 条回执。 |
 | `newSessionIntervalSeconds` | `60` | `new` 目标的最小投递间隔，范围 60–604,800 秒。 |
+| `referenceQuiescence` | `false` | 启用任务变更及投递的协调维护。 |
 
 [配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-schedule)定义全部字段。Remote `deliveryLimits()` 向 UI 提示提供实际的新 Session 投递间隔。
 
@@ -179,6 +180,10 @@ v2 写入后，v1 程序会拒绝该存储。无效或有歧义的回执会被�
 历史与任务一同保存，只在追加时裁剪。旧历史缺失时保留最新回执，并标记更早记录不可用。历史 Session 日志中的 `schedule/change` 事件保留冻结类型，作为既有记录；Schedule 不解释这些事件、发出相关警告或将它们导入宿主存储。
 
 `archiveAdmission()` 报告 `session` 或预留的 `new_once` 目标的 `sessionId` 与该 Session 匹配的活动任务。停止操作在同一 FIFO 内通过一次领域批量写入删除该集合。批量写入被拒绝时发出 `schedule/changed`，让观察方重读目录；`unknown-state` 失败会隔离领域，直到重新打开。投递拒绝已归档的目的 Session，包括重试时复用的预留 Session。读取和删除不激活 Session。关闭存储前排空已接受的工作及通知。
+
+仅供宿主调用的 `inspectSessionBindings` 在管理和投递队列内观察内部预留及未完成的投递。已结束的任务仍可手动执行，最后一条回执也可用于恢复排队工作。仅较早回执及涉及关系属于历史；历史缺失或裁剪时不返回完整证据。
+
+设置 `referenceQuiescence: true` 后，`withReferenceQuiescence` 排空已接纳的变更、通知和投递事务。它拒绝新任务变更、删除及手动运行，并延后定时投递，包括新建 Session。读取和 Workspace 归档停止仍可用；持闸期间产生的停止通知在释放后发送。`referenceQuiescenceEnabled()` 仅报告启用状态。遇到禁用或忙碌时不得继续，也不得在取得所有必需生产者作用域前获取存储 epoch。
 
 </details>
 

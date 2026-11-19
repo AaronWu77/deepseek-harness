@@ -10,7 +10,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset, SessionId } from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Commands from '@deepseek-ai/dsh-commands'
-import SubagentService, { type SubagentActivation } from '@deepseek-ai/dsh-subagent'
+import SubagentService, { ReferenceProducerBusy, ReferenceProducerGate, type SubagentActivation } from '@deepseek-ai/dsh-subagent'
 import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
@@ -103,6 +103,71 @@ async function waitRunning(ctx: Context, id: SessionId): Promise<Agent> {
 }
 
 describe('Tree-owned task boards', () => {
+  it('creates and updates tasks without touching the default-off coordinator', async () => {
+    const { ctx, lead } = await setup([])
+    const admit = vi.spyOn(ReferenceProducerGate.prototype, 'admit')
+    const service = ctx.agentTeams
+    expect(service.referenceQuiescenceEnabled()).toBe(false)
+    await expect(service.withReferenceQuiescence('maintenance', async () => undefined))
+      .rejects.toMatchObject({ code: 'REFERENCE_QUIESCENCE_DISABLED', reason: 'disabled' })
+    const task = await service.createTask(lead, { subject: 'default', description: 'ungated' })
+    await expect(service.updateTask(lead, { taskId: task.id, expectedRevision: 1, action: 'claim' }))
+      .resolves.toMatchObject({ status: 'in_progress' })
+    expect(service.referenceQuiescenceEnabled()).toBe(false)
+    expect(admit).not.toHaveBeenCalled()
+  })
+
+  it('reports opt-in without acquiring or releasing the Team producer gate', async () => {
+    const { ctx, lead } = await setup([], { referenceQuiescence: true })
+    const service = ctx.agentTeams
+    expect(service.referenceQuiescenceEnabled()).toBe(true)
+    await service.withReferenceQuiescence('maintenance', async () => {
+      expect(service.referenceQuiescenceEnabled()).toBe(true)
+      await expect(service.createTask(lead, { subject: 'refused', description: 'task' }))
+        .rejects.toBeInstanceOf(ReferenceProducerBusy)
+    }, { drainTimeoutMs: 0 })
+    expect(service.referenceQuiescenceEnabled()).toBe(true)
+    await expect(service.createTask(lead, { subject: 'released', description: 'task' }))
+      .resolves.toMatchObject({ status: 'pending' })
+  })
+
+  it('drains an admitted task flush while refusing new mutations, but allows reads', async () => {
+    const { ctx, lead } = await setup([], { referenceQuiescence: true })
+    const service = ctx.agentTeams
+    const task = await service.createTask(lead, { subject: 'gated', description: 'task' })
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const flush = ctx.sessions.flush.bind(ctx.sessions)
+    vi.spyOn(ctx.sessions, 'flush').mockImplementationOnce(async (session) => {
+      entered.resolve()
+      await release.promise
+      return flush(session)
+    })
+    const claim = service.updateTask(lead, { taskId: task.id, expectedRevision: 1, action: 'claim' })
+    const callback = vi.fn(async () => service.listTasks(lead))
+    let scope: Promise<unknown> | undefined
+    try {
+      await entered.promise
+      await expect(service.withReferenceQuiescence('timeout', callback, { drainTimeoutMs: 0 }))
+        .rejects.toMatchObject({ code: 'REFERENCE_PRODUCER_BUSY', reason: 'busy', phase: 'drain-timeout' })
+      scope = service.withReferenceQuiescence('maintenance', callback)
+      await expect(service.withReferenceQuiescence('competing', callback)).rejects.toBeInstanceOf(ReferenceProducerBusy)
+      await expect(service.createTask(lead, { subject: 'refused', description: 'task' }))
+        .rejects.toMatchObject({ code: 'REFERENCE_PRODUCER_BUSY', reason: 'busy', phase: 'held' })
+      await expect(service.updateTask(lead, { taskId: task.id, expectedRevision: 2, action: 'complete' }))
+        .rejects.toMatchObject({ code: 'REFERENCE_PRODUCER_BUSY', reason: 'busy', phase: 'held' })
+      expect(service.getTask(lead, task.id).status).toBe('in_progress')
+      expect(callback).not.toHaveBeenCalled()
+    } finally {
+      release.resolve()
+      await claim
+      await scope
+    }
+    expect(callback).toHaveBeenCalledTimes(1)
+    await expect(service.updateTask(lead, { taskId: task.id, expectedRevision: 2, action: 'complete' }))
+      .resolves.toMatchObject({ status: 'completed' })
+  })
+
   it.each(['spawn', 'fork'])('shares the configured root mode with real %s children', async (provider) => {
     const { ctx, lead } = await setup(['hang', 'hang'], { defaultEnabled: true }, false)
     expect(durable(lead).enabled).toBe(true)

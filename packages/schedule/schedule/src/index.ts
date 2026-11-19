@@ -9,11 +9,14 @@ import { RemoteError, TypertRemoteService, Remote } from '@deepseek-ai/dsh-typer
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { delegationDepthOf } from '@deepseek-ai/dsh-subagent'
 import { SessionId as toSessionId, type SessionId } from '@deepseek-ai/dsh-session'
+import type { Evidence, MaintenanceEpoch } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionActivity } from '@deepseek-ai/dsh-workspace'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { ScheduleRuntime, type ScheduleRuntimeLimits } from './runtime.ts'
+import { inspectScheduleRows, type ScheduleBinding } from './session-bindings.ts'
 import { scheduleDomain, scheduleTaskSchema, type ScheduleTask } from './storage.ts'
 import { deliveryHistoryPage } from './delivery-history.ts'
+import { ReferenceProducerGate, ReferenceQuiescenceDisabled } from './reference-quiescence.ts'
 import { createScheduleRecord, updateScheduleRecord } from './update.ts'
 import {
   ScheduleInputError, ScheduleId, MIN_EVERY_INTERVAL_SECONDS,
@@ -27,6 +30,7 @@ import type {
 export type * from './client.ts'
 export { scheduleDomain } from './storage.ts'
 export type { ScheduleTask } from './storage.ts'
+export type { ScheduleBinding } from './session-bindings.ts'
 export type { RecurringOccurrence } from './domain.ts'
 export { formatScheduleLocalTime } from './domain.ts'
 export {
@@ -78,6 +82,8 @@ declare module '@deepseek-ai/cordis' {
 
 /** Configuration for the Host Schedule domain. */
 export interface Config {
+  /** Opt in to maintenance coordination for task mutations and delivery. */
+  referenceQuiescence?: boolean
   /**
    * Delivery-history window retained per task, in days; omission defaults to 30.
    * Pruning happens when an acknowledgment is appended, and `lastDelivery` is always retained.
@@ -224,6 +230,7 @@ export class ScheduleService extends TypertRemoteService {
   static inject = ['agents', 'sessions', 'storageDomain', 'sessionPersistence']
 
   static Config: z<Config> = z.object({
+    referenceQuiescence: z.boolean().default(false),
     deliveryHistoryDays: z.number().step(1).min(1).max(3650).default(DEFAULT_DELIVERY_HISTORY_DAYS),
     deliveryHistoryRecords: z.number().step(1).min(1).max(10_000).default(DEFAULT_DELIVERY_HISTORY_RECORDS),
     newSessionIntervalSeconds: z.number().step(1).min(MIN_EVERY_INTERVAL_SECONDS).max(604_800)
@@ -236,6 +243,9 @@ export class ScheduleService extends TypertRemoteService {
   private readonly initialized: PromiseLike<unknown>
   private chain: Promise<unknown> = Promise.resolve()
   private notifications: Promise<void> = Promise.resolve()
+  private readonly pendingNotices = new Set<ScheduleTask>()
+  private readonly referenceGate: ReferenceProducerGate | undefined
+  private deferredNotices: { task: ScheduleTask; actorSessionId: SessionId | undefined; change: ScheduleChangeKind }[] | undefined
   private runtime: ScheduleRuntime | undefined
   private resolveWebAgent: ((sessionId: SessionId) => Promise<Agent>) | undefined
   private stopping = false
@@ -246,6 +256,13 @@ export class ScheduleService extends TypertRemoteService {
    */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'schedule')
+    this.referenceGate = config.referenceQuiescence ? new ReferenceProducerGate(() => {
+      const notices = this.deferredNotices
+      this.deferredNotices = undefined
+      if (this.stopping) return
+      for (const { task, actorSessionId, change } of notices ?? []) this.enqueueNotice(task, actorSessionId, change)
+      this.runtime?.resumeDrive()
+    }) : undefined
     ctx.inject(['sessionController'], (webCtx) => {
       webCtx.effect(() => {
         this.resolveWebAgent = async (sessionId) => {
@@ -289,6 +306,7 @@ export class ScheduleService extends TypertRemoteService {
       try {
         cleanup = ctx.effect(() => async () => {
           this.stopping = true
+          this.deferredNotices = undefined
           await this.runtime?.dispose()
           await this.chain // The chain contains failures after returning them to their callers.
           await this.notifications // Each notice contains its own delivery failure.
@@ -312,7 +330,7 @@ export class ScheduleService extends TypertRemoteService {
         (sessionId) => {
           if (this.resolveWebAgent === undefined) throw new Error('schedule: no Session activation provider')
           return this.resolveWebAgent(sessionId)
-        })
+        }, this.referenceGate)
       this.runtime.requestDrive()
       return cleanup
     })
@@ -343,6 +361,28 @@ export class ScheduleService extends TypertRemoteService {
 
   async [Service.init](): Promise<void> {
     await this.initialized
+  }
+
+  /** @returns Whether Schedule opted in to producer admission control. Does not acquire a scope. */
+  referenceQuiescenceEnabled(): boolean {
+    return this.referenceGate !== undefined
+  }
+
+  /**
+   * Stop new task mutations and dispatch before draining accepted writes; reads and archive stop remain available.
+   * @param holder - diagnostic label for the maintenance caller.
+   * @param fn - work to finish before intake reopens; the scope's holder is diagnostic only.
+   * @param options - cancellation before callback entry and maximum drain time (default 30 seconds).
+   * @returns The callback result. Rejects with REFERENCE_QUIESCENCE_DISABLED (reason disabled) when not opted in,
+   * or REFERENCE_PRODUCER_BUSY (reason busy, phase held or drain-timeout) when acquisition fails.
+   */
+  async withReferenceQuiescence<T>(
+    holder: string, fn: (scope: Readonly<{ holder: string }>) => Promise<T>,
+    options?: { signal?: AbortSignal; drainTimeoutMs?: number },
+  ): Promise<T> {
+    options?.signal?.throwIfAborted()
+    if (this.referenceGate === undefined) throw new ReferenceQuiescenceDisabled('schedule')
+    return this.referenceGate.withQuiescence(holder, fn, options)
   }
 
   /** Read effective delivery limits without loading or activating a task.
@@ -378,7 +418,16 @@ export class ScheduleService extends TypertRemoteService {
    * @param signal - Cancellation checked before the durable write begins, including after FIFO waits.
    * @returns The stored task. Cancellation does not roll back an in-flight write.
    */
-  async create(
+  create(
+    request: ScheduleCreateRequest,
+    actorSessionId?: SessionId,
+    signal?: AbortSignal,
+  ): Promise<ScheduleCatalogEntry> {
+    if (this.referenceGate === undefined) return this.createAdmitted(request, actorSessionId, signal)
+    return this.referenceGate.run(() => this.createAdmitted(request, actorSessionId, signal))
+  }
+
+  private async createAdmitted(
     request: ScheduleCreateRequest,
     actorSessionId?: SessionId,
     signal?: AbortSignal,
@@ -401,7 +450,7 @@ export class ScheduleService extends TypertRemoteService {
       await domain.table('tasks').put(id, task)
       this.emitChanged()
       this.runtime?.requestDrive()
-      this.queueNotification(task, actorSessionId, 'created')
+      this.queueNotification(task, actorSessionId, 'created', true)
       return this.entry(task)
     })
   }
@@ -454,6 +503,45 @@ export class ScheduleService extends TypertRemoteService {
   }
 
   /**
+   * Observe stored bindings, reservations and in-flight deliveries inside the mutation FIFO.
+   * Results cover the mounted Host domain, not deleted task rows or other Host processes.
+   * @param epoch - active Session persistence maintenance epoch.
+   * @param sessionIds - target, reservation, execution or historical Session identities to match.
+   * @returns blocking dependencies, nonblocking involved and history rows, or unknown if coverage is incomplete.
+   */
+  async inspectSessionBindings(epoch: MaintenanceEpoch, sessionIds: readonly SessionId[]): Promise<Evidence<ScheduleBinding>> {
+    const persistence = this.ctx.sessionPersistence
+    const stale = { state: 'unknown', reason: { code: 'stale-epoch' } } as const
+    if (!persistence.isMaintenanceEpochActive(epoch)) return stale
+    const candidates = new Set(sessionIds)
+    try {
+      const domain = await this.getDomain()
+      const result = await this.serialize(async (): Promise<Evidence<ScheduleBinding>> => {
+        if (!persistence.isMaintenanceEpochActive(epoch)) return stale
+        if (this.runtime === undefined || this.stopping) {
+          return { state: 'unknown', reason: { code: 'busy', detail: 'Schedule runtime is unavailable' } }
+        }
+        const items = this.runtime.inFlightBindings(candidates)
+        if (items === undefined) {
+          return { state: 'unknown', reason: { code: 'unstable', detail: 'A Schedule delivery did not confirm idle' } }
+        }
+        const addNoticeBindings = (task: ScheduleTask) => {
+          for (const sessionId of task.involvedSessionIds) {
+            if (candidates.has(sessionId)) items.push({ kind: 'in-flight', taskId: task.record.id, sessionId })
+          }
+        }
+        for (const notice of this.pendingNotices) addNoticeBindings(notice)
+        for (const { task } of this.deferredNotices ?? []) addNoticeBindings(task)
+        return inspectScheduleRows(epoch, candidates, domain.table('tasks').entries(), items)
+      })
+      return persistence.isMaintenanceEpochActive(epoch) ? result : stale
+    } catch (error: unknown) {
+      if (!persistence.isMaintenanceEpochActive(epoch)) return stale
+      return { state: 'unknown', reason: { code: 'io', detail: error instanceof Error ? error.message : String(error) } }
+    }
+  }
+
+  /**
    * Read one page of saved deliveries without activating or reading a target Session.
    * @param request - Task identity, explicit page size, and optional exclusive cursor.
    * @returns Newest-first saved deliveries, or a task/cursor lookup failure.
@@ -492,7 +580,12 @@ export class ScheduleService extends TypertRemoteService {
    * another execution of the task is queued, running, or inside its delivery floor, or a non-mutating miss.
    */
   @Remote('run')
-  async run(request: ScheduleRunRequest, signal?: AbortSignal): Promise<ScheduleRunResult> {
+  run(request: ScheduleRunRequest, signal?: AbortSignal): Promise<ScheduleRunResult> {
+    if (this.referenceGate === undefined) return this.runAdmitted(request, signal)
+    return this.referenceGate.run(() => this.runAdmitted(request, signal))
+  }
+
+  private async runAdmitted(request: ScheduleRunRequest, signal?: AbortSignal): Promise<ScheduleRunResult> {
     await this.getDomain()
     /* v8 ignore next -- initialization installs the runtime before the domain becomes readable. */
     if (this.runtime === undefined) throw new Error('Schedule runtime is unavailable')
@@ -517,7 +610,12 @@ export class ScheduleService extends TypertRemoteService {
    * @returns Count of removed rows; zero when the Host held no ended task.
    */
   @Remote('deleteInactive')
-  async deleteInactive(): Promise<ScheduleDeleteInactiveResult> {
+  deleteInactive(): Promise<ScheduleDeleteInactiveResult> {
+    if (this.referenceGate === undefined) return this.deleteInactiveAdmitted()
+    return this.referenceGate.run(() => this.deleteInactiveAdmitted())
+  }
+
+  private async deleteInactiveAdmitted(): Promise<ScheduleDeleteInactiveResult> {
     return this.serialize<ScheduleDeleteInactiveResult>(async () => {
       const tasks = (await this.getDomain()).table('tasks')
       const ended = [...tasks.entries()]
@@ -552,7 +650,16 @@ export class ScheduleService extends TypertRemoteService {
    * @param signal - Cancellation checked before the durable write begins, including after FIFO waits.
    * @returns The updated task, the deletion outcome, or a non-mutating miss or conflict.
    */
-  async edit(
+  edit(
+    request: ScheduleEditRequest,
+    actorSessionId?: SessionId,
+    signal?: AbortSignal,
+  ): Promise<ScheduleEditResult> {
+    if (this.referenceGate === undefined) return this.editAdmitted(request, actorSessionId, signal)
+    return this.referenceGate.run(() => this.editAdmitted(request, actorSessionId, signal))
+  }
+
+  private async editAdmitted(
     request: ScheduleEditRequest,
     actorSessionId?: SessionId,
     signal?: AbortSignal,
@@ -575,7 +682,7 @@ export class ScheduleService extends TypertRemoteService {
         await tasks.delete(request.id)
         this.emitChanged()
         this.runtime?.requestDrive()
-        this.queueNotification(current, actorSessionId, 'deleted')
+        this.queueNotification(current, actorSessionId, 'deleted', true)
         return { id: request.id, deleted: true }
       }
       const effectiveTarget = target ?? current.target
@@ -587,7 +694,7 @@ export class ScheduleService extends TypertRemoteService {
       await tasks.put(request.id, task)
       this.emitChanged()
       this.runtime?.requestDrive()
-      this.queueNotification(task, actorSessionId, 'updated')
+      this.queueNotification(task, actorSessionId, 'updated', true)
       return this.entry(task)
     })
   }
@@ -736,8 +843,30 @@ export class ScheduleService extends TypertRemoteService {
    * Queue one change notice behind earlier notices without adding Session I/O to the management operation.
    * Callers queue inside the serialized operation, so teardown, which drains that queue first, cannot overtake it.
    */
-  private queueNotification(task: ScheduleTask, actorSessionId: SessionId | undefined, change: ScheduleChangeKind): void {
-    this.notifications = this.notifications.then(() => this.notify(task, actorSessionId, change))
+  private queueNotification(
+    task: ScheduleTask, actorSessionId: SessionId | undefined, change: ScheduleChangeKind, admitted = false,
+  ): void {
+    if (!admitted && this.referenceGate?.held) {
+      // Archive stop still disarms rows, but must not write a notice to a Session under maintenance.
+      (this.deferredNotices ??= []).push({ task, actorSessionId, change })
+    } else {
+      this.enqueueNotice(task, actorSessionId, change, admitted)
+    }
+  }
+
+  private enqueueNotice(
+    task: ScheduleTask, actorSessionId: SessionId | undefined, change: ScheduleChangeKind, continuation = false,
+  ): void {
+    const permit = continuation ? this.referenceGate?.admitContinuation() : this.referenceGate?.admit()
+    this.pendingNotices.add(task)
+    this.notifications = this.notifications.then(async () => {
+      try {
+        await this.notify(task, actorSessionId, change)
+      } finally {
+        this.pendingNotices.delete(task)
+        permit?.[Symbol.dispose]()
+      }
+    })
   }
 
   /**

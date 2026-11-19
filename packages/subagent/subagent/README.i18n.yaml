@@ -59,6 +59,9 @@
 /deepseek-ai-dsh-subagent/understand-the-implementation/restoring-child-composition:
   en: 843f9f4319ca2ae3
   zh: 218bf355816d4ff6
+/deepseek-ai-dsh-subagent/understand-the-implementation/retained-lineage-inspection:
+  en: 3e440e992edb262b
+  zh: 712fd44b149d681f
 /deepseek-ai-dsh-subagent/understand-the-implementation/ownership-and-invariants:
   en: ab5d2c41f06b8fea
   zh: 13a9ca3685fa799b

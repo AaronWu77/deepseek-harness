@@ -9,6 +9,9 @@
   ],
   "references": [
     {
+      "path": "../../subagent/subagent"
+    },
+    {
       "path": "../../../vendor/cosmokit"
     },
     {
@@ -22,6 +25,9 @@
     },
     {
       "path": "../../core/scope"
+    },
+    {
+      "path": "../../session/session-persistence"
     },
     {
       "path": "../../util/timeout"

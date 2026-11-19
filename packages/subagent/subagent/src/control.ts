@@ -79,6 +79,7 @@ export function rejectPrompt(error: unknown, childSessionId: SessionId, signal: 
           { childSessionId },
           { cause: error },
         )
+      case 'REFERENCE_PRODUCER_BUSY':
       case 'DRAINING':
       case 'ACTIVATION_CLOSING':
       case 'ACTIVATION_LIMIT_REACHED':

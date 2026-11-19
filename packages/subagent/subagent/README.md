@@ -139,6 +139,12 @@ Cold resume mounts the target's saved preset from its `agentPreset` projection o
 
 Targets without a saved preset use the host composition and retain their historical descriptor's persona and tool restrictions. Persisted permission policies replay from the target's own log. Restoration uses the currently registered preset definition, without preserving an earlier revision across restarts.
 
+### Retained lineage inspection
+
+Host maintenance can inspect retained lineage without opening Sessions or waking Agents. The inspection reconciles the parent catalogs and child descriptors with a strict persistence corpus. Active and restorable descendants, including ordinary forks, count as references. Missing or unreadable evidence yields an unknown result, not an empty tree.
+
+The host-only `referenceQuiescence` option defaults to `false`. When enabled, maintenance can drain admitted spawn and waking delivery calls before acquiring storage exclusivity. The scope refuses new calls but does not stop resident work; it leaves reads and interruption available. `referenceQuiescenceEnabled()` reports opt-in without acquiring the gate or granting maintenance permission.
+
 ### Ownership and invariants
 
 - **The manager owns accepted work** — unpublished failures roll back; published handles cancel and release only their exact activation. Every instance belongs to the subagent tree root; creation parent ids remain unchanged.

@@ -91,6 +91,10 @@ kind: "package-reference"
 
 每个实现还会回答 Workspace 注册表的归档准入（[接缝](../../workspace/workspace/README.zh.md)），由接缝的构造函数只通过抽象的 `list` 与 `kill` 安装：`workspace/session-activity` 把被询问会话拥有的运行中或停止中任务作为 `job` 族报告，每个任务一项、附其 label；`workspace/session-stop` 以原因 `session archived` 逐个 kill 它们，因此一个在取消时抛错的生产方只记日志，该会话的其他任务仍会停止。无主任务不属于任何会话，绝不会为某个会话被报告或 kill。
 
+可选宿主检查 API `inspectSessionQuiescence` 仅在有效 Session 维护 epoch 内报告由提供方确认的证据。无法确认生命周期覆盖面的实现返回 `unknown`；不能用按调用者过滤的 `list()` 替代。
+
+支持 `withReferenceQuiescence` 的提供方先关闭作业和依赖登记，再排空已接纳工作。提供方的默认方法以 `REFERENCE_QUIESCENCE_DISABLED` 拒绝；`referenceQuiescenceEnabled()` 只读取启用状态，不获取闸门。持闸期间仍可读取和取消作业。
+
 </details>
 
 -----

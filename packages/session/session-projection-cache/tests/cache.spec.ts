@@ -230,6 +230,36 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })))
 })
 
+describe('SessionProjectionCache purge', () => {
+  it('removes the specific durable row and prevents an older flushing checkpoint from recreating it', async () => {
+    const { ctx, cache, root } = await harness()
+    const id = SessionId('purge-target')
+    const untouched = SessionId('purge-untouched')
+    const saved = Promise.all([whenWritten(ctx, id), whenWritten(ctx, untouched)])
+    const target = ctx.sessions.create(id)
+    ctx.sessions.create(untouched)
+    await saved
+    const entered = Promise.withResolvers<void>()
+    const finish = Promise.withResolvers<void>()
+    vi.spyOn(ctx.sessions, 'flush').mockImplementationOnce(async () => {
+      entered.resolve()
+      await finish.promise
+      return true
+    })
+    const stale = cache.write(target)
+    await entered.promise
+    try {
+      await cache.purge(id)
+    } finally {
+      finish.resolve()
+      await stale
+    }
+    await expect(readFile(recordPath(root, id))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(cache.cachedSnapshot(target.header)).toBeUndefined()
+    expect(await storedRecord(root, untouched)).toBeDefined()
+  })
+})
+
 describe('SessionProjectionCache write policy', () => {
   it('writes a durable checkpoint at turn/end (mandatory point)', async () => {
     const { ctx, root } = await harness()

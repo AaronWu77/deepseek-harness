@@ -12,6 +12,7 @@ import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import type {} from '@deepseek-ai/dsh-workspace'
 import type { WorktreeProjectionState } from './projection.ts'
+import type { ReferenceProducerGate } from './reference-quiescence.ts'
 import type { CreatedWorktree, WorktreeCleanup, WorktreeCreation } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -60,17 +61,21 @@ export class WorktreeReclamation {
   private readonly pending = new Set<Promise<unknown>>()
   private readonly lifetime = new AbortController()
   private revision = 0
+  private deferred: SessionId[] | undefined
+  private replaying = false
 
   /**
    * @param ctx - scope injecting the Workspace registry, Session query, store, working-directory, and
    *   sandbox-policy providers; the projection cache is read when mounted.
    * @param host - the service operations the module runs through.
    * @param projection - the `worktree` unit, read live and through the persisted cache.
+   * @param gate - optional admission owner shared with checkout creation and restore.
    */
   constructor(
     private readonly ctx: Context,
     private readonly host: ReclamationHost,
     private readonly projection: ProjectionHandle<WorktreeProjectionState>,
+    private readonly gate?: ReferenceProducerGate,
   ) {
     // Listeners withdraw before the drain so a disposing service never fails
     // unrelated directory access or an unarchive with its own abort.
@@ -83,8 +88,17 @@ export class WorktreeReclamation {
         return await next()
       })
     })
-    ctx.on('workspace/session-archived', ({ sessionId }) => { this.schedule(sessionId) })
+    ctx.on('workspace/session-archived', ({ sessionId }) => {
+      if (this.gate === undefined) {
+        this.schedule(sessionId)
+      } else if (this.gate.held || this.replaying || this.deferred !== undefined) {
+        (this.deferred ??= []).push(sessionId)
+      } else {
+        this.startAdmitted(sessionId)
+      }
+    })
     ctx.on('workspace/session-unarchiving', async ({ sessionId }) => {
+      if (this.deferred !== undefined) this.deferred = this.deferred.filter(id => id !== sessionId)
       const attempt = this.attempts.get(sessionId)
       if (attempt === undefined) return
       attempt.cancelled = true
@@ -93,10 +107,21 @@ export class WorktreeReclamation {
     })
     ctx.effect(() => async () => {
       this.lifetime.abort(new Error('worktree reclamation stopped'))
+      this.deferred = undefined
       for (const attempt of this.attempts.values()) attempt.cancelled = true
       await Promise.allSettled(this.pending)
       this.attempts.clear()
     }, 'worktree: drain archive cleanup')
+  }
+
+  /**
+   * Observe whether archive work has settled without waiting on callbacks or checkout locks.
+   * @returns the latest admission revision, or undefined while cleanup is pending, failed, or stopping.
+   */
+  quiescentRevision(): number | undefined {
+    if (this.pending.size > 0 || this.lifetime.signal.aborted
+      || [...this.attempts.values()].some(attempt => (attempt.status === 'scheduled' || attempt.status === 'failed'))) return undefined
+    return this.revision
   }
 
   /**
@@ -114,8 +139,55 @@ export class WorktreeReclamation {
     return { revision: attempt.revision, status: attempt.status }
   }
 
+  /** Resume deferred archive requests in arrival order without making the holder wait on checkout I/O. */
+  resumeDeferred(): void {
+    if (this.gate?.held || this.replaying || this.lifetime.signal.aborted) return
+    while (this.deferred !== undefined) {
+      const sessionId = this.deferred.shift()
+      if (sessionId === undefined) {
+        this.deferred = undefined
+        return
+      }
+      // The Session may have been unarchived or removed while only the intent existed.
+      if (!this.ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)) continue
+      this.replaying = true
+      let done: Promise<void> | undefined
+      try {
+        done = this.startAdmitted(sessionId)
+      } catch (error) {
+        this.ctx.logger.warn('Worktree cleanup of archived Session %s could not start: %s', sessionId, error)
+      }
+      if (done !== undefined) {
+        void done.finally(() => {
+          this.replaying = false
+          this.resumeDeferred()
+        })
+        return
+      }
+      this.replaying = false
+      if (this.gate?.held) return
+    }
+  }
+
+  private startAdmitted(sessionId: SessionId): Promise<void> | undefined {
+    const permit = this.gate?.admit()
+    let done: Promise<void> | undefined
+    try {
+      done = this.schedule(sessionId)
+      return done?.then(
+        () => { permit?.[Symbol.dispose]() },
+        (error: unknown) => {
+          permit?.[Symbol.dispose]()
+          this.ctx.logger.warn('Worktree cleanup of archived Session %s failed to settle: %s', sessionId, error)
+        },
+      )
+    } finally {
+      if (done === undefined) permit?.[Symbol.dispose]()
+    }
+  }
+
   /** Register attempts for the Session's own creations and return; every inspection runs in the background. */
-  private schedule(sessionId: SessionId): void {
+  private schedule(sessionId: SessionId): Promise<void> | undefined {
     if (this.host.retainOnArchive()) return
     const live = this.ctx.sessions.get(sessionId)
     // A cold Session's creations come from the persisted cache or its log, below.
@@ -130,6 +202,7 @@ export class WorktreeReclamation {
     const task = this.run(sessionId, attempt, owned)
     this.pending.add(task)
     attempt.done = task.then(() => { this.pending.delete(task) })
+    return attempt.done
   }
 
   private async run(sessionId: SessionId, attempt: Attempt, owned: readonly WorktreeCreation[] | undefined): Promise<void> {

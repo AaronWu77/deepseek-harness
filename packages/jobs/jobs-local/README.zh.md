@@ -45,6 +45,7 @@ kind: "package-reference"
 | `retainBytes` | `262144` | 每个任务输出环的运行期保留量，UTF-8 字节 |
 | `settledRetainBytes` | `16384` | 任务结算后保留的环容量，UTF-8 字节；模型尚未读取的字节保留到它的首次终态读取 |
 | `pumpPollMs` | `150` | 任务拉取源的轮询间隔，毫秒 |
+| `referenceQuiescence` | `false` | 启用作业登记与已声明 Session 依赖的协调维护 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-jobs-local)是每个受支持字段的穷尽式真源。
 
@@ -105,6 +106,10 @@ kind: "package-reference"
 ### 销毁
 
 所有者释放（`disposeOwned`）会取消该所有者的任务、等待其结算、移除其记录，并逐条宣布移除——这是任何逐任务记录都无法表达的可见集变更。服务释放（`disposeAll`）会取消所有存活任务、等待结算、移除每条记录（逐条宣布移除，让挂载在服务之外的订阅者丢掉它的行），然后分离跨 fiber 的所有者清理 effect。
+
+`inspectSessionQuiescence` 读取登记作业及排空所有者作业时使用的注册表。请求停止不代表资源已释放。通过 `JobSpec.sessionDependencies` 声明间接 Session 绑定；运行中的作业若未声明此字段，就无法确认其直接所有者之外的 Session 已静默。
+
+设置 `referenceQuiescence: true` 后，`withReferenceQuiescence` 拒绝启动新作业及登记其间接绑定，并等待已接纳作业的生产者结束和输出排空。强制写入终态不代表生产者已结束。读取、停止或终止作业仍可用。维护调用方遇到禁用或忙碌必须拒绝本次操作，并在获取存储 epoch 前获取所有必需的生产者作用域。
 
 </details>
 

@@ -110,6 +110,35 @@ export interface ArchiveSessionOptions {
   readonly stopActivity?: boolean
 }
 
+/** Registry facts needed to preserve membership across a reversible move. */
+export interface WorkspaceSessionAccount {
+  readonly archived: boolean
+  readonly pinned: boolean
+  readonly memberships: readonly { readonly workspaceId: WorkspaceId; readonly position: number }[]
+}
+
+/** Result of forgetting one session's accounting, without modifying its log. */
+export type WorkspaceSessionRemoval =
+  | { readonly status: 'removed'; readonly account: WorkspaceSessionAccount }
+  | { readonly status: 'unknown-session' }
+
+/** Result of restoring an archived session's workspace accounting. */
+export type WorkspaceSessionRestoration =
+  | { readonly status: 'restored' }
+  | { readonly status: 'unknown-session' | 'unknown-workspace' | 'workspace-mismatch' }
+
+/** Operations usable only in the owning registry's reserved queue slot. */
+export interface WorkspaceSessionMaintenance {
+  readonly account: WorkspaceSessionAccount
+  /** @returns the durable removal result; await before leaving the queue slot. */
+  remove(): Promise<WorkspaceSessionRemoval>
+  /** @param workspaceId - original workspace, if any.
+   * @param position - original position, or omit to prepend.
+   * @returns the durable restoration result; await before leaving the queue slot.
+   */
+  restore(workspaceId?: WorkspaceId, position?: number): Promise<WorkspaceSessionRestoration>
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     workspaceRegistry: WorkspaceRegistry
@@ -198,6 +227,7 @@ export class WorkspaceRegistry extends Service {
 
   private readonly host: WorkspaceEntityHost = {
     table: () => this.requireTable(),
+    enqueue: operation => this.enqueueOperation(operation),
     candidateMatches: (id, path) => this.sessionPaths.get(id) === path || this.missingSessionPaths.has(id),
     readSessionHeader: id => this.readSessionHeader(id),
     rememberSessionPath: (id, path) => {
@@ -429,6 +459,113 @@ export class WorkspaceRegistry extends Service {
         archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
       })
     })
+  }
+
+  /**
+   * Reserve the local registry mutation queue across admission, the storage move,
+   * and accounting. Use only the scoped methods from the callback; public mutators
+   * queue behind it. This does not coordinate registries in other processes.
+   * @param id - the session being maintained.
+   * @param operation - work that awaits its scoped mutations before returning.
+   * @returns the callback result after its queue slot settles.
+   */
+  withSessionMaintenance<T>(id: SessionId, operation: (scope: WorkspaceSessionMaintenance) => Promise<T>): Promise<T> {
+    return this.enqueueOperation(async () => {
+      let active = true
+      try {
+        return await operation({
+          account: this.sessionAccount(id),
+          remove: async () => {
+            if (!active) throw new Error('workspace maintenance scope has ended')
+            return this.removeSessionInQueue(id)
+          },
+          restore: async (workspaceId, position) => {
+            if (!active) throw new Error('workspace maintenance scope has ended')
+            return this.restoreSessionInQueue(id, workspaceId, position)
+          },
+        })
+      } finally {
+        active = false
+      }
+    })
+  }
+
+  /**
+   * Forget archive, pin, membership and header indexes after a confirmed move.
+   * A failed durable write may leave partial accounting; retry with the original account.
+   * @param id - moved session id.
+   * @returns what was removed, or an idempotent unknown-session result.
+   */
+  removeSession(id: SessionId): Promise<WorkspaceSessionRemoval> {
+    return this.enqueueOperation(() => this.removeSessionInQueue(id))
+  }
+
+  /**
+   * Backfill registry accounting for a verified stored artifact without moving files.
+   * For online moves, use the scoped operation in {@link withSessionMaintenance}.
+   * @param id - restored session id.
+   * @param workspaceId - original workspace, if any; omit for no association.
+   * @returns the result; missing records and cwd mismatches are refusals.
+   */
+  backfillSessionRegistry(id: SessionId, workspaceId?: WorkspaceId): Promise<WorkspaceSessionRestoration> {
+    return this.enqueueOperation(() => this.restoreSessionInQueue(id, workspaceId))
+  }
+
+  private sessionAccount(id: SessionId): WorkspaceSessionAccount {
+    const state = this.requireState()
+    return {
+      archived: state.archivedSessionIds.includes(id),
+      pinned: state.pinnedSessionIds.includes(id),
+      memberships: state.workspaceIds.flatMap((workspaceId) => {
+        const position = this.requireTable().get(workspaceId)?.sessionIds.indexOf(id) ?? -1
+        return position < 0 ? [] : [{ workspaceId, position }]
+      }),
+    }
+  }
+
+  private async removeSessionInQueue(id: SessionId): Promise<WorkspaceSessionRemoval> {
+    const account = this.sessionAccount(id)
+    const state = this.requireState()
+    for (const { workspaceId } of account.memberships) {
+      const entity = this.entities.get(workspaceId)
+      if (entity === undefined) throw new Error('workspace account references an unpublished workspace')
+      await entity.setSessionAccount(id)
+    }
+    if (account.archived || account.pinned) {
+      await this.setState({
+        ...state,
+        archivedSessionIds: state.archivedSessionIds.filter(value => value !== id),
+        pinnedSessionIds: state.pinnedSessionIds.filter(value => value !== id),
+      })
+    }
+    const indexed = [this.headers, this.sessionPaths, this.missingSessionPaths, this.invalidSessionPaths]
+      .map(index => index.delete(id)).some(Boolean)
+    return indexed || account.archived || account.pinned || account.memberships.length > 0
+      ? { status: 'removed', account }
+      : { status: 'unknown-session' }
+  }
+
+  private async restoreSessionInQueue(id: SessionId, workspaceId?: WorkspaceId, position = 0): Promise<WorkspaceSessionRestoration> {
+    const workspace = workspaceId === undefined ? undefined : this.entities.get(workspaceId)
+    if (workspaceId !== undefined && workspace === undefined) return { status: 'unknown-workspace' }
+    const snapshot = await this.ctx.sessionPersistence.stat(id)
+    if (snapshot?.location === undefined || snapshot.header.id !== id || snapshot.formatStatus === 'migration-required') {
+      return { status: 'unknown-session' }
+    }
+    await this.indexHeader(snapshot.header)
+    if (workspace !== undefined) {
+      if (!this.host.candidateMatches(id, workspace.path)) return { status: 'workspace-mismatch' }
+      await workspace.setSessionAccount(id, position)
+    }
+    const state = this.requireState()
+    if (!state.archivedSessionIds.includes(id)) {
+      await this.setState({
+        ...state,
+        archivedSessionIds: [...state.archivedSessionIds, id],
+        pinnedSessionIds: state.pinnedSessionIds.filter(value => value !== id),
+      })
+    }
+    return { status: 'restored' }
   }
 
   /**

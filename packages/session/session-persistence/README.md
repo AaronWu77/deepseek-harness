@@ -66,6 +66,10 @@ For versioned artifacts, `stat` and `list` expose `formatStatus` as `current` or
 
 A stored log the current build cannot faithfully interpret is refused with a direction-aware error, never misread. `SessionHandle` exposes only current logical records identified by `SESSION_FORMAT_VERSION`; a provider must convert any supported historical storage before returning a handle, and the shipped JSONL provider migrates supported historical generations through its static catalog. A newer format instructs the operator to upgrade the harness. An event type unknown to this build refuses unless its envelope marks it `ignorable`, and committed-prefix corruption rejects as `SessionPersistenceCorruptionError`.
 
+Host callers can use `maintenanceCapability()` to discover optional reversible storage support and `inspectMaintenance(id)` to obtain a read-only revision and artifact identity for confirmation. `withMaintenance()` checks policy under backend ownership before moving an entire artifact. It returns a receipt or a structured refusal; unsupported or disabled providers throw `SessionMaintenanceDisabledError`. A receipt covers the file move only. The caller owns deployment isolation, lifecycle admission and reconciliation of derived data.
+
+Use `withExclusiveMaintenance(holder, fn)` before collecting evidence for reference admission. The backend gives `fn` an epoch; evidence providers check `isMaintenanceEpochActive(epoch)` in their own calls. Only complete evidence consumed within that same exclusive epoch can establish an empty result for the declared scope. `inspectReferenceCorpus({ epoch })` includes restorable trash by default; `referenceDescendants(corpus, id)` reports direct and transitive header lineage and refuses unresolved parents or cycles. An unknown result or an active-only scan cannot authorize removal.
+
 -----
 
 <a id="understand-the-implementation"></a>

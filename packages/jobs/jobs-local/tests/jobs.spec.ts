@@ -7,6 +7,8 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { MaintenanceEpoch, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { bindScopeParent, createScope, scopeOf } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
 import { JobId } from '@deepseek-ai/dsh-jobs'
@@ -14,6 +16,7 @@ import type {
   JobErrorCode, JobEvent, JobEventFilter, JobHandle, JobHooks, JobKind, JobOutcome, JobOutputSource, JobSpec, JobView,
 } from '@deepseek-ai/dsh-jobs'
 import LocalJobRegistry, { type Config as JobsConfig } from '@deepseek-ai/dsh-jobs-local'
+import { ReferenceProducerGate } from '../src/reference-quiescence.ts'
 import { unsupportedModel, unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 
 vi.mock('node:crypto', async (importOriginal) => {
@@ -174,6 +177,184 @@ function scriptedSource(reads: { text: string; lossy?: boolean }[], channel?: 's
 
 /** The structured identity a registry refusal carries. */
 const jobError = (code: JobErrorCode): { name: 'JobError'; code: JobErrorCode } => ({ name: 'JobError', code })
+
+describe('Jobs reference producer quiescence', () => {
+  const held = { name: 'ReferenceProducerBusy', code: 'REFERENCE_PRODUCER_BUSY', reason: 'busy', phase: 'held' }
+  it('does not allocate an admission owner or track starts by default', async () => {
+    const ctx = await harness()
+    const admit = vi.spyOn(ReferenceProducerGate.prototype, 'admit')
+    const task = producer()
+    try {
+      expect(ctx.jobs.referenceQuiescenceEnabled()).toBe(false)
+      expect(Reflect.get(ctx.jobs, 'referenceGate')).toBeUndefined()
+      const fn = vi.fn(async () => {})
+      await expect(ctx.jobs.withReferenceQuiescence('disabled', fn))
+        .rejects.toMatchObject({ code: 'REFERENCE_QUIESCENCE_DISABLED', reason: 'disabled' })
+      expect(fn).not.toHaveBeenCalled()
+      const id = ctx.jobs.start(task.spec)
+      expect(ctx.jobs.get(id).status).toBe('running')
+      expect(admit).not.toHaveBeenCalled()
+    } finally {
+      task.settle({ status: 'completed' })
+      admit.mockRestore()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('blocks starts and dependencies, drains actual work and keeps kill and reads usable', async () => {
+    const ctx = await harness({ referenceQuiescence: true })
+    const task = producer()
+    const refused = producer()
+    const run = vi.spyOn(refused.spec, 'run')
+    const signal = AbortSignal.abort(new Error('do not enter'))
+    const fn = vi.fn(async (scope: Readonly<{ holder: string }>) => {
+      expect(scope.holder).toBe('maintenance')
+      expect(ctx.jobs.list()[0]?.status).toBe('killed')
+      expect(() => ctx.jobs.start(refused.spec)).toThrow(expect.objectContaining(held))
+      throw new Error('callback failed')
+    })
+    try {
+      const admit = vi.spyOn(ReferenceProducerGate.prototype, 'admit')
+      try {
+        expect(ctx.jobs.referenceQuiescenceEnabled()).toBe(true)
+        expect(admit).not.toHaveBeenCalled()
+      } finally {
+        admit.mockRestore()
+      }
+      expect(ctx.jobs.list()).toEqual([])
+      await expect(ctx.jobs.withReferenceQuiescence('pre-aborted', fn, { signal })).rejects.toBe(signal.reason)
+      const id = ctx.jobs.start(task.spec)
+      await expect(ctx.jobs.withReferenceQuiescence('timeout', fn, { drainTimeoutMs: 0 }))
+        .rejects.toMatchObject({ ...held, phase: 'drain-timeout' })
+      expect(fn).not.toHaveBeenCalled()
+      const maintenance = ctx.jobs.withReferenceQuiescence('maintenance', fn)
+      const rejected = expect(maintenance).rejects.toThrow('callback failed')
+      try {
+        await expect(ctx.jobs.withReferenceQuiescence('competing', async () => {})).rejects.toMatchObject(held)
+        expect(() => ctx.jobs.start({ ...refused.spec, sessionDependencies: [SessionId('new-dependency')] }))
+          .toThrow(expect.objectContaining(held))
+        expect(run).not.toHaveBeenCalled()
+        ctx.jobs.kill(id)
+        expect(task.cancels).toHaveLength(1)
+        expect(fn).not.toHaveBeenCalled()
+      } finally {
+        task.settle({ status: 'killed' })
+        await rejected
+      }
+      expect(ctx.jobs.get(ctx.jobs.start(refused.spec)).status).toBe('running')
+      expect(run).toHaveBeenCalledOnce()
+    } finally {
+      task.settle({ status: 'killed' })
+      refused.settle({ status: 'completed' })
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('does not treat an owner-forced failure as the producer settling', async () => {
+    const ctx = await harness({ referenceQuiescence: true })
+    const owner = await liveAgent(ctx, 'orphan-owner')
+    const task = producer({ owner, cancel() { throw new Error('cancel blew up') } })
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    try {
+      ctx.jobs.start(task.spec)
+      await disposeAgentScope(owner)
+      const fn = vi.fn(async () => {})
+      await expect(ctx.jobs.withReferenceQuiescence('timeout', fn, { drainTimeoutMs: 0 }))
+        .rejects.toMatchObject({ ...held, phase: 'drain-timeout' })
+      expect(fn).not.toHaveBeenCalled()
+      const drained = ctx.jobs.withReferenceQuiescence('drain', fn)
+      task.settle({ status: 'completed' })
+      await drained
+      expect(fn).toHaveBeenCalledOnce()
+    } finally {
+      task.settle({ status: 'completed' })
+      warn.mockRestore()
+      await ctx.fiber.dispose()
+    }
+  })
+})
+
+describe('LocalJobRegistry.inspectSessionQuiescence', () => {
+  const epoch = brandString<MaintenanceEpoch>('jobs-evidence')
+  const candidate = SessionId('job-candidate')
+
+  async function fixture() {
+    const ctx = await harness()
+    let active = true
+    const persistence: Pick<SessionPersistence, 'isMaintenanceEpochActive'> = {
+      isMaintenanceEpochActive: provided => active && provided === epoch,
+    }
+    ctx.provide('sessionPersistence', persistence as SessionPersistence)
+    return { ctx, expire: () => { active = false } }
+  }
+
+  it('reports owned running and stopping work, then clears after owner drain', async () => {
+    const { ctx } = await fixture()
+    const owner = await liveAgent(ctx, candidate)
+    const task = producer({ owner })
+    try {
+      const id = ctx.jobs.start(task.spec)
+      const inspect = () => ctx.jobs.inspectSessionQuiescence(epoch, [candidate])
+      expect(await inspect()).toEqual({ state: 'complete', epoch, items: [{ id, sessionId: candidate, kind: 'owner', status: 'running' }] })
+      ctx.jobs.kill(id, candidate)
+      expect(await inspect()).toEqual({ state: 'complete', epoch, items: [{ id, sessionId: candidate, kind: 'owner', status: 'stopping' }] })
+      const drain = disposeAgentScope(owner)
+      task.settle({ status: 'killed' })
+      await drain
+      expect(await inspect()).toEqual({ state: 'complete', epoch, items: [] })
+    } finally {
+      task.settle({ status: 'killed' })
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('distinguishes explicit indirect dependencies from unowned work with unknown dependencies', async () => {
+    const { ctx, expire } = await fixture()
+    const declared = producer()
+    const unbound = producer()
+    try {
+      const id = ctx.jobs.start({ ...declared.spec, sessionDependencies: [candidate] })
+      const inspect = () => ctx.jobs.inspectSessionQuiescence(epoch, [candidate])
+      expect(await inspect()).toEqual({ state: 'complete', epoch, items: [{ id, sessionId: candidate, kind: 'indirect', status: 'running' }] })
+      ctx.jobs.start(unbound.spec)
+      expect(await inspect()).toMatchObject({ state: 'unknown', reason: { code: 'unstable' } })
+      expire()
+      expect(await inspect()).toEqual({ state: 'unknown', reason: { code: 'stale-epoch' } })
+    } finally {
+      unbound.settle({ status: 'completed' })
+      declared.settle({ status: 'completed' })
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('does not infer that a live job owned by a different Session has no indirect binding', async () => {
+    const { ctx } = await fixture()
+    const owner = await liveAgent(ctx, 'another-jobs-owner')
+    const task = producer({ owner })
+    try {
+      ctx.jobs.start(task.spec)
+      expect(await ctx.jobs.inspectSessionQuiescence(epoch, [candidate])).toMatchObject({ state: 'unknown', reason: { code: 'unstable' } })
+    } finally {
+      task.settle({ status: 'completed' })
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('refuses a rejected producer lifecycle even after its terminal record is removed', async () => {
+    const { ctx } = await fixture()
+    const task = producer()
+    try {
+      const id = ctx.jobs.start({ ...task.spec, sessionDependencies: [candidate] })
+      task.reject(new Error('unconfirmed exit'))
+      await ctx.jobs.wait(id, 1000)
+      ctx.jobs.remove(id)
+      expect(await ctx.jobs.inspectSessionQuiescence(epoch, [candidate])).toMatchObject({ state: 'unknown', reason: { code: 'unstable' } })
+    } finally {
+      task.settle({ status: 'completed' })
+      await ctx.fiber.dispose()
+    }
+  })
+})
 
 describe('LocalJobRegistry.start', () => {
   it('preserves the SessionId brand on public owner projections', () => {

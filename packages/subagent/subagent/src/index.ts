@@ -40,6 +40,9 @@ import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Evidence, MaintenanceEpoch } from '@deepseek-ai/dsh-session-persistence'
+import { inspectRemovalLineage, type LineageEdge } from './removal-lineage.ts'
+import { ReferenceProducerGate, ReferenceQuiescenceDisabled, type ReferenceQuiescenceOptions } from './reference-quiescence.ts'
 import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
 import { Remote, RemoteError, TypertRemoteService, principalOf, type Principal } from '@deepseek-ai/dsh-typert-protocol'
 import {
@@ -125,6 +128,9 @@ export type { ChildComposition, DelegatedPolicyOverrides } from './child-agent.t
 export type { AgentMessageSource, SubagentSettledMessageSource } from './continuation-messages.ts'
 export type * from './control-types.ts'
 export type { SubagentDescendantListEntry } from './list-children.ts'
+export type { LineageEdge } from './removal-lineage.ts'
+export { ReferenceProducerBusy, ReferenceProducerGate, ReferenceQuiescenceDisabled } from './reference-quiescence.ts'
+export type { ReferenceQuiescenceOptions } from './reference-quiescence.ts'
 export type { SubagentRunEndInfo, SubagentRunInfo } from './types.ts'
 export type { SubagentCatalogEntry, SubagentIdentityProjection, SubagentTimingProjection } from './projection-types.ts'
 
@@ -188,6 +194,8 @@ export interface Config {
   maxActiveSubagents: Volatile<number>
   /** Default delegation depth for tools without an explicit limit; defaults to 1. */
   maxDepth: Volatile<number>
+  /** Enable host-only reference producer coordination; defaults to false. */
+  referenceQuiescence?: boolean
 }
 
 /** Named provider registry with managed activations, durable discovery, and local child messaging. */
@@ -195,10 +203,12 @@ export class SubagentRuntime extends TypertRemoteService {
   static Config = z.object({
     maxDepth: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(1).volatile(),
     maxActiveSubagents: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(8).volatile(),
+    referenceQuiescence: z.boolean().default(false),
   })
   static inject = ['workingDirectory', 'sessionProjections']
   private providers = new Map<string, SubagentProvider>()
   private manager: SubagentManager | undefined
+  private readonly referenceGate: ReferenceProducerGate | undefined
   /**
    * The contained lifecycle-edge publisher. Built here because scoped dispatch
    * keys its carrier by this exact service instance, whose own context filter
@@ -208,6 +218,7 @@ export class SubagentRuntime extends TypertRemoteService {
 
   constructor(ctx: Context, private config: Config) {
     super(ctx, 'subagents')
+    if (config.referenceQuiescence === true) this.referenceGate = new ReferenceProducerGate()
     this.emitLifecycle = createLifecycleEmitter(this.ctx, parent => scopeTarget(this, parent))
   }
 
@@ -265,6 +276,12 @@ export class SubagentRuntime extends TypertRemoteService {
    * @throws PROVIDER_CHANGED if the selected provider is removed or replaced before dispatch.
    */
   async startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation> {
+    using permit = this.referenceGate?.admit()
+    const activation = this.establishActivation(spec)
+    return permit === undefined ? activation : await activation
+  }
+
+  private establishActivation(spec: SubagentActivationSpec): Promise<SubagentActivation> {
     const provider = this.expectProvider(spec.provider)
     if (spec.childId !== undefined && provider.prepareContinuable === undefined) {
       throw new SubagentError('reserved child ids require a local backend', 'UNSUPPORTED_CAPABILITY')
@@ -371,7 +388,9 @@ export class SubagentRuntime extends TypertRemoteService {
     content: ContentBlock[],
     options: SubagentSendMessageOptions,
   ): Promise<MessageId> {
-    return this.requireManager().sendMessage(sender, targetId, content, options)
+    using permit = this.referenceGate?.admit()
+    const delivery = this.requireManager().sendMessage(sender, targetId, content, options)
+    return permit === undefined ? delivery : await delivery
   }
 
   /**
@@ -429,6 +448,45 @@ export class SubagentRuntime extends TypertRemoteService {
   }
 
   /**
+   * Corroborate retained descendants, including ordinary forks and restorable trash, without waking Agents.
+   * @param epoch - active exclusive maintenance epoch from this host's persistence service.
+   * @param targetId - Session whose descendants may block removal.
+   * @returns retained edges or unknown for unverified lineage; consume only inside the same active epoch.
+   */
+  inspectRemovalLineage(epoch: MaintenanceEpoch, targetId: SessionId): Promise<Evidence<LineageEdge>> {
+    const persistence = this.ctx.get('sessionPersistence')
+    if (persistence?.isMaintenanceEpochActive(epoch) && this.ctx.get('sessions')?.list().length) {
+      return Promise.resolve({ state: 'unknown', reason: { code: 'busy', detail: 'live Sessions may contain unpersisted lineage' } })
+    }
+    return inspectRemovalLineage(persistence, epoch, targetId)
+  }
+
+  /**
+   * Read this mount's opt-in without acquiring the gate or changing producer admission.
+   * @returns whether reference quiescence is enabled; defaults to false. True does not imply gate ownership or authorize maintenance.
+   */
+  referenceQuiescenceEnabled(): boolean {
+    return this.referenceGate !== undefined
+  }
+
+  /**
+   * Close this mount's spawn and waking delivery entries, then drain their admitted promises.
+   * This does not stop resident Agents, external backends, or ordinary Session forks.
+   * Reads, interruption and teardown remain available. Acquire before the storage maintenance epoch.
+   * @param holder - diagnostic name of the maintenance caller.
+   * @param fn - scoped work that must settle before reopening admissions.
+   * @param options - cancellation before entry and optional drain timeout.
+   * @returns the callback result.
+   * @throws {ReferenceQuiescenceDisabled} when the deployment has not opted in.
+   * @throws {ReferenceProducerBusy} when already held or still draining at the deadline.
+   */
+  async withReferenceQuiescence<T>(holder: string, fn: () => Promise<T>, options?: ReferenceQuiescenceOptions): Promise<T> {
+    options?.signal?.throwIfAborted()
+    if (this.referenceGate === undefined) throw new ReferenceQuiescenceDisabled('subagent')
+    return this.referenceGate.withQuiescence(holder, fn, options)
+  }
+
+  /**
    * Deliver one browser-authored message to a continuable child through its
    * live subagent tree root, retaining the caller-minted request identity and
    * validated browser zone on the accepted message. Success identifies the
@@ -469,6 +527,7 @@ export class SubagentRuntime extends TypertRemoteService {
       ...(principal === undefined ? {} : { principal }),
     }
     try {
+      using _permit = this.referenceGate?.admit()
       // Admission precedes delivery: image parts become durable references
       // here, so the child inbox only ever accepts Host-persisted attachments.
       let content: ContentBlock[]

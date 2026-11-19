@@ -141,6 +141,12 @@ Team 在激活前要求 `sessionPersistence` 可用。`Service.init` 等待 `age
 
 投影忽略历史名册与邮箱记录，不校验或保留其载荷。投影仅保存任务板、模式选择和恢复元数据。缺少 `ownerName` 的第 7 版检查点仍可复用；后缀回放从后续任务事件记录名称，不回填历史任务。不兼容的投影检查点从未改写的 Session 日志重建；参见[升级指南](../../../docs/upgrade-guide/v0.2.1-rc.3/team-projection/guide.zh.md)。
 
+### 保留任务的引用
+
+宿主维护在各 Lead 的任务修改队列中读取其保留日志，不发布 Session。待处理或进行中的任务若匹配 Lead 或任务所有者，均阻止移除。已删除任务仍可作为不阻断的墓碑查看，已完成任务仅为历史记录。日志或投影不可读时，不允许放行。
+
+仅宿主使用的 `referenceQuiescence` 选项默认为 `false`。启用后，宿主维护可在获取存储独占权限前等待已接纳的 Team 写入收尾，并在该作用域内拒绝新写入。读取和取消仍可用。 `referenceQuiescenceEnabled()` 只报告是否启用，不获取闸门，也不授予维护权限。
+
 ### Dispose
 
 卸载服务会注销投影。保留的 handle 仍可读取，并在已获准工作收尾期间按需折叠 Session 事件。Team 不拥有 Agent：队友仍由 subagent 运行时管理，容量、收尾和拆除均由后者负责。

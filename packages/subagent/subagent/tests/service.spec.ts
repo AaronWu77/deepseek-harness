@@ -13,6 +13,8 @@ import SubagentRuntime, {
   snapshotSubagentDescriptor,
   SUBAGENT_DESCRIPTOR_VERSION,
   SubagentError,
+  ReferenceProducerBusy,
+  ReferenceProducerGate,
   assertSubagentMaxDepth,
   type SubagentCapabilities,
   type SubagentActivation,
@@ -75,7 +77,7 @@ class StubProvider implements SubagentProvider {
 
 const contexts = new WeakMap<SubagentRuntime, Context>()
 
-async function service(withAgents = true): Promise<{ ctx: Context; subagents: SubagentRuntime }> {
+async function service(withAgents = true, referenceQuiescence = false): Promise<{ ctx: Context; subagents: SubagentRuntime }> {
   const ctx = new Context()
   if (withAgents) {
     await mountAgentLoopTestDependencies(ctx)
@@ -85,7 +87,7 @@ async function service(withAgents = true): Promise<{ ctx: Context; subagents: Su
 
   }
   await mountWorkingDirectoryFixture(ctx)
-  await ctx.plugin(SubagentRuntime)
+  await ctx.plugin(SubagentRuntime, referenceQuiescence ? { referenceQuiescence } : {})
   const subagents = ctx.subagents
   contexts.set(subagents, ctx)
   onTestFinished(() => ctx.fiber.dispose())
@@ -104,6 +106,88 @@ async function start(subagents: SubagentRuntime, provider: string, request: Suba
 }
 
 describe('SubagentRuntime', () => {
+  it('uses direct spawn admission by default without touching the opt-in coordinator', async () => {
+    const { subagents } = await service()
+    const admit = vi.spyOn(ReferenceProducerGate.prototype, 'admit')
+    try {
+      const provider = new StubProvider('default-admission')
+      subagents.registerProvider(provider)
+      expect(subagents.referenceQuiescenceEnabled()).toBe(false)
+      await expect(subagents.withReferenceQuiescence('maintenance', async () => undefined))
+        .rejects.toMatchObject({ code: 'REFERENCE_QUIESCENCE_DISABLED', reason: 'disabled' })
+      const activation = await start(subagents, provider.name, baseRequest())
+      await activation.dispose()
+      expect(provider.startCount).toBe(1)
+      expect(subagents.referenceQuiescenceEnabled()).toBe(false)
+      expect(admit).not.toHaveBeenCalled()
+    } finally {
+      admit.mockRestore()
+    }
+  })
+
+  it('closes new spawn admission while it drains in-flight startup, and reopens after release', async () => {
+    const { subagents } = await service(true, true)
+    const provider = new StubProvider('maintenance-admission')
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const startProvider = provider.start.bind(provider)
+    vi.spyOn(provider, 'start').mockImplementationOnce(async (request) => {
+      entered.resolve()
+      await release.promise
+      return startProvider(request)
+    })
+    subagents.registerProvider(provider)
+    const startup = start(subagents, provider.name, baseRequest())
+    let scope: Promise<string> | undefined
+    const callback = vi.fn(async () => 'held')
+    try {
+      await entered.promise
+      await expect(subagents.withReferenceQuiescence('timed-out', callback, { drainTimeoutMs: 1 }))
+        .rejects.toMatchObject({ code: 'REFERENCE_PRODUCER_BUSY', reason: 'busy', phase: 'drain-timeout' })
+      expect(callback).not.toHaveBeenCalled()
+      scope = subagents.withReferenceQuiescence('maintenance', callback)
+      await expect(subagents.withReferenceQuiescence('competing', callback)).rejects.toBeInstanceOf(ReferenceProducerBusy)
+      await expect(start(subagents, provider.name, baseRequest()))
+        .rejects.toMatchObject({ code: 'REFERENCE_PRODUCER_BUSY', reason: 'busy', phase: 'held' })
+      expect(callback).not.toHaveBeenCalled()
+    } finally {
+      release.resolve()
+      const activation = await startup
+      await activation.dispose()
+      await scope
+    }
+    expect(callback).toHaveBeenCalledTimes(1)
+    await expect(subagents.withReferenceQuiescence('another', async () => true)).resolves.toBe(true)
+    const after = await start(subagents, provider.name, baseRequest())
+    await after.dispose()
+    expect(provider.startCount).toBe(2)
+  })
+
+  it('keeps new spawn closed throughout the callback and releases it after callback rejection', async () => {
+    const { subagents } = await service(true, true)
+    const provider = new StubProvider('entered-maintenance')
+    subagents.registerProvider(provider)
+    const failure = new Error('fixture callback failed')
+    expect(subagents.referenceQuiescenceEnabled()).toBe(true)
+    await expect(subagents.withReferenceQuiescence('maintenance', async () => {
+      expect(subagents.referenceQuiescenceEnabled()).toBe(true)
+      await expect(start(subagents, provider.name, baseRequest())).rejects.toBeInstanceOf(ReferenceProducerBusy)
+      throw failure
+    }, { drainTimeoutMs: 0 })).rejects.toBe(failure)
+    expect(subagents.referenceQuiescenceEnabled()).toBe(true)
+    const activation = await start(subagents, provider.name, baseRequest())
+    await activation.dispose()
+  })
+
+  it('does not enter maintenance for an already aborted request', async () => {
+    const { subagents } = await service(true, true)
+    const signal = AbortSignal.abort(new Error('fixture cancellation'))
+    const callback = vi.fn(async () => true)
+    await expect(subagents.withReferenceQuiescence('cancelled', callback, { signal })).rejects.toBe(signal.reason)
+    expect(callback).not.toHaveBeenCalled()
+    await expect(subagents.withReferenceQuiescence('next', callback)).resolves.toBe(true)
+  })
+
   it('resolves Activation roots only for exact live child and root instances', async () => {
     const { ctx, subagents } = await service()
     const root = await ctx.agents.create({ sessionId: SessionId('lineage-root') })

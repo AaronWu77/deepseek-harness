@@ -22,6 +22,8 @@ import {
 import { formatScheduleLocalTime } from './domain.ts'
 import { appendDelivery } from './delivery-history.ts'
 import type { ScheduleTask } from './storage.ts'
+import type { ReferenceProducerGate } from './reference-quiescence.ts'
+import type { ScheduleBinding } from './session-bindings.ts'
 import type { DeliveryRetentionBounds, ScheduleDeliveryReceipt, ScheduleId, ScheduleSessionCreateSpec } from './types.ts'
 
 /** Largest delay Node timers represent without clamping. */
@@ -68,6 +70,8 @@ export class ScheduleRuntime {
   private timer: ReturnType<typeof setTimeout> | undefined
   private running: Promise<void> | undefined
   private readonly executing = new Set<ScheduleId>()
+  private readonly deliveryExecutions = new Set<{ sessionId: SessionIdType; taskIds: readonly ScheduleId[] }>()
+  private deliveryEvidenceUnknown = false
   private stopping = false
   private requested = false
 
@@ -79,6 +83,7 @@ export class ScheduleRuntime {
    * @param changed - Publish a change that has no task write, such as an execution reaching whole-agent idle.
    * @param limits - Resolved retention and new-Session admission limits.
    * @param resolveAgent - Host fallback after embedding activation handlers delegate.
+   * @param gate - optional admission owner shared with task mutations.
    */
   constructor(
     private readonly ctx: Context,
@@ -88,6 +93,7 @@ export class ScheduleRuntime {
     private readonly changed: () => void,
     private readonly limits: ScheduleRuntimeLimits,
     private readonly resolveAgent: (sessionId: SessionIdType) => Promise<Agent>,
+    private readonly gate?: ReferenceProducerGate,
   ) {}
 
   /**
@@ -98,13 +104,15 @@ export class ScheduleRuntime {
     if (this.stopping) return
     this.requested = true
     this.clearTimer()
-    if (this.running !== undefined) return
+    if (this.running !== undefined || this.gate?.held) return
     let run: Promise<void>
     try {
       run = this.ctx.agents.withoutInitiator(async () => {
-        while (this.requested && !this.stopping) {
+        while (this.requested && !this.stopping && !this.gate?.held) {
           this.requested = false
-          await this.transact(async () => { await this.drive() })
+          const work = async () => { await this.drive() }
+          if (this.gate === undefined) await this.transact(work)
+          else await this.gate.run(() => this.transact(work))
         }
       })
     } catch (error: unknown) {
@@ -119,8 +127,13 @@ export class ScheduleRuntime {
     }).finally(() => {
       this.running = undefined
       /* v8 ignore next -- a request can arrive in the microtask gap between the drive loop and this finalizer. */
-      if (this.requested && !this.stopping) this.requestDrive()
+      if (!this.gate?.held) this.resumeDrive()
     })
+  }
+
+  /** Resume intake only when a drive request arrived during maintenance. */
+  resumeDrive(): void {
+    if (this.requested && !this.stopping) this.requestDrive()
   }
 
   /** Stop the timer and drain an accepted delivery before storage closes. */
@@ -154,7 +167,7 @@ export class ScheduleRuntime {
       // Sample the occurrence after Session restoration, which can take longer than one recurrence interval.
       const occurrenceAt = new Date(Date.now()).toISOString()
       const held = task.target.kind !== 'new' ? [id] : []
-      const sent = await this.send(target.agent, renderReminderFraming({ ...task.record, scheduledAt: occurrenceAt }), held)
+      const sent = await this.send(target.agent, renderReminderFraming({ ...task.record, scheduledAt: occurrenceAt }), held, [id])
       const committed = new Set<ScheduleId>()
       try {
         const delivered = this.delivered(task, {
@@ -176,6 +189,41 @@ export class ScheduleRuntime {
    */
   isExecutionActive(id: ScheduleId): boolean {
     return this.executing.has(id)
+  }
+
+  /**
+   * Observe accepted reminders until their target reaches whole-Agent idle, independent of task retention.
+   * @param candidates - Session identities to match.
+   * @returns blocking in-flight bindings, or undefined if an accepted execution cannot be observed.
+   */
+  inFlightBindings(candidates: ReadonlySet<SessionIdType>): ScheduleBinding[] | undefined {
+    if (this.deliveryEvidenceUnknown) return undefined
+    const items: ScheduleBinding[] = []
+    for (const { sessionId, taskIds } of this.deliveryExecutions) {
+      if (candidates.has(sessionId)) {
+        for (const taskId of taskIds) items.push({ kind: 'in-flight', taskId, sessionId })
+      }
+    }
+    return items
+  }
+
+  private trackDelivery(agent: Agent, taskIds: readonly ScheduleId[], holdsSlot: boolean): Promise<void> | undefined {
+    let execution: Promise<void>
+    try {
+      execution = agent.whenIdle()
+    } catch (error) {
+      this.deliveryEvidenceUnknown = true
+      if (holdsSlot) throw error
+      return undefined
+    }
+    const binding = { sessionId: agent.id, taskIds }
+    this.deliveryExecutions.add(binding)
+    const finish = () => { this.deliveryExecutions.delete(binding) }
+    void execution.then(finish, () => {
+      this.deliveryEvidenceUnknown = true
+      finish()
+    })
+    return execution
   }
 
   /**
@@ -261,7 +309,7 @@ export class ScheduleRuntime {
         })))
         : renderReminderFraming({ ...single.task.record, scheduledAt: single.occurrence.occurrenceAt })
       const held = deliveries.filter(({ task }) => task.target.kind !== 'new').map(({ task }) => task.record.id)
-      const sent = await this.send(target.agent, text, held)
+      const sent = await this.send(target.agent, text, held, deliveries.map(({ task }) => task.record.id))
       try {
         for (const { task, occurrence } of deliveries) {
           await this.commit(this.advanced(task, occurrence, {
@@ -331,12 +379,13 @@ export class ScheduleRuntime {
         // without creating a second logical delivery or Session.
         agent.inbox.remove(message.id)
         agent.followup(message)
-        const execution = held.length > 0 ? agent.whenIdle() : undefined
+        const execution = this.trackDelivery(agent, [task.record.id], held.length > 0)
         const flushed = await this.ctx.sessions.flush(agent.session)
         if (!flushed) throw new Error('Session persistence did not acknowledge the recovered reminder')
-        if (execution !== undefined) this.watchExecution(held, execution)
-      } else if (held.length > 0) {
-        this.watchExecution(held, agent.whenIdle())
+        if (held.length > 0 && execution !== undefined) this.watchExecution(held, execution)
+      } else {
+        const execution = this.trackDelivery(agent, [task.record.id], held.length > 0)
+        if (held.length > 0 && execution !== undefined) this.watchExecution(held, execution)
       }
       return held.includes(task.record.id)
     } catch (error: unknown) {
@@ -349,14 +398,16 @@ export class ScheduleRuntime {
    * Enqueue one reminder and wait for Session persistence to acknowledge it.
    * The held tasks hold their slots from the enqueue; a failure releases them.
    */
-  private async send(agent: Agent, text: string, held: readonly ScheduleId[]): Promise<SentReminder> {
+  private async send(
+    agent: Agent, text: string, held: readonly ScheduleId[], taskIds: readonly ScheduleId[],
+  ): Promise<SentReminder> {
     const message = createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'schedule' } })
     for (const id of held) this.executing.add(id)
     try {
       agent.followup(message)
       // Capture the activity immediately after wakeup. Waiting for durable flush
       // can miss the whole lifecycle of a fast target Agent.
-      const execution = held.length > 0 ? agent.whenIdle() : undefined
+      const execution = this.trackDelivery(agent, taskIds, held.length > 0)
       const flushed = await this.ctx.sessions.flush(agent.session)
       if (!flushed) throw new Error('Session persistence did not acknowledge the reminder')
       return { messageId: message.id, deliveredAt: new Date(Date.now()).toISOString(), execution }

@@ -23,6 +23,68 @@ import type { WorkspaceDomainState, WorkspaceRecord } from '../src/index.ts'
 import { defaultWorkspaceTitle, fullyQualifiedWorkspacePath } from '../src/paths.ts'
 import * as workspacePaths from '../src/paths.ts'
 
+describe('reversible session accounting', () => {
+  it('removes persisted archive, pin and membership state and restores the original accounting order', async () => {
+    const cwd = await makeDir('reversible')
+    const first = header('first-kept', cwd, 1)
+    const removed = header('removed', cwd, 2)
+    const last = header('last-kept', cwd, 3)
+    const { ctx, pool, registry, setSessions, stat } = await harness({ sessions: [first, removed, last] })
+    onTestFinished(() => ctx.fiber.dispose())
+    const workspace = registry.list()[0]!
+    const original = workspace.sessionIds
+    const position = original.indexOf(removed.id)
+    await registry.archiveSession(removed.id)
+    await registry.pinSession(first.id)
+    setSessions([last])
+    const result = await registry.removeSession(removed.id)
+    expect(result).toEqual({ status: 'removed', account: {
+      archived: true, pinned: false, memberships: [{ workspaceId: workspace.id, position }],
+    } })
+    expect(await registry.removeSession(first.id)).toMatchObject({ status: 'removed', account: { pinned: true } })
+    expect(await registry.removeSession(removed.id)).toEqual({ status: 'unknown-session' })
+    expect(storedState(pool)).toMatchObject({ archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedRecord(pool, workspace.id).sessionIds).toEqual([last.id])
+    await expect(registry.archiveSession(removed.id)).rejects.toMatchObject({ name: 'WorkspaceUnknownSessionError' })
+    stat.mockResolvedValue(undefined)
+    expect(await registry.backfillSessionRegistry(removed.id, workspace.id)).toEqual({ status: 'unknown-session' })
+    stat.mockResolvedValue({ header: removed, revision: SessionPersistenceRevision('restored'), location: { kind: 'fixture', path: join(cwd, 'restored.jsonl') } })
+    const restored = await registry.withSessionMaintenance(removed.id, slot => slot.restore(workspace.id, position))
+    expect(restored).toEqual({ status: 'restored' })
+    expect(storedState(pool).archivedSessionIds).toEqual([removed.id])
+    expect(storedRecord(pool, workspace.id).sessionIds).toContain(removed.id)
+    expect(workspace.sessionIds).toContain(removed.id)
+  })
+
+  it('blocks unarchive on the registry queue until admission, move and removal finish', async () => {
+    const cwd = await makeDir('maintenance-queue')
+    const meta = header('queue', cwd)
+    const { ctx, registry, setSessions } = await harness({ sessions: [meta] })
+    onTestFinished(() => ctx.fiber.dispose())
+    await registry.archiveSession(meta.id)
+    const entered = Promise.withResolvers<void>()
+    const finish = Promise.withResolvers<void>()
+    const operation = registry.withSessionMaintenance(meta.id, async (slot) => {
+      entered.resolve()
+      await finish.promise
+      expect(slot.account.archived).toBe(true)
+      expect(registry.archivedSessionIds).toContain(meta.id)
+      setSessions([])
+      return await slot.remove()
+    })
+    await entered.promise
+    const unarchive = registry.unarchiveSession(meta.id)
+    finish.resolve()
+    try {
+      expect(await operation).toMatchObject({ status: 'removed' })
+    } finally {
+      await unarchive
+    }
+    expect(registry.archivedSessionIds).not.toContain(meta.id)
+    expect(registry.list()[0]?.sessionIds).not.toContain(meta.id)
+  })
+})
+
 const DOMAIN_VERSION = 2
 
 const header = (id: string, cwd?: string, createdAt = 0): SessionHeader => ({
@@ -55,7 +117,9 @@ async function harness(options: HarnessOptions = {}) {
   const list = vi.fn(async (): Promise<SessionPersistenceSnapshot[]> =>
     listed.map(header => ({ header, revision: SessionPersistenceRevision(`rev-${header.id}`) })))
   const open = vi.fn(() => { throw new Error('event bodies must not be opened') })
-  const stat = vi.fn(() => { throw new Error('per-session stat must not be needed') })
+  const stat = vi.fn(async (_id: SessionId): Promise<SessionPersistenceSnapshot | undefined> => {
+    throw new Error('per-session stat must not be needed')
+  })
   ctx.provide('sessionPersistence', { list, open, stat } as never)
 
   if (options.sessionStore === true) {
@@ -213,7 +277,7 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     const newer = await makeDir('newer')
     const alias = join(base, 'older-link')
     const plain = join(base, 'plain.txt')
-    await symlink(older, alias)
+    await symlink(older, alias, process.platform === 'win32' ? 'junction' : 'dir')
     await writeFile(plain, 'not a directory')
     const missing = join(base, 'missing')
     const result = await harness({
@@ -384,7 +448,7 @@ describe('WorkspaceRegistry create and lookup', () => {
     const firstDir = await makeDir('first')
     const secondDir = await makeDir('second')
     const alias = join(base, 'first-link')
-    await symlink(firstDir, alias)
+    await symlink(firstDir, alias, process.platform === 'win32' ? 'junction' : 'dir')
     const { registry, pool } = await harness()
     const first = await registry.create(firstDir, 'Original')
     const second = await registry.create(secondDir)
@@ -1495,7 +1559,7 @@ describe('first-use Workspace preparation', () => {
     const target = join(h.directoryRoot, 'elsewhere')
     await mkdir(target)
     await mkdir(join(h.directoryRoot, 'nested'))
-    await symlink(target, join(h.directoryRoot, 'nested', 'Workspace'))
+    await symlink(target, join(h.directoryRoot, 'nested', 'Workspace'), process.platform === 'win32' ? 'junction' : 'dir')
     const workspace = await h.registry.initializeDefault(h.resolveDirectory)
     expect(workspace?.path).toBe(await realpath(target))
     // Not 'elsewhere': the title names the directory the caller asked for, so

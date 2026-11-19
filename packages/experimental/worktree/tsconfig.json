@@ -9,6 +9,12 @@
   ],
   "references": [
     {
+      "path": "../../subagent/subagent"
+    },
+    {
+      "path": "../../util/error"
+    },
+    {
       "path": "../../../vendor/cosmokit"
     },
     {
@@ -40,6 +46,9 @@
     },
     {
       "path": "../../core/session"
+    },
+    {
+      "path": "../../session/session-persistence"
     },
     {
       "path": "../../session/session-projection"

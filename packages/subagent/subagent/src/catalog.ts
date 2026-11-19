@@ -120,10 +120,24 @@ const stateSchema: z.ZodType<SubagentCatalogState> = z.object({
 function subagentCatalogEntries(state: SubagentCatalogState): SubagentCatalogEntry[] {
   const entries: SubagentCatalogEntry[] = []
   for (const data of iterateChunkedList(state.head)) {
-    const { version: _version, childId, childCreatedAt, ...descriptor } = data
-    entries.push({ id: childId, createdAt: childCreatedAt, ...descriptor })
+    entries.push(catalogEntry(data))
   }
   return entries
+}
+
+function catalogEntry(data: SubagentCatalogEvent): SubagentCatalogEntry {
+  const { version: _version, childId, childCreatedAt, ...descriptor } = data
+  return { id: childId, createdAt: childCreatedAt, ...descriptor }
+}
+
+/**
+ * Decode a retained catalog event with the projection's persisted schema.
+ * @param data - untrusted event payload.
+ * @returns the catalog row, or undefined if the event cannot be decoded.
+ */
+export function inspectCatalogEntry(data: unknown): SubagentCatalogEntry | undefined {
+  const parsed = eventDataSchema.safeParse(data)
+  return parsed.success ? catalogEntry(parsed.data) : undefined
 }
 
 /** Parent-owned catalog; version-6 checkpoints retain unnamed facts, and invalid own facts reject restoration. */

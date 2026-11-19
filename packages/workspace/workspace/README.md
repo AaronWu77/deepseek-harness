@@ -78,6 +78,8 @@ Hide a session from the grouping when it should stop appearing there: it disappe
 
 Workspace registration does not establish ownership of its directory. A future destructive filesystem action must be separately named, explicitly confirmed, and enforce ownership and safety checks.
 
+The host can reserve the local registry queue with `withSessionMaintenance()` so unarchive and workspace mutations cannot interrupt a coordinated file move. `removeSession()` clears accounting only after a confirmed move. For reconciliation, `backfillSessionRegistry()` requires a materialized stored artifact and restores accounting without moving files. This registry cannot coordinate independent processes.
+
 -----
 
 <a id="understand-the-implementation"></a>

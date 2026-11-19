@@ -16,16 +16,18 @@ import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ScopedLayers, scopeOf } from '@deepseek-ai/dsh-scope'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Evidence, MaintenanceEpoch } from '@deepseek-ai/dsh-session-persistence'
 import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { JobError, JobRegistry, JobId } from '@deepseek-ai/dsh-jobs'
 import type {
-  JobAppendOptions, JobEvent, JobEvents, JobHandle, JobKind, JobOutcome, JobOutputRead, JobOutputSource,
+  JobAppendOptions, JobDependency, JobEvent, JobEvents, JobHandle, JobKind, JobOutcome, JobOutputRead, JobOutputSource,
   JobRead, JobRegisteredData, JobSettleCause, JobSettledData, JobSpec, JobStatus, JobToolCall, JobView,
 } from '@deepseek-ai/dsh-jobs'
 import { JobEventHub, JobLayer } from './events.ts'
 import { startPump } from './pump.ts'
 import type { PumpHandle } from './pump.ts'
 import { OutputRing } from './ring.ts'
+import { ReferenceProducerGate } from './reference-quiescence.ts'
 
 /** Timeout code that distinguishes a bounded wait from caller cancellation. */
 export const TASK_WAIT_TIMEOUT = 'TASK_WAIT_TIMEOUT'
@@ -44,6 +46,8 @@ const DEFAULT_PUMP_POLL_MS = 150
 
 /** Configuration for the process-local job registry. */
 export interface Config {
+  /** Opt in to maintenance coordination for job and dependency registration. */
+  referenceQuiescence?: boolean
   /**
    * Maximum `running` plus `stopping` jobs per exact owner or in the shared unowned bucket;
    * omission defaults to 10.
@@ -82,6 +86,8 @@ interface TrackedJob {
   outputLimitBytes: number | undefined
   /** Exact lifecycle owner; session-id authorization is derived from it. */
   owner: Agent | undefined
+  sessionDependencies: readonly SessionId[] | undefined
+  producerReleased: boolean
   cancel: (reason?: string) => void
   status: JobStatus
   ring: OutputRing
@@ -136,6 +142,7 @@ function isTerminal(status: JobStatus): boolean {
  */
 export class LocalJobRegistry extends JobRegistry {
   static Config: z<Config> = z.object({
+    referenceQuiescence: z.boolean().default(false),
     maxConcurrentJobsPerOwner: z.number()
       .step(1)
       .min(1)
@@ -167,6 +174,12 @@ export class LocalJobRegistry extends JobRegistry {
   /** Schemastery-defaulted pull-source poll interval. */
   private readonly pumpPollMs: number
   private store = new Map<JobId, TrackedJob>()
+  private readonly referenceGate: ReferenceProducerGate | undefined
+  private starting = 0
+  private draining = 0
+  private stopping = false
+  private readonly unresolvedTeardowns = new Set<JobId>()
+  private producerReleaseUnknown = false
   /**
    * Controllers and scoped subscriptions layered by the scope that registered
    * them, in the tools-registry shape: a contribution files into its
@@ -195,6 +208,7 @@ export class LocalJobRegistry extends JobRegistry {
     this.retainBytes = resolved.retainBytes
     this.settledRetainBytes = resolved.settledRetainBytes
     this.pumpPollMs = resolved.pumpPollMs
+    this.referenceGate = resolved.referenceQuiescence ? new ReferenceProducerGate() : undefined
     this.selfCtx = ctx
     this.hub = new JobEventHub(this.layers, (message) => { ctx.logger.warn(message) })
     ctx.effect(() => () => this.disposeAll(), 'jobs teardown')
@@ -211,7 +225,32 @@ export class LocalJobRegistry extends JobRegistry {
     }
   }
 
+  override referenceQuiescenceEnabled(): boolean {
+    return this.referenceGate !== undefined
+  }
+
+  override async withReferenceQuiescence<T>(
+    holder: string, fn: (scope: Readonly<{ holder: string }>) => Promise<T>,
+    options?: { signal?: AbortSignal; drainTimeoutMs?: number },
+  ): Promise<T> {
+    if (this.referenceGate === undefined) return super.withReferenceQuiescence(holder, fn, options)
+    return this.referenceGate.withQuiescence(holder, fn, options)
+  }
+
   start(spec: JobSpec): JobId {
+    const permit = this.referenceGate?.admit()
+    this.starting++
+    try {
+      return this.startJob(spec, permit)
+    } catch (error) {
+      permit?.[Symbol.dispose]()
+      throw error
+    } finally {
+      this.starting--
+    }
+  }
+
+  private startJob(spec: JobSpec, permit?: Disposable): JobId {
     const owner = this.resolveOwner(spec.owner)
     if (!this.servesOwner(owner)) {
       throw new JobError(
@@ -249,6 +288,7 @@ export class LocalJobRegistry extends JobRegistry {
       append: (text, options) => { this.appendRing(state, ring, text, options, 'producer') },
       updateProgress: (line) => { this.updateProgress(state, line) },
     }
+    const sessionDependencies = spec.sessionDependencies === undefined ? undefined : [...new Set(spec.sessionDependencies)]
     const hooks = spec.run(handle)
 
     let markSettled!: () => void
@@ -260,6 +300,8 @@ export class LocalJobRegistry extends JobRegistry {
       label: spec.label,
       outputLimitBytes: spec.outputLimitBytes,
       owner,
+      sessionDependencies,
+      producerReleased: false,
       cancel: hooks.cancel.bind(hooks),
       status: 'running',
       ring,
@@ -295,6 +337,8 @@ export class LocalJobRegistry extends JobRegistry {
     const producerDone = hooks.done.then(
       outcome => ({ outcome, producerReported: true }),
       (error: unknown): { outcome: JobOutcome; producerReported: boolean } => {
+        this.unresolvedTeardowns.delete(job.id)
+        this.producerReleaseUnknown = true
         // Contain a producer contract violation (`done` rejected) so cleanup and waiters cannot hang.
         this.selfCtx.logger.warn(`jobs: job ${job.id} producer done promise rejected (producer contract violation): ${String(error)}`)
         return { outcome: { status: 'failed', detail: String(error) }, producerReported: false }
@@ -312,8 +356,14 @@ export class LocalJobRegistry extends JobRegistry {
       )
     }
     void producerDone.then(async ({ outcome, producerReported }) => {
-      if (job.pump !== undefined) await job.pump.done
-      this.settle(job, outcome, job.settleCause ?? 'producer', producerReported)
+      try {
+        if (job.pump !== undefined) await job.pump.done
+        job.producerReleased = producerReported
+        this.unresolvedTeardowns.delete(job.id)
+        this.settle(job, outcome, job.settleCause ?? 'producer', producerReported)
+      } finally {
+        permit?.[Symbol.dispose]()
+      }
     })
     return id
   }
@@ -322,6 +372,33 @@ export class LocalJobRegistry extends JobRegistry {
     return [...this.store.values()]
       .filter(job => job.owner === undefined || job.owner.id === caller)
       .map(job => this.view(job))
+  }
+
+  override async inspectSessionQuiescence(epoch: MaintenanceEpoch, sessionIds: readonly SessionId[]): Promise<Evidence<JobDependency>> {
+    const persistence = this.selfCtx.get('sessionPersistence')
+    if (persistence?.isMaintenanceEpochActive(epoch) !== true) {
+      return { state: 'unknown', reason: { code: 'stale-epoch' } }
+    }
+    // Registration, cancellation admission, and owner drain share this synchronous registry.
+    if (this.starting > 0 || this.draining > 0 || this.stopping) {
+      return { state: 'unknown', reason: { code: 'busy', detail: 'Job registry admission or drain is in progress' } }
+    }
+    if (this.producerReleaseUnknown || this.unresolvedTeardowns.size > 0) {
+      return { state: 'unknown', reason: { code: 'unstable', detail: 'A job producer has not confirmed resource release' } }
+    }
+    const candidates = new Set(sessionIds)
+    const items: JobDependency[] = []
+    for (const { id, status, owner, sessionDependencies } of this.store.values()) {
+      if (status !== 'running' && status !== 'stopping') continue
+      if (sessionDependencies === undefined && candidates.size > (owner !== undefined && candidates.has(owner.id) ? 1 : 0)) {
+        return { state: 'unknown', reason: { code: 'unstable', detail: 'A live job has undeclared indirect Session dependencies' } }
+      }
+      if (owner !== undefined && candidates.has(owner.id)) items.push({ id, status, sessionId: owner.id, kind: 'owner' })
+      for (const sessionId of sessionDependencies ?? []) {
+        if (sessionId !== owner?.id && candidates.has(sessionId)) items.push({ id, status, sessionId, kind: 'indirect' })
+      }
+    }
+    return { state: 'complete', epoch, items }
   }
 
   get(id: JobId, caller?: SessionId): JobView {
@@ -665,9 +742,14 @@ export class LocalJobRegistry extends JobRegistry {
   /** Cancel, await terminal records, and drop every job owned by one exact agent lifecycle. */
   private async disposeOwned(owner: Agent): Promise<void> {
     const owned = [...this.store.values()].filter(job => job.owner === owner)
-    this.cancelForTeardown(owned, 'owner disposed')
-    await Promise.all(owned.map(job => job.settled))
-    this.drop(owned)
+    this.draining++
+    try {
+      this.cancelForTeardown(owned, 'owner disposed')
+      await Promise.all(owned.map(job => job.settled))
+      this.drop(owned)
+    } finally {
+      this.draining--
+    }
   }
 
   /** Drop settled records and announce each removal, the one visible-set change no per-job record carries. */
@@ -683,6 +765,7 @@ export class LocalJobRegistry extends JobRegistry {
    * effects. Throwing cancels are force-failed to avoid teardown deadlock.
    */
   private async disposeAll(): Promise<void> {
+    this.stopping = true
     const all = [...this.store.values()]
     this.cancelForTeardown(all, 'jobs service disposed')
     await Promise.all(all.map(job => job.settled))
@@ -719,6 +802,7 @@ export class LocalJobRegistry extends JobRegistry {
       } catch (error: unknown) {
         const detail = `cancel threw during teardown; work may be orphaned: ${String(error)}`
         this.selfCtx.logger.warn(`jobs: cancel of ${job.id} threw during teardown; job record forced failed and work may be orphaned: ${String(error)}`)
+        if (!job.producerReleased) this.unresolvedTeardowns.add(job.id)
         this.settle(job, { status: 'failed', detail }, 'teardown', false)
       }
     }

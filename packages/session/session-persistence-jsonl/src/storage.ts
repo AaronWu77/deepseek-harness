@@ -101,6 +101,7 @@ export class JsonlSessionHandle implements SessionHandle {
     private readonly state: StorageHandleState,
     /** The cross-process write lock; a create handle acquires it lazily at first materialization. */
     private lease?: SessionWriteLease,
+    private readonly maintenanceRelease?: () => Promise<void>,
   ) {}
 
   /** Exact fork-inherited prefix length stored with this session's log. */
@@ -252,6 +253,11 @@ export class JsonlSessionHandle implements SessionHandle {
       } catch (releaseFailure: unknown) {
         /* v8 ignore next -- lock releases reject with Error */
         failures.push(releaseFailure instanceof Error ? releaseFailure : new Error(errorChain(releaseFailure)))
+      }
+      try {
+        await this.maintenanceRelease?.()
+      } catch (error: unknown) {
+        failures.push(error instanceof Error ? error : new Error(errorChain(error)))
       }
       this.storage.releaseHandle(this, this.state.materialized)
       if (failures.length > 1) throw new AggregateError(failures, `session "${this.id}": close failed to drain and to release its write lock`)
@@ -429,6 +435,11 @@ export class JsonlBackendTracker {
   claimWrite(id: SessionId): void {
     if (this.writers.has(id)) throw new SessionAlreadyOwnedError(id)
     this.writers.set(id, null)
+  }
+
+  /** @param id - observed session. @returns whether a writer or write claim exists. */
+  hasWriter(id: SessionId): boolean {
+    return this.writers.has(id)
   }
 
   /**

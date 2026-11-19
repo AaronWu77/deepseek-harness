@@ -22,7 +22,6 @@
  */
 
 import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 
@@ -260,10 +259,10 @@ export function snapshotSubagentDescriptor(
  * @throws when a current-version persisted payload does not match its complete
  *   declared schema.
  */
-export function foldSubagentDescriptor(events: readonly SessionEvent[]): SubagentDescriptorData | undefined {
-  const event = events.find(
-    (candidate): candidate is SessionEvent<'subagent/descriptor'> => candidate.type === 'subagent/descriptor',
-  )
+export function foldSubagentDescriptor(
+  events: readonly { readonly type: string; readonly data?: unknown }[],
+): SubagentDescriptorData | undefined {
+  const event = events.find(candidate => candidate.type === 'subagent/descriptor')
   if (event === undefined) return undefined
   return parseSubagentDescriptor(event.data)
 }

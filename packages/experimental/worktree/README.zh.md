@@ -58,6 +58,10 @@ Git 与目录分配通过挂载的子进程及沙箱提供方执行，沿用调�
 
 本包不发布运行时不变量伴随入口：Git 拥有工作树注册信息，工作目录服务拥有 Session 目录；本包不保留二者的独立投影。
 
+`inspectSessionCheckout` 读取保留的创建与工作目录记录，不打开 Session。仅在宿主策略已允许不受沙箱约束的执行时，才使用只读 Git 命令核对已知注册。归档或工作树操作仍在进行、目录无法判定、Git 注册缺失时均返回 `unknown`。
+
+设置 `referenceQuiescence: true`（默认 `false`）后，`withReferenceQuiescence` 排空已接纳的检出变更，并拒绝新的创建和还原。持闸期间，归档只登记清理意图；`cleanupOf` 仍可读取已有清理尝试。释放后按接收顺序重新核对 Session 仍然归档并运行清理；取消归档会撤销延期意图，无须等待清理。`referenceQuiescenceEnabled()` 仅报告启用状态。在取得存储 epoch 前获取所有必需的生产者作用域；任一闸门禁用或忙碌时拒绝维护。
+
 </details>
 
 -----

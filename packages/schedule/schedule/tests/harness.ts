@@ -7,7 +7,7 @@ import { unsupportedModel, unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import type { CreateSessionOptions } from '@deepseek-ai/dsh-session'
-import { SessionPersistenceRevision, type SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
+import { SessionPersistenceRevision, type SessionPersistenceSnapshot, type SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import Storage, { type KvUnit, type KvUnitDescriptor, type StorageBackend } from '@deepseek-ai/dsh-storage'
 import { DomainFacility, type KvTable } from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -83,6 +83,7 @@ export async function harness(options: {
   direct?: true
   sessionController?: false
   config?: Config
+  isMaintenanceEpochActive?: SessionPersistence['isMaintenanceEpochActive']
 } = {}) {
   const ctx = new Context()
   options.onContext?.(ctx)
@@ -114,7 +115,7 @@ export async function harness(options: {
   }
   const flush = vi.fn(async () => {})
   ctx.on('session/flush', flush)
-  ctx.provide('sessionPersistence', { stat } as never)
+  ctx.provide('sessionPersistence', { stat, isMaintenanceEpochActive: options.isMaintenanceEpochActive ?? (() => false) } as never)
   await options.beforeService?.(ctx, facility)
   let fiber: Context['fiber']
   if (options.direct) {

@@ -109,6 +109,7 @@ export class SessionProjectionCache extends Service {
 
   private table?: KvTable<SessionId, CheckpointRecord>
   private readonly dirty = new Map<Session, DirtyState>()
+  private readonly checkpointWrites = new Set<{ id: SessionId; invalidated: boolean }>()
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'sessionProjectionCache')
@@ -264,12 +265,27 @@ export class SessionProjectionCache extends Service {
     // from events no stored log contains). At detach the store entry is
     // already gone; persistence's own retirement drain covers that path and
     // any residual overreach is caught by the cold read's anchored floor.
-    if (this.ctx.sessions.get(session.id) === session) await this.ctx.sessions.flush(session)
-    await this.put(
-      session.id,
-      identityOf(session.header, session.inheritedEventCount),
-      rows,
-    )
+    const write = { id: session.id, invalidated: false }
+    this.checkpointWrites.add(write)
+    try {
+      if (this.ctx.sessions.get(session.id) === session) await this.ctx.sessions.flush(session)
+      if (!write.invalidated) await this.put(session.id, identityOf(session.header, session.inheritedEventCount), rows)
+    } finally {
+      this.checkpointWrites.delete(write)
+    }
+  }
+
+  /**
+   * Delete one session's cached projection and invalidate older checkpoint work.
+   * Call only after quiescing session producers. A new read/write can create a
+   * row again; this method does not tombstone the session or touch its log.
+   * @param id - session whose checkpoint should be discarded.
+   * @returns resolution after the ordered deletion is durable; storage failures reject.
+   */
+  async purge(id: SessionId): Promise<void> {
+    for (const write of this.checkpointWrites) if (write.id === id) write.invalidated = true
+    for (const session of this.dirty.keys()) if (session.id === id) this.markClean(session)
+    await this.requireTable().delete(id)
   }
 
   /**

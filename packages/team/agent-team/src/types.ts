@@ -74,6 +74,17 @@ export interface TeamTaskSnapshot {
   readonly writeScopes: string[]
 }
 
+/** A matching retained Team task, including explicitly non-blocking deleted tombstones. */
+export type TeamTaskReference = {
+  readonly rootId: SessionId
+  readonly taskId: TeamTaskId
+  readonly revision: number
+  readonly ownerId?: SessionId
+} & (
+  | { readonly kind: 'reference'; readonly status: 'pending' | 'in_progress' }
+  | { readonly kind: 'tombstone'; readonly status: 'deleted' }
+)
+
 /** Runtime-enriched task view returned to tools and hosts. */
 export interface TeamTaskView {
   readonly id: TeamTaskId
@@ -138,6 +149,8 @@ export interface Config {
   readonly defaultEnabled?: boolean
   /** Maximum non-deleted tasks retained by one Team. */
   readonly maxTasks?: number
+  /** Enable host-only reference producer coordination; defaults to false. */
+  readonly referenceQuiescence?: boolean
 }
 
 /** Input for creating one shared task. */

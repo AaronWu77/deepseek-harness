@@ -58,6 +58,10 @@ Git and directory allocation run through the mounted subprocess and sandbox prov
 
 No runtime invariant companion is published: Git owns checkout registration and the working-directory service owns the Session directory; this package retains no independent projection of either.
 
+`inspectSessionCheckout` reads retained creation and working-directory records without opening a Session. It verifies known registrations with read-only Git commands only when the Host policy already permits unconfined execution. Busy archive or checkout work, unresolved directories, and missing Git registrations produce `unknown`.
+
+With `referenceQuiescence: true` (default `false`), `withReferenceQuiescence` drains accepted checkout mutations and refuses new creations and restores. Archive only queues cleanup intent while held; `cleanupOf` can still read existing attempts. After release, cleanup runs in arrival order and rechecks that the Session is still archived; unarchive cancels the deferred intent without waiting for it. `referenceQuiescenceEnabled()` only reports opt-in. Acquire every required producer scope before taking a storage epoch; refuse maintenance if any acquisition is disabled or busy.
+
 </details>
 
 -----

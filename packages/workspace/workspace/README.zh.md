@@ -78,6 +78,8 @@ ctx.workspaceRegistry.list() // shows the project, newest first
 
 Workspace 注册不意味着拥有其目录。未来的破坏性文件系统操作必须单独命名、获得明确确认，并执行所有权与安全检查。
 
+宿主可用 `withSessionMaintenance()` 保留本地注册表队列，避免取消归档及工作区写入插入受协调的文件移动。`removeSession()` 应在确认移动后清除台账。`backfillSessionRegistry()` 用于补记账：它要求可识别的已物化存储产物，只恢复台账、不移动文件。本注册表不能协调独立进程。
+
 -----
 
 <a id="understand-the-implementation"></a>

@@ -38,6 +38,9 @@ export interface WorkspaceEntityHost {
    */
   table(): KvTable<WorkspaceId, WorkspaceRecord>
 
+  /** @param operation - a registry mutation. @returns its queued result. */
+  enqueue<T>(operation: () => Promise<T>): Promise<T>
+
   /**
    * Validate an already-accounted session, preserving ownership when its fully
    * qualified cwd cannot resolve because a path component is missing.
@@ -104,10 +107,14 @@ export class WorkspaceEntity implements Workspace {
   }
 
   async setTitle(title: string): Promise<void> {
-    await this.mutate(record => ({ ...record, title }))
+    await this.host.enqueue(() => this.mutate(record => ({ ...record, title })))
   }
 
-  async attachSession(sessionId: SessionId): Promise<void> {
+  attachSession(sessionId: SessionId): Promise<void> {
+    return this.host.enqueue(() => this.attachKnownSession(sessionId))
+  }
+
+  private async attachKnownSession(sessionId: SessionId): Promise<void> {
     // Validation is skipped when the settled snapshot already accounts the
     // id: the cwd fact was checked when it first attached and both inputs
     // (stored header cwd, workspace path) are immutable. Membership itself is
@@ -150,7 +157,7 @@ export class WorkspaceEntity implements Workspace {
   }
 
   async insertSessionBefore(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void> {
-    await this.mutate((record) => {
+    await this.host.enqueue(() => this.mutate((record) => {
       if (!record.sessionIds.includes(sessionId)) {
         throw new WorkspaceMoveInvalidError(
           `cannot move session '${sessionId}' in workspace '${record.path}': the session is not accounted`,
@@ -169,13 +176,27 @@ export class WorkspaceEntity implements Workspace {
       return sessionIds.every((id, index) => id === record.sessionIds[index])
         ? record
         : { ...record, sessionIds }
-    })
+    }))
   }
 
-  async detachSession(sessionId: SessionId): Promise<void> {
-    await this.mutate(record => record.sessionIds.includes(sessionId)
-      ? { ...record, sessionIds: record.sessionIds.filter(id => id !== sessionId) }
-      : record)
+  detachSession(sessionId: SessionId): Promise<void> {
+    return this.host.enqueue(() => this.setSessionAccount(sessionId))
+  }
+
+  /**
+   * Update only the named account; the caller already owns the registry queue.
+   * @param sessionId - account to remove or restore.
+   * @param position - desired initial position; omit to remove.
+   */
+  async setSessionAccount(sessionId: SessionId, position?: number): Promise<void> {
+    const current = this.record
+    if (current.sessionIds.includes(sessionId) === (position !== undefined)) return
+    const next = await this.host.table().update(this.id, (record) => {
+      const sessionIds = record.sessionIds.filter(id => id !== sessionId)
+      if (position !== undefined) sessionIds.splice(position, 0, sessionId)
+      return { ...record, sessionIds, updatedAt: new Date().toISOString() }
+    })
+    this.record = next
   }
 
   async status(): Promise<'ok' | 'missing-dir'> {

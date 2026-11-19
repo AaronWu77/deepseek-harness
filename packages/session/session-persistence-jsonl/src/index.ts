@@ -23,7 +23,11 @@ import pLimit, { type LimitFunction } from 'p-limit'
 import {
   SessionPersistence, SessionPersistenceRevision, SessionFormatUnsupportedError,
   SessionPersistenceCorruptionError,
-  SessionAlreadyExistsError, SessionPersistenceNotFoundError,
+  SessionAlreadyExistsError, SessionAlreadyOwnedError, SessionPersistenceNotFoundError,
+  type SessionMaintenanceAdmission, type SessionMaintenanceBatchId, type SessionMaintenanceContext,
+  type SessionMaintenanceOperation, type SessionMaintenanceOperationId, type SessionMaintenanceOptions,
+  type MaintenanceEpoch, type ReferenceCorpusScope, type SessionMaintenanceGateOptions,
+  type ReferenceArtifactRef, type ReferenceLogOptions, type SessionEventLike,
   assertStoredId, materializeCreateHeader, sessionFormatVersionRefusal, validateStoredEvents,
   type SessionAccess, type SessionHandle,
   type SessionHandleReadResult,
@@ -34,6 +38,8 @@ import {
 } from '@deepseek-ai/dsh-session-persistence'
 import { JsonlBackendTracker, JsonlSessionHandle, type StorageHandleState } from './storage.ts'
 import { SessionWriteLease } from './lease.ts'
+import { JsonlMaintenance } from './maintenance.ts'
+import { CorpusIncomplete, errno } from './maintenance-fs.ts'
 import { SESSION_FORMAT_VERSION, SessionId as makeSessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionId, SessionHeader, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
 import {
@@ -58,6 +64,7 @@ import {
 } from './generation.ts'
 
 export type { JsonlCompression } from './format.ts'
+export { SessionMaintenanceGateError } from './root-gate.ts'
 
 /**
  * Internal handoff-reuse policy, not deployment configuration: a cold
@@ -67,6 +74,8 @@ export type { JsonlCompression } from './format.ts'
 const COLD_LOG_MEMO_MAX_ENTRIES = 2
 
 const DEFAULT_COMPRESSION: JsonlCompression = 'zstd'
+const MAX_REFERENCE_HEADER_BYTES = 1024 * 1024
+const STRICT_HEADER_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 /**
  * Internal scheduling constant, not deployment configuration: balance
  * frame-boundary event-loop yields against `setImmediate` overhead. One frame
@@ -100,6 +109,10 @@ export interface Config {
    * readable directory; an absent root is created on first materialization.
    */
   root: string
+  /** Absolute or cwd-relative recycle-bin root; defaults to <root parent>/trash/sessions. */
+  trashRoot?: string
+  /** Host-only maintenance opt-in; omitted or false leaves writers on the ordinary protocol. */
+  maintenance?: { enabled?: boolean }
   /** Physical encoding; defaults to checksummed Zstandard frames. */
   compression?: JsonlCompression
   /**
@@ -294,6 +307,7 @@ class JsonlSessionPersistence extends SessionPersistence {
 
   private root: string
   private compression: JsonlCompression
+  private readonly maintenance: JsonlMaintenance
   /**
    * Bounds directory, header, and stat I/O across every concurrent listing of
    * this backend (`list()`, the root encoding check, historical fingerprints).
@@ -325,6 +339,13 @@ class JsonlSessionPersistence extends SessionPersistence {
     // Resolve once so later process.cwd() changes cannot split one backend across roots.
     this.root = resolve(config.root)
     this.compression = config.compression ?? DEFAULT_COMPRESSION
+    this.maintenance = new JsonlMaintenance(this.root, config.trashRoot, config.maintenance?.enabled === true, this.compression, {
+      hasWriter: id => this.tracker.hasWriter(id),
+      inspect: (id, expected, signal) => this.inspectForMaintenance(id, expected, signal),
+      readCorpusHeader: (path, version) => this.readCorpusHeader(path, version),
+      invalidate: (id) => { this.coldLogMemo.delete(id) },
+      warn: (message) => { this.ctx.logger.warn(message) },
+    })
     this.listLimit = pLimit(config.listConcurrency ?? DEFAULT_LIST_CONCURRENCY)
     this.generationFormat = {
       currentVersion: sessionFormatCatalog.currentVersion,
@@ -335,6 +356,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         error instanceof SessionFormatUnsupportedMigrationError,
     }
     this.assertUsableRoot()
+    ctx.effect(() => () => this.maintenance.stop(), 'session persistence maintenance drain')
   }
 
   /**
@@ -344,6 +366,75 @@ class JsonlSessionPersistence extends SessionPersistence {
    */
   private locate(meta: SessionHeader): SessionLocation {
     return { kind: 'jsonl', path: logPath(this.root, meta.cwd, meta.id, this.compression) }
+  }
+
+  private async inspectForMaintenance(id: SessionId, expected: PersistenceRevision | undefined, signal?: AbortSignal): Promise<SessionPersistenceSnapshot | undefined> {
+    try {
+      const snapshot = await this.stat(id, signal === undefined ? undefined : { signal })
+      if (snapshot !== undefined && snapshot.revision !== expected) return snapshot
+      if (snapshot?.location === undefined || snapshot.formatStatus !== 'current') {
+        throw new SessionPersistenceCorruptionError('Maintenance requires a selected current generation', {})
+      }
+      const decoded = await this.readStoredLog(snapshot.location.path, id, signal)
+      if (decoded.tornTruncateTo !== undefined) {
+        throw new SessionPersistenceCorruptionError('Maintenance refuses a generation with a torn tail', {})
+      }
+      return snapshot
+    } catch (error) {
+      if (error instanceof SessionFormatUnsupportedError) {
+        throw new SessionPersistenceCorruptionError('Maintenance cannot interpret the selected generation', { cause: error })
+      }
+      throw error
+    }
+  }
+
+  override maintenanceGate() {
+    return this.maintenance.gate()
+  }
+
+  override withExclusiveMaintenance<T>(holder: string, fn: (epoch: MaintenanceEpoch) => Promise<T>, options?: SessionMaintenanceGateOptions) {
+    return this.maintenance.exclusive(holder, fn, options)
+  }
+
+  override isMaintenanceEpochActive(epoch: MaintenanceEpoch): boolean {
+    return this.maintenance.epochActive(epoch)
+  }
+
+  override inspectReferenceCorpus(scope?: ReferenceCorpusScope) {
+    return this.maintenance.inspectCorpus(scope)
+  }
+
+  override inspectReferenceLog(
+    epoch: MaintenanceEpoch, artifact: ReferenceArtifactRef, visit: (event: SessionEventLike) => void, options?: ReferenceLogOptions,
+  ) {
+    return this.maintenance.inspectReferenceLog(epoch, artifact, visit, options)
+  }
+
+  override inspectMaintenance(id: SessionId) {
+    return this.maintenance.inspect(id)
+  }
+
+  override maintenanceCapability() {
+    return this.maintenance.capability()
+  }
+
+  override withMaintenance<T extends SessionMaintenanceAdmission>(
+    id: SessionId, operation: SessionMaintenanceOperation,
+    admit: (ctx: SessionMaintenanceContext) => Promise<T>, options?: SessionMaintenanceOptions,
+  ) {
+    return this.maintenance.run(id, operation, admit, options)
+  }
+
+  override listMaintenanceBatches() {
+    return this.maintenance.list()
+  }
+
+  override recoverMaintenance() {
+    return this.maintenance.recover()
+  }
+
+  override releaseMaintenanceReservation(batchId: SessionMaintenanceBatchId, operationId: SessionMaintenanceOperationId) {
+    return this.maintenance.releaseReservation(batchId, operationId)
   }
 
   // --- SessionPersistence service API ---
@@ -360,6 +451,24 @@ class JsonlSessionPersistence extends SessionPersistence {
   async create(header: SessionHeader, options?: SessionPersistenceCreateOptions): Promise<SessionHandle> {
     options?.signal?.throwIfAborted()
     const snapshot = materializeCreateHeader(header)
+    let release: (() => Promise<void>) | undefined
+    if (this.maintenance.enabled) {
+      try {
+        release = await this.maintenance.enterHandle(snapshot.id, 'write')
+      } catch (error) {
+        if (error instanceof SessionAlreadyOwnedError) throw new SessionAlreadyExistsError(snapshot.id)
+        throw error
+      }
+    }
+    try {
+      return await this.createWithOwner(snapshot, options, release)
+    } catch (error) {
+      await release?.()
+      throw error
+    }
+  }
+
+  private async createWithOwner(snapshot: SessionHeader, options?: SessionPersistenceCreateOptions, release?: () => Promise<void>): Promise<SessionHandle> {
     // Fail fast on a seeded/cut mismatch with the exact refusal the header
     // line encoder enforces at materialization.
     toHeaderLine(snapshot, options?.inheritedEventCount)
@@ -370,12 +479,12 @@ class JsonlSessionPersistence extends SessionPersistence {
       throw new SessionAlreadyExistsError(snapshot.id)
     }
     options?.signal?.throwIfAborted()
-    // No lock yet: before materialization there is no durable artifact for
-    // another process to contend over, so the handle acquires the lock right
-    // before its first log bytes publish (ensureLease); an unmaterialized
-    // session leaves no filesystem footprint at all.
+    // The legacy lease still starts at first materialization. The optional
+    // stable lease was already acquired outside the Session directory.
     this.tracker.registerCreated(snapshot, inheritedEventCount)
-    return this.tracker.adopt(new JsonlSessionHandle(this, snapshot.id, snapshot, 'write', { cursor: 0, materialized: false, inheritedEventCount }))
+    return this.tracker.adopt(new JsonlSessionHandle(this, snapshot.id, snapshot, 'write', {
+      cursor: 0, materialized: false, inheritedEventCount,
+    }, undefined, release))
   }
 
   /**
@@ -387,12 +496,24 @@ class JsonlSessionPersistence extends SessionPersistence {
    */
   async open(id: SessionId, access: SessionAccess, options?: SessionPersistenceOpenOptions): Promise<SessionHandle> {
     options?.signal?.throwIfAborted()
+    const release = this.maintenance.enabled ? await this.maintenance.enterHandle(id, access) : undefined
+    try {
+      return await this.openWithOwner(id, access, options, release)
+    } catch (error) {
+      await release?.()
+      throw error
+    }
+  }
+
+  private async openWithOwner(id: SessionId, access: SessionAccess, options?: SessionPersistenceOpenOptions, release?: () => Promise<void>): Promise<SessionHandle> {
     await this.ensureRootEncoding()
     options?.signal?.throwIfAborted()
     const pending = this.tracker.pendingOf(id)
     if (access === 'read') {
       if (pending !== undefined) {
-        return this.tracker.adopt(new JsonlSessionHandle(this, id, pending.header, 'read', { cursor: 0, materialized: false, inheritedEventCount: pending.inheritedEventCount }))
+        return this.tracker.adopt(new JsonlSessionHandle(this, id, pending.header, 'read', {
+          cursor: 0, materialized: false, inheritedEventCount: pending.inheritedEventCount,
+        }, undefined, release))
       }
       let stored: StoredLog
       try {
@@ -416,7 +537,7 @@ class JsonlSessionPersistence extends SessionPersistence {
           inheritedEventCount: stored.inheritedEventCount,
         }
       }
-      return this.tracker.adopt(new JsonlSessionHandle(this, id, stored.meta, 'read', state))
+      return this.tracker.adopt(new JsonlSessionHandle(this, id, stored.meta, 'read', state, undefined, release))
     }
     // A pending entry always belongs to an ACTIVE creator handle (close erases
     // it), so the claim below rejects that case as already owned.
@@ -442,7 +563,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         recoveredTail: stored.recoveredTail,
         inheritedEventCount: stored.inheritedEventCount,
         primed: stored,
-      }, lease))
+      }, lease, release))
     } catch (error) {
       // Free the in-process claim no matter how the kernel-lock release
       // fares, and keep the original diagnostic: a release failure joins it
@@ -1170,16 +1291,30 @@ class JsonlSessionPersistence extends SessionPersistence {
   }
 
   /** Read and translate one selected generation header without inspecting its body. */
+  private async readCorpusHeader(path: string, version: number) {
+    let metadata: GenerationHeader | undefined
+    try {
+      metadata = await this.readGenerationHeader({ sourcePath: path, sourceVersion: version, currentPath: path }, undefined, undefined, false)
+    } catch (error) {
+      if (error instanceof SessionFormatUnsupportedError) throw new CorpusIncomplete('unsupported-generation', error.message)
+      if (errno(error) !== undefined) throw error
+      throw new CorpusIncomplete('bad-header', error instanceof Error ? error.message : String(error))
+    }
+    if (metadata === undefined) throw new CorpusIncomplete('bad-header', 'missing or malformed header: ' + path)
+    return { header: metadata.header, revision: fileRevision(await stat(path, { bigint: true })) }
+  }
+
   private async readGenerationHeader(
     selected: ResolvedJsonlGeneration,
     expectedId?: SessionId,
     signal?: AbortSignal,
+    validateLocation = true,
   ): Promise<GenerationHeader | undefined> {
     let first: string | undefined
     try {
       first = this.compression === 'zstd'
-        ? await this.readFirstZstdLine(selected.sourcePath, signal)
-        : await this.readFirstLine(selected.sourcePath, signal)
+        ? await this.readFirstZstdLine(selected.sourcePath, signal, validateLocation ? undefined : MAX_REFERENCE_HEADER_BYTES)
+        : await this.readFirstLine(selected.sourcePath, signal, validateLocation ? undefined : MAX_REFERENCE_HEADER_BYTES)
     } catch (error: unknown) {
       signal?.throwIfAborted()
       if (isENOENT(error)) return undefined
@@ -1215,7 +1350,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     if (result.status === 'malformed') return undefined
     const header = this.currentHeader(result.header)
-    await this.assertStoredIdentity(
+    if (validateLocation) await this.assertStoredIdentity(
       selected.sourcePath,
       selected.sourceVersion,
       header,
@@ -1469,12 +1604,13 @@ class JsonlSessionPersistence extends SessionPersistence {
    * file. Returns undefined if the file is empty or has no complete first line.
    * Reads in bounded chunks so a huge log costs only the header read.
    */
-  private async readFirstLine(path: string, signal?: AbortSignal): Promise<string | undefined> {
+  private async readFirstLine(path: string, signal?: AbortSignal, limit = Infinity): Promise<string | undefined> {
     signal?.throwIfAborted()
     const handle = await open(path, 'r')
     try {
       signal?.throwIfAborted()
       const chunks: Buffer[] = []
+      let length = 0
       const buf = Buffer.alloc(8192)
       for (;;) {
         signal?.throwIfAborted()
@@ -1483,10 +1619,13 @@ class JsonlSessionPersistence extends SessionPersistence {
         if (bytesRead === 0) return undefined // EOF with no newline → no complete line
         const slice = buf.subarray(0, bytesRead)
         const nl = slice.indexOf(0x0a)
+        length += nl === -1 ? bytesRead : nl
+        if (length > limit) throw new Error('Session header exceeds the census size limit')
         if (nl !== -1) {
           chunks.push(slice.subarray(0, nl))
           signal?.throwIfAborted()
-          return Buffer.concat(chunks).toString('utf8')
+          const line = Buffer.concat(chunks)
+          return limit === Infinity ? line.toString('utf8') : STRICT_HEADER_UTF8.decode(line)
         }
         chunks.push(Buffer.from(slice))
       }
@@ -1496,7 +1635,7 @@ class JsonlSessionPersistence extends SessionPersistence {
   }
 
   /** Read only the header frame; compression failures reject as corruption, while I/O and cancellation propagate. */
-  private async readFirstZstdLine(path: string, signal?: AbortSignal): Promise<string | undefined> {
+  private async readFirstZstdLine(path: string, signal?: AbortSignal, limit = Infinity): Promise<string | undefined> {
     signal?.throwIfAborted()
     const handle = await open(path, 'r')
     try {
@@ -1513,11 +1652,16 @@ class JsonlSessionPersistence extends SessionPersistence {
         signal?.throwIfAborted()
         try {
           const first = scanZstdFrames(content, 1).frames[0]
-          if (first === undefined) continue
-          const plaintext = await decompressZstdFrame(content.subarray(first.start, first.end))
+          if (first === undefined) {
+            if (content.length > limit) throw new Error('Session header frame exceeds the census size limit')
+            continue
+          }
+          if (first.end > limit) throw new Error('Session header frame exceeds the census size limit')
+          const plaintext = await decompressZstdFrame(content.subarray(first.start, first.end), limit === Infinity ? undefined : limit)
           signal?.throwIfAborted()
           assertZstdHeaderFrame(plaintext)
-          return plaintext.subarray(0, -1).toString('utf8')
+          const line = plaintext.subarray(0, -1)
+          return limit === Infinity ? line.toString('utf8') : STRICT_HEADER_UTF8.decode(line)
         } catch (error) {
           /* v8 ignore next -- decoder failure plus concurrent abort is timing-dependent */
           if (signal?.aborted) signal.throwIfAborted()
@@ -1809,6 +1953,8 @@ export const name = 'session-persistence-jsonl'
 /** Loader schema for the backend's root, physical encoding, and listing concurrency. */
 export const Config: z<Config> = z.object({
   root: z.string().required(),
+  trashRoot: z.string().min(1),
+  maintenance: z.object({ enabled: z.boolean() }),
   compression: JsonlCompressionSchema,
   listConcurrency: z.natural().min(1).default(DEFAULT_LIST_CONCURRENCY),
 })

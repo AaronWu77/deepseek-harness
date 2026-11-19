@@ -45,6 +45,8 @@ kind: "package-reference"
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `root` | 必填 | 所有会话文件的根目录 |
+| `trashRoot` | `<root 的父目录>/trash/sessions` | 必须与会话根目录同卷且互不包含 |
+| `maintenance.enabled` | `false` | 宿主受控维护；开关并不证明部署隔离 |
 | `compression` | `'zstd'` | 物理编码：`'zstd'` 带校验和帧，或 `'none'` 换行分隔 UTF-8 文本 |
 | `listConcurrency` | `3` | 同时进行的目录、header 与 stat 读取上限，由该后端所有并发的列举共用 |
 
@@ -91,6 +93,12 @@ kind: "package-reference"
 历史正文准备通过 [V3→V4](../session-format-v3-to-v4/README.zh.md) 补齐父目录：从 header 找到候选直属子 Session，通过历史编解码器逐个读取其自身 descriptor，保留紧凑证据与来源修订。此过程不准备子目录，也不发布子后继。不可读或不支持的 header（包括损坏的 Zstandard header 帧）不参与发现，也不出现在 `list()` 中。直接访问损坏的压缩 header 仍会失败；header 的 I/O 错误与取消错误继续传播。子日志解码或 descriptor 字段失败会产生带子路径的警告；父目录没有完整条目时，通过 `subagent/catalog` 保留 header 身份信息。健康子项和已有父目录项仍可使用。打开损坏子 Session 时仍报告该子会话的错误。缺失、不支持或多个 descriptor 同样生成模式未知的目录项，不编造标签。已发布的未知条目仍可浏览；读取子历史时会重试实际日志，并从有效 descriptor 确定模式。准备返回、复用与发布前会重新检查成员集合及已检查来源的修订，也包括读取失败的子日志，使修复后的子日志能够使旧准备缓存失效。来源变化时只读打开重试一次，写打开拒绝发布。取消仍会中止操作。当前 V4 打开跳过发现，并在暴露事件前校验目录字段、唯一性及当前投递归属。
 
 历史格式的 `stat` 与 `list` 修订号需要与根目录 Session 数量成正比的元数据工作。首次正文准备扫描所有所选 header 并解码直属子正文；复用准备缓存仍扫描成员集合并检查修订。只读访问从不发布升级，因此冷进程与被淘汰的准备缓存会重复这些工作。当前 V4 正文读取和修订号避开历史全库扫描。见[实测成本与诊断命令](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.zh.md#catalog-scan-measurements)。
+
+启用维护后，create/open 在取得会话锁之前先共享持有 `<lockRoot>/root.lock`，两个锁都保留到句柄关闭。`withExclusiveMaintenance()` 排他持有同一个根锁文件；遇到竞争立即拒绝。持锁期间，新建句柄在接触会话目录或会话锁前就以 `maintenance-gate` 原因被拒绝。`maintenanceGate()` 观察锁状态而不创建文件；持锁实例可提供持有者信息。Windows 根锁使用文件共享模式，逐会话的命名信号量仍限于同一登录会话。协调不覆盖旧版或未启用协议的写者、浏览器冷选中或持久化服务之外的变更。仅在受控、本地且规范的根路径维护；`maintenanceCapability()` 不验证部署隔离。
+
+严格引用清点检查所有保留 v3/v4 代的头部、布局和实体身份，默认包含已核验的可还原回收站项。遇到未知布局、重复 ID、未核定的维护日志或不可读的头部即拒绝。清点不解码事件正文或迁移会话。调用方可在同一 epoch 内用 `inspectReferenceLog()` 从未经修改的清点项流式读取事件，无需打开会话句柄或创建锁；读取结果未知时必须丢弃临时发现。
+
+`inspectMaintenance(id)` 对所有已提交代际计算摘要，不创建文件也不取得所有权。删除重新校验已确认的 revision 与目录身份。删除及还原均拒绝带迁移暂存文件或仍有历史权威代际的语料，因为迁移可能读取其他会话。获准的操作仅移动整个会话目录，不跨卷、不覆盖已有目标。单会话批次在 `<trashRoot>/<batchId>/manifest.json` 记录删除意图；还原写独立的反向记录。稳定锁目录保存阻止重用会话 id 的墓碑，在还原完成时解除。恢复只核对并补记账；不自动移动或清除目录。报告为 `reserved-empty` 的 POSIX 占位只能显式释放；损坏或无从确认的批次须人工处理。
 
 -----
 

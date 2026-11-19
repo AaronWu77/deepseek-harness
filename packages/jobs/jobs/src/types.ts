@@ -188,6 +188,12 @@ export interface JobSpec {
    * caller until service disposal.
    */
   owner?: SessionId
+  /**
+   * Other Sessions whose resources this job can use. Omitting this field leaves
+   * indirect dependencies unknown. Supply an empty array when the job cannot
+   * depend on any Session beyond its direct owner, if any.
+   */
+  sessionDependencies?: readonly SessionId[]
   /** Creating tool invocation, retained in the durable lifecycle records. */
   toolCall?: JobToolCall
   /**
@@ -222,6 +228,14 @@ export interface JobRead {
   result?: string
   /** The job's state at read time. */
   job: JobView
+}
+
+/** Outstanding work that can depend on a candidate Session. Every item blocks quiescence. */
+export interface JobDependency {
+  readonly id: JobId
+  readonly sessionId: SessionId
+  readonly kind: 'owner' | 'indirect'
+  readonly status: 'running' | 'stopping'
 }
 
 /** Result of one non-consuming {@link JobRegistry.readAt}. */
